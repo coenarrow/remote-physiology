@@ -24,11 +24,11 @@ conda_setup() {
 # Function to set up using uv
 uv_setup() {
     rm -rf .venv || exit 1
-    uv venv --python 3.8 || exit 1
+    uv venv --python 3.10 || exit 1
     source .venv/bin/activate || exit 1
     uv pip install setuptools wheel || exit 1
-    uv pip install torch==2.1.2+cu121 torchvision==0.16.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121 || exit 1
-    uv pip install -r requirements.txt || exit 1
+    uv pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 torchaudio==2.1.2+cu118 --index-url https://download.pytorch.org/whl/cu118 || exit 1
+    uv pip install -r requirements.txt --no-build-isolation || exit 1
     cd tools/mamba && python setup.py install || exit 1
     # Explicitly install PyQt5 to use interactive plotting and avoid non-interactive backends
     # See this relevant issue for more details: https://github.com/astral-sh/uv/issues/6893
