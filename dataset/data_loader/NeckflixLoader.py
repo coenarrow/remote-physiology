@@ -20,10 +20,12 @@ class NeckflixLoader(BaseLoader):
         self.labels = list()
         self.config_data = config_data
         self.cached_path = Path(self.config_data.CACHED_PATH)
+        self.data_format = config_data.DATA_FORMAT
         if self.cached_path.exists():
             self.load()
         else:
-            raise ValueError("Neckflix Dataset must be preprocessed before loading")
+            raise ValueError(f"Neckflix Dataset must be preprocessed before loading\n \
+                Could not find at {self.config_data.CACHED_PATH}")
 
     def __getitem__(self, index):
         if self.data_format == 'NDCHW':
@@ -34,7 +36,7 @@ class NeckflixLoader(BaseLoader):
             data = np.load(self.inputs[index])
         else:
             raise ValueError('Unsupported Data Format!')
-        label = np.load(self.labels[index]).astype(np.float32)
+        label = np.load(self.labels[index]).astype(np.float32).squeeze()
         filename,chunk_id = Path(self.inputs[index]).stem.split('-input')
         return data, label, filename, chunk_id
 
