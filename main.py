@@ -265,7 +265,7 @@ if __name__ == "__main__":
         elif config.TEST.DATA.DATASET == "PhysDrive":
             test_loader = data_loader.PhysDriveLoader.PhysDriveLoader
         elif config.TEST.DATA.DATASET == "Neckflix":
-            valid_loader = data_loader.NeckflixLoader.NeckflixLoader
+            test_loader = data_loader.NeckflixLoader.NeckflixLoader
         else:
             raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
                              SCAMPS, BP4D+ (Normal and BigSmall preprocessing), UBFC-PHYS, iBVP, PhysDrive and Neckflix")
