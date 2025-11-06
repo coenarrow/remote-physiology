@@ -21,3 +21,4 @@ test.yaml
 *.out
 .venv
 .uv_cache
+uv.lock
