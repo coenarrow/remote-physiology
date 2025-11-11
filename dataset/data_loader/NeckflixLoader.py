@@ -44,13 +44,14 @@ class NeckflixLoader(BaseLoader):
         if self.data_format == 'NDCHW':
             input = input
         elif self.data_format == 'NCDHW':
-            input = input.permute(1,0,2,3)
-        elif self.data_format == 'DHWC':
-            input = input.permute(0,2,3,1)
+            input = input.transpose(1,0,2,3)
+        elif self.data_format == 'NDHWC':
+            input = input.transpose(0,2,3,1)
         else:
             raise ValueError('Unsupported Data Format!')
         filename = Path(self.inputs[index][0]).name
         chunk_id = self.inputs[index][1]
+        label = label.squeeze()
         return input, label, filename, chunk_id
 
     def get_cached_file_list(self):
@@ -173,7 +174,19 @@ class NeckflixLoader(BaseLoader):
         normed_trace = (clipped_trace - trace_min) / (trace_max - trace_min) * 2 - 1
         return normed_trace
 
-    def process_item(self, input, label):
+    def unnormalise_trace(self, normed_trace:np.ndarray, trace_type:str) -> np.ndarray:
+        if trace_type == 'CVP':
+            trace_min, trace_max = self.config_data.PREPROCESS.NECKFLIX.CVP_NORM
+        elif trace_type == 'ABP':
+            trace_min, trace_max = self.config_data.PREPROCESS.NECKFLIX.ABP_NORM
+        elif trace_type == 'ECG':
+            trace_min, trace_max = self.config_data.PREPROCESS.NECKFLIX.ECG_NORM
+        else:
+            raise ValueError(f"Unsupported trace type {trace_type} for unnormalization")
+        raw_trace = (normed_trace + 1) / 2 * (trace_max - trace_min) + trace_min
+        return raw_trace
+
+    def process_item(self, input, label) -> tuple[np.ndarray, np.ndarray]:
         processed_input = self.resize_frames(input)
 
         for process in self.config_data.PREPROCESS.DATA_TYPE:
@@ -185,12 +198,15 @@ class NeckflixLoader(BaseLoader):
                 pass
             else:
                 raise ValueError(f"Unsupported preprocessing type {process}")
+        # convert back to numpy array
+        processed_input = processed_input.to('cpu').numpy()
 
         processed_label = []
         for i, trace in enumerate(self.config_data.PREPROCESS.NECKFLIX.TRACES):
             normed_trace = self.normalise_trace(label[:, i], trace)
             processed_label.append(normed_trace)
-        processed_label = torch.from_numpy(np.stack(processed_label, axis=-1)).to(self.device)
+
+        processed_label = np.stack(processed_label, axis=-1)
         return processed_input, processed_label
 
     def load(self):
