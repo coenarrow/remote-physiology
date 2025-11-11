@@ -79,11 +79,8 @@ class PhysMambaTrainer(BaseTrainer):
                 pred_ppg = self.model(data)
 
                 pred_ppg = (pred_ppg-torch.mean(pred_ppg, axis=-1).view(-1, 1))/torch.std(pred_ppg, axis=-1).view(-1, 1)    # normalize
-                
-                labels = (labels - torch.mean(labels)) / \
-                            torch.std(labels)
+                labels = (labels - torch.mean(labels)) / torch.std(labels)
                 loss = self.criterion_Pearson(pred_ppg, labels)
-
                 loss.backward()
                 running_loss += loss.item()
                 if idx % 100 == 99:  # print every 100 mini-batches
