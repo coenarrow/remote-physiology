@@ -90,6 +90,14 @@ _C.TRAIN.DATA.PREPROCESS.BIGSMALL.RESIZE.SMALL_W = 9
 _C.TRAIN.DATA.PREPROCESS.BIGSMALL.RESIZE.SMALL_H = 9
 _C.TRAIN.DATA.PREPROCESS.IBVP = CN()
 _C.TRAIN.DATA.PREPROCESS.IBVP.DATA_MODE = 'RGB'
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX = CN()
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.CHANNELS = ['R','G','B','I','D']
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
+_C.TRAIN.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = True
 
 
 # -----------------------------------------------------------------------------
@@ -155,6 +163,14 @@ _C.VALID.DATA.PREPROCESS.BIGSMALL.RESIZE.SMALL_W = 9
 _C.VALID.DATA.PREPROCESS.BIGSMALL.RESIZE.SMALL_H = 9
 _C.VALID.DATA.PREPROCESS.IBVP = CN()
 _C.VALID.DATA.PREPROCESS.IBVP.DATA_MODE = 'RGB'
+_C.VALID.DATA.PREPROCESS.NECKFLIX = CN()
+_C.VALID.DATA.PREPROCESS.NECKFLIX.CHANNELS = ['R','G','B','I','D']
+_C.VALID.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
+_C.VALID.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
+_C.VALID.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
+_C.VALID.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
+_C.VALID.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
+_C.VALID.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = True
 
 # -----------------------------------------------------------------------------
 # Test settings
@@ -222,6 +238,14 @@ _C.TEST.DATA.PREPROCESS.BIGSMALL.RESIZE.SMALL_W = 9
 _C.TEST.DATA.PREPROCESS.BIGSMALL.RESIZE.SMALL_H = 9
 _C.TEST.DATA.PREPROCESS.IBVP = CN()
 _C.TEST.DATA.PREPROCESS.IBVP.DATA_MODE = 'RGB'
+_C.TEST.DATA.PREPROCESS.NECKFLIX = CN()
+_C.TEST.DATA.PREPROCESS.NECKFLIX.CHANNELS = ['R','G','B','I','D']
+_C.TEST.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
+_C.TEST.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
+_C.TEST.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
+_C.TEST.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
+_C.TEST.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
+_C.TEST.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = False
 # -----------------------------------------------------------------------------
 # Unsupervised method settings
 # -----------------------------------------------------------------------------\
@@ -280,6 +304,14 @@ _C.UNSUPERVISED.DATA.PREPROCESS.RESIZE.W = 128
 _C.UNSUPERVISED.DATA.PREPROCESS.RESIZE.H = 128
 _C.UNSUPERVISED.DATA.PREPROCESS.IBVP = CN()
 _C.UNSUPERVISED.DATA.PREPROCESS.IBVP.DATA_MODE = 'RGB'
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX = CN()
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.CHANNELS = ['R','G','B','I','D']
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
+_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = False
 ### -----------------------------------------------------------------------------
 # Model settings
 # -----------------------------------------------------------------------------
@@ -423,7 +455,7 @@ def update_config(config, args):
                                         "det_len{0}".format(config.TRAIN.DATA.PREPROCESS.CROP_FACE.DETECTION.DYNAMIC_DETECTION_FREQUENCY),
                                         "Median_face_box{0}".format(config.TRAIN.DATA.PREPROCESS.CROP_FACE.DETECTION.USE_MEDIAN_FACE_BOX)
                                               ])
-    config.TRAIN.DATA.CACHED_PATH = os.path.join(config.TRAIN.DATA.CACHED_PATH, config.TRAIN.DATA.EXP_DATA_NAME)
+    # config.TRAIN.DATA.CACHED_PATH = os.path.join(config.TRAIN.DATA.CACHED_PATH, config.TRAIN.DATA.EXP_DATA_NAME)
 
     name, ext = os.path.splitext(config.TRAIN.DATA.FILE_LIST_PATH)
     if not ext: # no file extension
@@ -459,7 +491,7 @@ def update_config(config, args):
                                           "det_len{0}".format(config.VALID.DATA.PREPROCESS.CROP_FACE.DETECTION.DYNAMIC_DETECTION_FREQUENCY),
                                           "Median_face_box{0}".format(config.VALID.DATA.PREPROCESS.CROP_FACE.DETECTION.USE_MEDIAN_FACE_BOX)
                                                 ])
-        config.VALID.DATA.CACHED_PATH = os.path.join(config.VALID.DATA.CACHED_PATH, config.VALID.DATA.EXP_DATA_NAME)
+        # config.VALID.DATA.CACHED_PATH = os.path.join(config.VALID.DATA.CACHED_PATH, config.VALID.DATA.EXP_DATA_NAME)
 
         name, ext = os.path.splitext(config.VALID.DATA.FILE_LIST_PATH)
         if not ext:  # no file extension
@@ -496,7 +528,7 @@ def update_config(config, args):
                                         "det_len{0}".format(config.TEST.DATA.PREPROCESS.CROP_FACE.DETECTION.DYNAMIC_DETECTION_FREQUENCY),
                                         "Median_face_box{0}".format(config.TEST.DATA.PREPROCESS.CROP_FACE.DETECTION.USE_MEDIAN_FACE_BOX)
                                               ])
-    config.TEST.DATA.CACHED_PATH = os.path.join(config.TEST.DATA.CACHED_PATH, config.TEST.DATA.EXP_DATA_NAME)
+    # config.TEST.DATA.CACHED_PATH = os.path.join(config.TEST.DATA.CACHED_PATH, config.TEST.DATA.EXP_DATA_NAME)
 
     name, ext = os.path.splitext(config.TEST.DATA.FILE_LIST_PATH)
     if not ext: # no file extension
@@ -566,7 +598,7 @@ def update_config(config, args):
                                         "Median_face_box{0}".format(config.UNSUPERVISED.DATA.PREPROCESS.CROP_FACE.DETECTION.USE_MEDIAN_FACE_BOX),
                                         "unsupervised"
                                               ])
-    config.UNSUPERVISED.DATA.CACHED_PATH = os.path.join(config.UNSUPERVISED.DATA.CACHED_PATH, config.UNSUPERVISED.DATA.EXP_DATA_NAME)
+    # config.UNSUPERVISED.DATA.CACHED_PATH = os.path.join(config.UNSUPERVISED.DATA.CACHED_PATH, config.UNSUPERVISED.DATA.EXP_DATA_NAME)
 
     name, ext = os.path.splitext(config.UNSUPERVISED.DATA.FILE_LIST_PATH)
     if not ext: # no file extension

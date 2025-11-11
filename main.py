@@ -12,8 +12,7 @@ from neural_methods import trainer
 from unsupervised_methods.unsupervised_predictor import unsupervised_predict
 from torch.utils.data import DataLoader
 
-
-NUM_WORKERS = 16
+NUM_WORKERS = 4
 RANDOM_SEED = 100
 torch.manual_seed(RANDOM_SEED)
 torch.cuda.manual_seed(RANDOM_SEED)
@@ -30,14 +29,10 @@ general_generator.manual_seed(RANDOM_SEED)
 train_generator = torch.Generator()
 train_generator.manual_seed(RANDOM_SEED)
 
-
-
-
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
 
 def add_args(parser):
     """Adds arguments for parser."""
@@ -63,7 +58,6 @@ def add_args(parser):
       UBFC-rPPG_UNSUPERVISED.yaml
     '''
     return parser
-
 
 def train_and_test(config, data_loader_dict):
     """Trains the model."""
@@ -94,7 +88,6 @@ def train_and_test(config, data_loader_dict):
     model_trainer.train(data_loader_dict)
     model_trainer.test(data_loader_dict)
 
-
 def test(config, data_loader_dict):
     """Tests the model."""
     if config.MODEL.NAME == "Physnet":
@@ -123,7 +116,6 @@ def test(config, data_loader_dict):
         raise ValueError('Your Model is Not Supported  Yet!')
     model_trainer.test(data_loader_dict)
 
-
 def unsupervised_method_inference(config, data_loader):
     if not config.UNSUPERVISED.METHOD:
         raise ValueError("Please set unsupervised method in yaml!")
@@ -144,7 +136,6 @@ def unsupervised_method_inference(config, data_loader):
             unsupervised_predict(config, data_loader, "OMIT")
         else:
             raise ValueError("Not supported unsupervised method!")
-
 
 if __name__ == "__main__":
     # parse arguments.
