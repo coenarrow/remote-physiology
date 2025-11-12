@@ -82,6 +82,12 @@ class PhysMambaTrainer(BaseTrainer):
                 labels = (labels - torch.mean(labels)) / torch.std(labels)
                 loss = self.criterion_Pearson(pred_ppg, labels)
                 loss.backward()
+                if idx % 10 == 0:
+                    tqdm.write(f"GPU Memory: {torch.cuda.memory_allocated()/1e9:.2f}GB")
+                    tqdm.write(f"Maximum {torch.cuda.max_memory_allocated()/1e9:.2f}GB")
+                    # print the available gpu memory
+                    tqdm.write(f"Total GPU Memory: {torch.cuda.get_device_properties(0).total_memory/1e9:.2f}GB")
+                    torch.cuda.reset_peak_memory_stats()
                 running_loss += loss.item()
                 if idx % 100 == 99:  # print every 100 mini-batches
                     print(
