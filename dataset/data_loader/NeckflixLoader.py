@@ -95,7 +95,8 @@ class NeckflixLoader(BaseLoader):
                 raise ValueError("Not all selected channels are present in the HDF5 file.")
             for ch in selected_channels:
                 if not all(tr in f[ch] for tr in selected_traces):
-                    raise ValueError(f"Not all selected traces are present in channel {ch}.")
+                    raise ValueError(f"Expected {selected_traces} in {h5_filepath}\
+                    but missing in channel {ch}.")
 
             # Infer length from first trace of first channel
             n_total = f[selected_channels[0]][selected_traces[0]].shape[0]
@@ -227,6 +228,10 @@ class NeckflixLoader(BaseLoader):
                 else:
                     inputs.append((file.as_posix(), 0))
                     labels.append((file.as_posix(), 0))
+        begin_idx = int(len(inputs)*self.config_data.BEGIN)
+        end_idx = int(len(inputs)*self.config_data.END)
+        inputs = inputs[begin_idx:end_idx]
+        labels = labels[begin_idx:end_idx]
         self.inputs = inputs
         self.labels = labels
 
