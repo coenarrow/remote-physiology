@@ -11,6 +11,7 @@ from dataset import data_loader
 from neural_methods import trainer
 from unsupervised_methods.unsupervised_predictor import unsupervised_predict
 from torch.utils.data import DataLoader
+import os
 
 NUM_WORKERS = 4
 RANDOM_SEED = 100
@@ -147,8 +148,17 @@ if __name__ == "__main__":
 
     # configurations.
     config = get_config(args)
-    print('Configuration:')
-    print(config, end='\n\n')
+
+    # create the output directory where test normally saves, and save a copy of the config there.
+    output_dir = config.TEST.OUTPUT_SAVE_DIR
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+    # use os to copy the file to the output directory
+    os.system(f"cp {args.config_file} {output_dir}/config.yaml")
+    print(f"Saved a copy of the config file to: {output_dir}/config.yaml", end='\n\n')
+
+    # print('Configuration:')
+    # print(config, end='\n\n')
 
     data_loader_dict = dict() # dictionary of data loaders 
     if config.TOOLBOX_MODE == "train_and_test":
@@ -192,7 +202,9 @@ if __name__ == "__main__":
                 batch_size=config.TRAIN.BATCH_SIZE,
                 shuffle=True,
                 worker_init_fn=seed_worker,
-                generator=train_generator
+                generator=train_generator,
+                pin_memory=False,
+                persistent_workers=False,
             )
         else:
             data_loader_dict['train'] = None
@@ -238,7 +250,9 @@ if __name__ == "__main__":
                 batch_size=config.TRAIN.BATCH_SIZE,  # batch size for val is the same as train
                 shuffle=False,
                 worker_init_fn=seed_worker,
-                generator=general_generator
+                generator=general_generator,
+                pin_memory=False,
+                persistent_workers=False,
             )
         else:
             data_loader_dict['valid'] = None
@@ -286,7 +300,9 @@ if __name__ == "__main__":
                 batch_size=config.INFERENCE.BATCH_SIZE,
                 shuffle=False,
                 worker_init_fn=seed_worker,
-                generator=general_generator
+                generator=general_generator,
+                pin_memory=False,
+                persistent_workers=False,
             )
         else:
             data_loader_dict['test'] = None
@@ -322,11 +338,14 @@ if __name__ == "__main__":
             batch_size=1,
             shuffle=False,
             worker_init_fn=seed_worker,
-            generator=general_generator
+            generator=general_generator,
+            pin_memory=False,
+            persistent_workers=False,
         )
 
     else:
         raise ValueError("Unsupported toolbox_mode! Currently support train_and_test or only_test or unsupervised_method.")
+
 
     if config.TOOLBOX_MODE == "train_and_test":
         train_and_test(config, data_loader_dict)
