@@ -49,7 +49,7 @@ class PhysHydraTrainer(BaseTrainer):
 
         if config.TOOLBOX_MODE == "train_and_test":
             self.num_train_batches = len(data_loader["train"])
-            self.criterion_CCC = PhysHydraLoss()
+            self.loss_class = PhysHydraLoss()
             self.optimizer = optim.Adam(self.model.parameters(), 
                                         lr=config.TRAIN.LR, 
                                         weight_decay = 0.0005)
@@ -60,7 +60,7 @@ class PhysHydraTrainer(BaseTrainer):
                 epochs=config.TRAIN.EPOCHS, 
                 steps_per_epoch=self.num_train_batches)
         elif config.TOOLBOX_MODE == "only_test":
-            self.criterion_CCC_test = PhysHydraLoss()
+            self.loss_class = PhysHydraLoss()
             pass
         else:
             raise ValueError("PhysNet trainer initialized in incorrect toolbox mode!")
@@ -111,10 +111,8 @@ class PhysHydraTrainer(BaseTrainer):
                 # Ensure labels have same shape as predictions
                 if labels.dim() == 2 and self.num_labels == 1:
                     labels = labels.unsqueeze(1)  # [batch, 1, frames]
-
                 
-                
-                loss = self.criterion_CCC(pred_ppg, labels)
+                loss = self.loss_class(pred_ppg, labels)
                 loss.backward()
                 running_loss += loss.item()
                 
@@ -155,7 +153,7 @@ class PhysHydraTrainer(BaseTrainer):
                 vbar.set_description("Validation")
                 BVP_label = valid_batch[1].to(torch.float32).to(self.device)
                 rPPG = self.model(valid_batch[0].to(torch.float32).to(self.device))
-                signal_loss = self.criterion_CCC(rPPG, BVP_label)
+                signal_loss = self.loss_class(rPPG, BVP_label)
                 valid_loss.append(signal_loss.item())
                 valid_step += 1
                 vbar.set_postfix(loss=signal_loss.item())
