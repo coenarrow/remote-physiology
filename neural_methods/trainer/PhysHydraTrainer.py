@@ -232,9 +232,3 @@ class PhysHydraTrainer(BaseTrainer):
             self.model_dir, self.model_file_name + '_Epoch' + str(index) + '.pth')
         torch.save(self.model.state_dict(), model_path)
         print('Saved Model Path: ', model_path)
-
-    # HR calculation based on ground truth label
-    def get_hr(self, y, sr=30, min=30, max=180):
-        print(f"Getting the shape of y:\nShape: {y.shape}")
-        p, q = welch(y, sr, nfft=1e5/sr, nperseg=np.min((len(y)-1, 256)))
-        return p[(p>min/60)&(p<max/60)][np.argmax(q[(p>min/60)&(p<max/60)])]*60
