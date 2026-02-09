@@ -10,3 +10,5 @@ import dataset.data_loader.BP4DPlusBigSmallLoader
 import dataset.data_loader.UBFCPHYSLoader
 import dataset.data_loader.PhysDriveLoader
 import dataset.data_loader.NeckflixLoader
+import dataset.data_loader.LADHLoader
+import dataset.data_loader.SUMSLoader
