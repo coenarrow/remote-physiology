@@ -13,5 +13,7 @@ module load cuda
 cd /mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox
 mkdir -p logs
 
-uv run python -m torch.distributed.run --nproc_per_node=1 \
+PORT=$((29500 + (SLURM_JOB_ID % 1000)))
+
+uv run python -m torch.distributed.run --nproc_per_node=1 --master_port=$PORT \
     main.py --config_file .configs/UBFC-rPPG_UBFC-rPPG_UBFC-rPPG_FACTORIZEPHYS.yaml
