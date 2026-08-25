@@ -77,7 +77,7 @@ class MambaLayer(nn.Module):
         self.dim = dim
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
-        self.mamba = make_mamba(dim, d_state, d_conv, expand, bimamba=True, use_fast_path=False)
+        self.mamba = make_mamba(dim, d_state, d_conv, expand, bimamba=True)
         self.drop_path = nn.Identity()
         self.apply(self._init_weights)
 

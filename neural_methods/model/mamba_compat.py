@@ -1,42 +1,60 @@
-"""Compatibility shim for mamba_ssm variants.
+"""Compatibility layer over mamba_ssm variants.
 
-On the HPC we use the PhysMamba fork of mamba-ssm, whose Mamba block accepts
-`bimamba=True` (bidirectional SSM). On macOS we install `mamba-ssm-macos`,
-which exposes the vanilla Mamba API without `bimamba`. This helper passes
-`bimamba` through when supported and falls back to unidirectional Mamba
-(with a one-time warning) when it is not.
+PhysMamba/PhysHydra historically depended on the vendored tools/mamba fork,
+whose Mamba block accepted `bimamba=True` (Vim-style bidirectional SSM with
+shared in/out projections). That fork is gone: this repo now targets the
+vanilla mamba_ssm API only - the newest official `mamba-ssm` on Linux/CUDA
+and `mamba-ssm-macos` on macOS.
+
+`make_mamba(..., bimamba=True)` returns a `BiMamba`: two independent vanilla
+Mamba blocks, one running on the time-reversed sequence, summed. This is a
+composition-based replacement for the fork's bimamba, NOT parameter-compatible
+with it (separate in/out projections per direction) - checkpoints trained with
+the fork do not load. On CUDA each direction uses the fused fast path; on
+macOS both directions pick up the parallel selective scan patched in below.
 """
 import inspect
-import warnings
 
+import torch.nn as nn
 from mamba_ssm import Mamba
 
 _MAMBA_PARAMS = inspect.signature(Mamba.__init__).parameters
-_SUPPORTS_BIMAMBA = 'bimamba' in _MAMBA_PARAMS
-_warned = False
 
 
-def make_mamba(*args, **kwargs):
-    """Instantiate Mamba, dropping unsupported kwargs (e.g. `bimamba`).
+def _filter_kwargs(kwargs):
+    """Drop kwargs the installed Mamba implementation does not accept."""
+    return {k: v for k, v in kwargs.items() if k in _MAMBA_PARAMS}
 
-    Any kwarg not accepted by the installed Mamba implementation is removed.
-    Falling back from bimamba=True changes the block to unidirectional
-    processing - results will differ from the HPC fork.
+
+class BiMamba(nn.Module):
+    """Bidirectional Mamba built from two vanilla Mamba blocks.
+
+    forward direction processes the sequence as-is; backward direction
+    processes the time-reversed sequence and un-reverses its output:
+        y = fwd(x) + flip(bwd(flip(x)))
+    x: (B, L, D) -> y: (B, L, D)
     """
-    global _warned
-    dropped = [k for k in kwargs if k not in _MAMBA_PARAMS]
-    if dropped:
-        if 'bimamba' in dropped and not _warned:
-            warnings.warn(
-                "Installed mamba_ssm does not support `bimamba`; "
-                "falling back to unidirectional Mamba. Results will differ "
-                "from the bidirectional (HPC fork) implementation.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            _warned = True
-        kwargs = {k: v for k, v in kwargs.items() if k in _MAMBA_PARAMS}
-    return Mamba(*args, **kwargs)
+
+    def __init__(self, d_model, d_state=16, d_conv=4, expand=2, **kwargs):
+        super().__init__()
+        kwargs = _filter_kwargs(kwargs)
+        self.fwd = Mamba(d_model, d_state=d_state, d_conv=d_conv, expand=expand, **kwargs)
+        self.bwd = Mamba(d_model, d_state=d_state, d_conv=d_conv, expand=expand, **kwargs)
+
+    def forward(self, x):
+        return self.fwd(x) + self.bwd(x.flip(1)).flip(1)
+
+
+def make_mamba(d_model, d_state=16, d_conv=4, expand=2, **kwargs):
+    """Build a (bi)directional Mamba block from the installed vanilla package.
+
+    bimamba=True -> BiMamba (two blocks, one time-reversed); otherwise a
+    plain Mamba. Unknown kwargs are dropped for portability across
+    mamba-ssm releases.
+    """
+    if kwargs.pop('bimamba', False):
+        return BiMamba(d_model, d_state=d_state, d_conv=d_conv, expand=expand, **kwargs)
+    return Mamba(d_model, d_state=d_state, d_conv=d_conv, expand=expand, **_filter_kwargs(kwargs))
 
 
 # ---------------------------------------------------------------------------

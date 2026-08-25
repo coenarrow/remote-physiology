@@ -1,10 +1,23 @@
 # Changelog
 
-This file tracks development milestones on the HPC branch. The main branch tracks the upstream rPPG-Toolbox fork and is kept stable. All active development occurs on HPC and is periodically merged.
+This file tracks development milestones. As of 2026-08-25 all branches (HPC, MacOS, phys-hydra) are unified into `main`, which has intentionally diverged from upstream rPPG-Toolbox (upstream fixes are cherry-picked only).
 
 **Format:** Each entry records the date, the branch or development context, and a summary of changes. Entries are listed in reverse chronological order (most recent first).
 
 ---
+
+## 2026-08-25 — Branch: `main`
+
+Unified branches, wired local Neckflix subset, replaced the vendored mamba fork.
+
+### Changes
+- Merged HPC and MacOS branches; absorbed phys-hydra history; deleted all branches except `main`
+- Reduced drift vs upstream; upstream/main fully merged at b7500b8 (intentional divergence begins here)
+- Added local physhydra configs targeting the Neckflix subset cache (P030-P039)
+- Added `mamba-ssm-macos` (darwin) and newest official `mamba-ssm` + `causal-conv1d` (linux) as platform-marked deps
+- **Removed vendored `tools/mamba` fork.** PhysMamba/PhysHydra now use vanilla mamba_ssm via `neural_methods/model/mamba_compat.py`: `make_mamba(..., bimamba=True)` returns a composition-based `BiMamba` (two vanilla blocks, one time-reversed, summed). NOT parameter-compatible with fork-trained checkpoints; fresh training required. Separate in/out projections per direction (small param increase vs fork's shared projections)
+- MPS support: trainers select cuda -> mps -> cpu; parallel (Hillis-Steele) selective scan with analytical-backward autograd for non-CUDA mamba_ssm (~340x faster than CPU loop at debug res; full 128x128 res trains at ~19 s/step, 18 GB on M1 Pro)
+- Added tests/test_mamba_compat.py (BiMamba semantics + parallel-scan-vs-reference)
 
 ## 2026-02-12 — Branch: `HPC`
 
