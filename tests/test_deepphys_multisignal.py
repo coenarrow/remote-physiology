@@ -30,3 +30,31 @@ def test_gradients_flow_from_both_blocks():
     g = x.grad.abs().sum(dim=(0, 2, 3))
     assert (g[:5] > 0).all()      # diff block used
     assert (g[5:] > 0).all()      # raw block used
+
+
+from neural_methods.model.SignalDictWrapper import SignalDictWrapper
+
+
+def test_wrapper_frames2d_dict_output():
+    from neural_methods.model.DeepPhys import DeepPhys
+    backbone = DeepPhys(in_channels=3, out_signals=2, img_size=36)
+    w = SignalDictWrapper(backbone, ['ABP', 'CVP'], input_mode='frames2d')
+    out = w(torch.randn(2, 6, 8, 36, 36))     # (B, 2*C, T, H, W)
+    assert set(out) == {'ABP', 'CVP'}
+    assert out['ABP'].shape == (2, 8)
+    assert out['CVP'].shape == (2, 8)
+
+
+def test_wrapper_video3d_dict_output():
+    class Fake3D(torch.nn.Module):
+        def forward(self, x):                  # (B, C, T, H, W) -> (B, S, T)
+            return x.mean(dim=(3, 4))[:, :2, :]
+    w = SignalDictWrapper(Fake3D(), ['ABP', 'CVP'], input_mode='video3d')
+    out = w(torch.randn(2, 3, 8, 16, 16))
+    assert out['ABP'].shape == (2, 8) and out['CVP'].shape == (2, 8)
+
+
+def test_wrapper_rejects_unknown_mode():
+    import pytest
+    with pytest.raises(ValueError):
+        SignalDictWrapper(torch.nn.Identity(), ['ABP'], input_mode='pointcloud')
