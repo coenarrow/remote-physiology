@@ -16,7 +16,7 @@ from tqdm import tqdm
 class NeckflixLoader(BaseLoader):
     """The data loader for the Neckflix dataset."""
 
-    def __init__(self, name, data_path, config_data, device=None,test_participants:list = [],get_raw_resized=False):
+    def __init__(self, name, data_path, config_data, device=None,test_participants:list = [],get_raw_resized=False, dict_output: bool = False):
         """Initializes an Neckflix dataloader.
             Args:
         """
@@ -28,6 +28,13 @@ class NeckflixLoader(BaseLoader):
         self.data_format = config_data.DATA_FORMAT
         self.test_participants = test_participants
         self.get_raw_resized = get_raw_resized
+        self.dict_output = dict_output
+        if dict_output:
+            from neural_methods.signals import (resolve_channels, resolve_traces,
+                                                signal_norm_overrides)
+            self.slot_channels = resolve_channels(config_data)
+            self.traces = resolve_traces(config_data)
+            self.norm_overrides = signal_norm_overrides(config_data)
         # check if cuda is available
         if torch.cuda.is_available():
             self.device = "cuda"
@@ -42,6 +49,14 @@ class NeckflixLoader(BaseLoader):
                 Could not find at {self.config_data.CACHED_PATH}")
 
     def __getitem__(self, index):
+        if self.dict_output:
+            filename = Path(self.inputs[index][0]).name
+            chunk_id = self.inputs[index][1]
+            np_input, labels, label_mask, ch_mask = self.load_recording_dict(index)
+            frames = self.process_item_dict(np_input, ch_mask)
+            return {'frames': frames, 'channel_mask': ch_mask,
+                    'labels': labels, 'label_mask': label_mask,
+                    'filename': filename, 'chunk_id': chunk_id}
         try:
             filename = Path(self.inputs[index][0]).name
             chunk_id = self.inputs[index][1]
@@ -93,6 +108,12 @@ class NeckflixLoader(BaseLoader):
                 continue
             posture = file.name.split('_')[3]
             if posture not in selected_postures:
+                continue
+            if self.dict_output:
+                with h5py.File(file, 'r') as f:
+                    if not any(ch in f for ch in self.slot_channels):
+                        continue
+                selected_files.append(file)
                 continue
             with h5py.File(file, 'r') as f:
                 available_channels = set(f.keys())
@@ -186,6 +207,102 @@ class NeckflixLoader(BaseLoader):
 
         return np_input, np_label
 
+    def load_recording_dict(self, index):
+        """Dict-mode read: zero-filled channel slots + per-signal labels/masks."""
+        from neural_methods.signals import normalize_signal
+        h5_filepath, chunk_start_idx = self.inputs[index]
+        chunk_size = self.config_data.PREPROCESS.CHUNK_LENGTH
+        random_chunk = self.config_data.PREPROCESS.NECKFLIX.RANDOM_CHUNK
+        slots = self.slot_channels
+
+        with h5py.File(h5_filepath, 'r') as f:
+            present = [ch in f for ch in slots]
+            ch0 = slots[present.index(True)]
+            keys = f[ch0]
+            probe = keys['timestamps'] if 'timestamps' in keys else \
+                keys[next(k for k in keys if k != 'frames')]
+            n_total = probe.shape[0]
+
+            # ----- labels over full length, averaged over channels that carry them -----
+            labels_full = {}
+            label_mask = {}
+            for tr in self.traces:
+                acc, n_carrier = None, 0
+                for ch, ok in zip(slots, present):
+                    if ok and tr in f[ch]:
+                        arr = f[ch][tr][...].astype(np.float32)
+                        acc = arr if acc is None else acc + arr
+                        n_carrier += 1
+                if n_carrier:
+                    labels_full[tr] = acc / n_carrier
+                    label_mask[tr] = 1.0
+                else:
+                    labels_full[tr] = np.zeros(n_total, dtype=np.float32)
+                    label_mask[tr] = 0.0
+
+            # ----- valid frames: finite across PRESENT traces only -----
+            present_traces = [tr for tr in self.traces if label_mask[tr] > 0]
+            if present_traces:
+                finite = np.all([np.isfinite(labels_full[tr]) for tr in present_traces], axis=0)
+            else:
+                finite = np.ones(n_total, dtype=bool)
+            valid_indices = np.flatnonzero(finite)
+            n_valid = valid_indices.shape[0]
+            if n_valid == 0:
+                raise ValueError(f"No finite labels in {h5_filepath}.")
+            chunk_len = min(chunk_size, n_valid)
+
+            if random_chunk:
+                max_start = n_valid - chunk_len
+                start_pos = 0 if max_start <= 0 else np.random.randint(0, max_start + 1)
+            else:
+                start_pos = chunk_start_idx * chunk_size
+                if start_pos >= n_valid:
+                    raise IndexError(
+                        f"chunk_start_idx {chunk_start_idx} out of range for {n_valid} valid frames.")
+            end_pos = min(start_pos + chunk_len, n_valid)
+            sel_idx = valid_indices[start_pos:end_pos]
+
+            # ----- frames per slot (zeros where absent) -----
+            frames_list = []
+            for ch, ok in zip(slots, present):
+                if ok:
+                    frames_list.append(f[ch]['frames'][sel_idx, ...].astype(np.float32))
+                else:
+                    hh, ww = f[ch0]['frames'].shape[1:3]
+                    frames_list.append(np.zeros((len(sel_idx), hh, ww), dtype=np.float32))
+
+        np_input = np.stack(frames_list, axis=-1)                # (T, H, W, n_slots)
+        labels = {tr: normalize_signal(labels_full[tr][sel_idx], tr, self.norm_overrides)
+                       .astype(np.float32) if label_mask[tr] > 0
+                  else np.zeros(len(sel_idx), dtype=np.float32)
+                  for tr in self.traces}
+        ch_mask = np.array(present, dtype=np.float32)
+        return np_input, labels, {tr: np.float32(label_mask[tr]) for tr in self.traces}, ch_mask
+
+    def process_item_dict(self, np_input, ch_mask):
+        """Resize then CONCATENATE each DATA_TYPE transform along channels.
+
+        np_input: (T, H, W, n_slots) -> frames: (n_types * n_slots, T, H, W)
+        Zero-filled slots are re-zeroed after each transform (diffnorm/zstand
+        of a constant-zero channel would otherwise produce 0/0 artifacts).
+        """
+        resized = self.resize_frames(np_input)                   # (T, C, H, W) torch
+        mask = torch.from_numpy(ch_mask).view(1, -1, 1, 1)
+        blocks = []
+        for process in self.config_data.PREPROCESS.DATA_TYPE:
+            if process == 'Standardized':
+                block = self.zstand(resized.clone(), exclude_mask=True)
+            elif process == 'DiffNormalized':
+                block = self.diffnorm(resized.clone(), exclude_mask=True)
+            elif process == '':
+                continue
+            else:
+                raise ValueError(f"Unsupported preprocessing type {process}")
+            blocks.append(torch.nan_to_num(block) * mask)
+        frames = torch.cat(blocks, dim=1)                        # (T, C_total, H, W)
+        return frames.permute(1, 0, 2, 3).contiguous().numpy()   # (C_total, T, H, W)
+
     def resize_frames(self, frames) -> torch.Tensor:
         """
         Resize video frames using torchvision, with automatic NumPy → Torch conversion and GPU support.
@@ -262,8 +379,16 @@ class NeckflixLoader(BaseLoader):
         # iterate through files
         for file in cached_file_list:
             with h5py.File(file, 'r') as f:
-                first_trace = f[self.config_data.PREPROCESS.NECKFLIX.CHANNELS[0]][self.config_data.PREPROCESS.NECKFLIX.TRACES[0]]
-                ids = len(first_trace[~np.isnan(first_trace[:])])
+                if self.dict_output:
+                    ch0 = next(ch for ch in self.slot_channels if ch in f)
+                    keys = f[ch0]
+                    probe = keys['timestamps'] if 'timestamps' in keys else \
+                        keys[next(k for k in keys if k != 'frames')]
+                    ids = probe.shape[0]
+                else:
+                    first_trace = f[self.config_data.PREPROCESS.NECKFLIX.CHANNELS[0]][
+                        self.config_data.PREPROCESS.NECKFLIX.TRACES[0]]
+                    ids = len(first_trace[~np.isnan(first_trace[:])])
                 if self.config_data.PREPROCESS.DO_CHUNK:
                     for i in range(ids//chunk_length):
                         inputs.append((file.as_posix(), i))
