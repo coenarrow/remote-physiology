@@ -1,8 +1,10 @@
 import os
 import pandas as pd
 import numpy as np
+import sys
 import matplotlib
-# matplotlib.use('Agg')
+if sys.platform != 'darwin':
+    matplotlib.use('Agg')  # headless backend for HPC/CI; interactive kept on macOS
 import matplotlib.pyplot as plt
 import math
 from scipy.stats import gaussian_kde
