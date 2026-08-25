@@ -1,13 +1,15 @@
 """Trainer for BigSmall Multitask Models"""
 
-# Training / Eval Imports 
+# Training / Eval Imports
 import torch
 import torch.optim as optim
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from neural_methods.trainer.BaseTrainer import BaseTrainer
 from neural_methods import loss
 from neural_methods.model.BigSmall import BigSmall
-from evaluation.bigsmall_multitask_metrics import (calculate_bvp_metrics, 
-                                                   calculate_resp_metrics, 
+from evaluation.bigsmall_multitask_metrics import (calculate_bvp_metrics,
+                                                   calculate_resp_metrics,
                                                    calculate_bp4d_au_metrics)
 
 # Other Imports
@@ -25,7 +27,7 @@ class BigSmallTrainer(BaseTrainer):
 
         if self.using_TSM:
             self.frame_depth = config.MODEL.BIGSMALL.FRAME_DEPTH
-            self.base_len = self.num_of_gpu * self.frame_depth 
+            self.base_len = self.frame_depth
 
         return model
 
@@ -40,7 +42,7 @@ class BigSmallTrainer(BaseTrainer):
         N, D, C, H, W = data_small.shape
         data_small = data_small.view(N * D, C, H, W)
 
-        # reshape labels 
+        # reshape labels
         if len(labels.shape) != 3: # this training format requires labels that are of shape N_label, D_label, C_label
             labels = torch.unsqueeze(labels, dim=-1)
         N_label, D_label, C_label = labels.shape
@@ -75,48 +77,37 @@ class BigSmallTrainer(BaseTrainer):
         return label_idxs
 
 
-    def remove_data_parallel(self, old_state_dict):
-        new_state_dict = OrderedDict()
-
-        for k, v in old_state_dict.items():
-            name = k[7:] # remove `module.`
-            new_state_dict[name] = v
-        
-        return new_state_dict
-
-
     def save_model(self, index):
+        if not self.is_main:
+            return
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
         model_path = os.path.join(self.model_dir, self.model_file_name + '_Epoch' + str(index) + '.pth')
-        torch.save(self.model.state_dict(), model_path)
+        model_to_save = self._unwrap_model()
+        torch.save(model_to_save.state_dict(), model_path)
         print('Saved Model Path: ', model_path)
         print('')
 
 
-    def __init__(self, config, data_loader):
+    def __init__(self, config, data_loader, **kwargs):
 
         print('')
         print('Init BigSmall Multitask Trainer\n\n')
 
-        self.config = config # save config file
+        super().__init__(**kwargs)
 
-        # Set up GPU/CPU compute device
-        if torch.cuda.is_available() and config.NUM_OF_GPU_TRAIN > 0:
-            self.device = torch.device(config.DEVICE) # set device to primary GPU
-            self.num_of_gpu = config.NUM_OF_GPU_TRAIN # set number of used GPUs
-        else:
-            self.device = "cpu" # if no GPUs set device is CPU
-            self.num_of_gpu = 0 # no GPUs used
+        self.config = config
+
+        # Set up device via DDP rank
+        self.device = torch.device(f'cuda:{self.rank}' if torch.cuda.is_available() else 'cpu')
 
         # Defining model
         self.using_TSM = True
-        self.model = self.define_model(config) # define the model
+        self.model = self.define_model(config)
+        self.model = self.model.to(self.device)
 
-        if torch.cuda.device_count() > 1 and config.NUM_OF_GPU_TRAIN > 1: # distribute model across GPUs
-            self.model = torch.nn.DataParallel(self.model, device_ids=list(range(config.NUM_OF_GPU_TRAIN))) # data parallel model
-
-        self.model = self.model.to(self.device) # send model to primary GPU
+        if self.world_size > 1:
+            self.model = DDP(self.model, device_ids=[self.rank], output_device=self.rank)
 
         # Training parameters
         self.batch_size = config.TRAIN.BATCH_SIZE
@@ -124,7 +115,7 @@ class BigSmallTrainer(BaseTrainer):
         self.LR = config.TRAIN.LR
 
         # Set Loss and Optimizer
-        AU_weights = torch.as_tensor([9.64, 11.74, 16.77, 1.05, 0.53, 0.56, 
+        AU_weights = torch.as_tensor([9.64, 11.74, 16.77, 1.05, 0.53, 0.56,
                                       0.75, 0.69, 8.51, 6.94, 5.03, 25.00]).to(self.device)
 
         self.criterionAU = torch.nn.BCEWithLogitsLoss(pos_weight=AU_weights).to(self.device)
@@ -132,27 +123,38 @@ class BigSmallTrainer(BaseTrainer):
         self.criterionRESP = torch.nn.MSELoss().to(self.device)
         self.optimizer = optim.AdamW(self.model.parameters(), lr=self.LR, weight_decay=0)
 
-        # self.scaler = torch.cuda.amp.GradScaler() # Loss scalar
-        
+        # Scheduler (was missing — Bug 1 fix)
+        self.num_train_batches = len(data_loader["train"])
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            self.optimizer, max_lr=self.LR, epochs=self.max_epoch_num,
+            steps_per_epoch=self.num_train_batches)
+
         # Model info (saved more dir, chunk len, best epoch, etc.)
         self.model_dir = config.MODEL.MODEL_DIR
         self.model_file_name = config.TRAIN.MODEL_FILE_NAME
         self.chunk_len = config.TRAIN.DATA.PREPROCESS.CHUNK_LENGTH
 
-        # Epoch To Use For Test
-        self.used_epoch = 0
+        # Model selection state (Bug 2 fix — replaces undefined self.model_to_use)
+        self.min_valid_loss = None
+        self.best_epoch = 0
+
+        # Track distributed sampler
+        if self.world_size > 1 and data_loader["train"] is not None:
+            self.train_sampler = data_loader["train"].sampler
+        else:
+            self.train_sampler = None
 
         # Indicies corresponding to used labels
-        label_list = ['bp_wave', 'HR_bpm', 'systolic_bp', 'diastolic_bp', 'mean_bp', 
-                      'resp_wave', 'resp_bpm', 'eda', 
-                      'AU01', 'AU02', 'AU04', 'AU05', 'AU06', 'AU06int', 'AU07', 'AU09', 'AU10', 'AU10int', 
-                      'AU11', 'AU12', 'AU12int', 'AU13', 'AU14', 'AU14int', 'AU15', 'AU16', 'AU17', 'AU17int', 
-                      'AU18', 'AU19', 'AU20', 'AU22', 'AU23', 'AU24', 'AU27', 'AU28', 'AU29', 'AU30', 'AU31', 
+        label_list = ['bp_wave', 'HR_bpm', 'systolic_bp', 'diastolic_bp', 'mean_bp',
+                      'resp_wave', 'resp_bpm', 'eda',
+                      'AU01', 'AU02', 'AU04', 'AU05', 'AU06', 'AU06int', 'AU07', 'AU09', 'AU10', 'AU10int',
+                      'AU11', 'AU12', 'AU12int', 'AU13', 'AU14', 'AU14int', 'AU15', 'AU16', 'AU17', 'AU17int',
+                      'AU18', 'AU19', 'AU20', 'AU22', 'AU23', 'AU24', 'AU27', 'AU28', 'AU29', 'AU30', 'AU31',
                       'AU32', 'AU33', 'AU34', 'AU35', 'AU36', 'AU37', 'AU38', 'AU39',
                       'pos_bvp','pos_env_norm_bvp']
 
         used_labels = ['bp_wave', 'AU01', 'AU02', 'AU04', 'AU06', 'AU07', 'AU10', 'AU12',
-                       'AU14', 'AU15', 'AU17', 'AU23', 'AU24', 
+                       'AU14', 'AU15', 'AU17', 'AU23', 'AU24',
                         'pos_env_norm_bvp', 'resp_wave']
 
         # Get indicies for labels from npy array
@@ -180,11 +182,12 @@ class BigSmallTrainer(BaseTrainer):
         if data_loader["train"] is None:
             raise ValueError("No data for train")
 
-        print('Starting Training Routine')
-        print('')
+        if self.world_size > 1:
+            dist.barrier()
 
-        # Init min validation loss as infinity
-        min_valid_loss = np.inf # minimum validation loss
+        if self.is_main:
+            print('Starting Training Routine')
+            print('')
 
         # ARRAYS TO SAVE (LOSS ARRAYS)
         train_loss_dict = dict()
@@ -197,27 +200,31 @@ class BigSmallTrainer(BaseTrainer):
         val_bvp_loss_dict = dict()
         val_resp_loss_dict = dict()
 
-        # TODO: Expand tracking and subsequent plotting of these losses for BigSmall
         mean_training_losses = []
         mean_valid_losses = []
         lrs = []
 
         # ITERATE THROUGH EPOCHS
         for epoch in range(self.max_epoch_num):
-            print(f"====Training Epoch: {epoch}====")
+            if self.train_sampler is not None:
+                self.train_sampler.set_epoch(epoch)
+
+            if self.is_main:
+                print(f"====Training Epoch: {epoch}====")
 
             # INIT PARAMS FOR TRAINING
-            running_loss = 0.0 # tracks avg loss over mini batches of 100
+            running_loss = 0.0
             train_loss = []
             train_au_loss = []
             train_bvp_loss = []
             train_resp_loss = []
-            self.model.train() # put model in train mode
+            self.model.train()
 
             # MODEL TRAINING
-            tbar = tqdm(data_loader["train"], ncols=80)
+            tbar = tqdm(data_loader["train"], ncols=80) if self.is_main else data_loader["train"]
             for idx, batch in enumerate(tbar):
-                tbar.set_description("Train epoch %s" % epoch)
+                if self.is_main:
+                    tbar.set_description("Train epoch %s" % epoch)
 
                 # GATHER AND FORMAT BATCH DATA
                 data, labels = batch[0], batch[1]
@@ -227,22 +234,17 @@ class BigSmallTrainer(BaseTrainer):
                 # FOWARD AND BACK PROPOGATE THROUGH MODEL
                 self.optimizer.zero_grad()
                 au_out, bvp_out, resp_out = self.model(data)
-                au_loss = self.criterionAU(au_out, labels[:, self.label_idx_train_au, 0]) # au loss 
-                bvp_loss = self.criterionBVP(bvp_out, labels[:, self.label_idx_train_bvp, 0]) # bvp loss
-                resp_loss =  self.criterionRESP(resp_out, labels[:, self.label_idx_train_resp, 0]) # resp loss 
-                loss = au_loss  + bvp_loss + resp_loss # sum losses 
+                au_loss = self.criterionAU(au_out, labels[:, self.label_idx_train_au, 0])
+                bvp_loss = self.criterionBVP(bvp_out, labels[:, self.label_idx_train_bvp, 0])
+                resp_loss = self.criterionRESP(resp_out, labels[:, self.label_idx_train_resp, 0])
+                loss = au_loss + bvp_loss + resp_loss
                 loss.backward()
 
                 # Append the current learning rate to the list
                 lrs.append(self.scheduler.get_last_lr())
 
                 self.optimizer.step()
-                # self.scaler.scale(loss).backward() # Loss scaling
-                # self.scaler.step(self.optimizer)
-                # self.scaler.update()
-
-
-                
+                self.scheduler.step()
 
                 # UPDATE RUNNING LOSS AND PRINTED TERMINAL OUTPUT AND SAVED LOSSES
                 train_loss.append(loss.item())
@@ -251,23 +253,28 @@ class BigSmallTrainer(BaseTrainer):
                 train_resp_loss.append(resp_loss.item())
 
                 running_loss += loss.item()
-                if idx % 100 == 99: # print every 100 mini-batches
-                    print(f'[{epoch}, {idx + 1:5d}] loss: {running_loss / 100:.3f}')
+                if idx % 100 == 99:
+                    if self.is_main:
+                        print(f'[{epoch}, {idx + 1:5d}] loss: {running_loss / 100:.3f}')
                     running_loss = 0.0
 
-                 
-                tbar.set_postfix({"loss:": loss.item(), "lr:": self.optimizer.param_groups[0]["lr"]})
+                if self.is_main:
+                    tbar.set_postfix({"loss:": loss.item(), "lr:": self.optimizer.param_groups[0]["lr"]})
 
             # APPEND EPOCH LOSS LIST TO TRAINING LOSS DICTIONARY
             train_loss_dict[epoch] = train_loss
             train_au_loss_dict[epoch] = train_au_loss
             train_bvp_loss_dict[epoch] = train_bvp_loss
             train_resp_loss_dict[epoch] = train_resp_loss
-            
-            print('')
 
-            # Append the mean training loss for the epoch
-            mean_training_losses.append(np.mean(train_loss))
+            # Aggregate training loss across ranks
+            if self.world_size > 1:
+                loss_tensor = torch.tensor([np.mean(train_loss)], device=self.device)
+                dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+                epoch_train_loss = loss_tensor.cpu().item()
+            else:
+                epoch_train_loss = np.mean(train_loss)
+            mean_training_losses.append(epoch_train_loss)
 
             # SAVE MODEL FOR THIS EPOCH
             self.save_model(epoch)
@@ -282,28 +289,31 @@ class BigSmallTrainer(BaseTrainer):
                 val_au_loss_dict[epoch] = valid_au_loss
                 val_bvp_loss_dict[epoch] = valid_bvp_loss
                 val_resp_loss_dict[epoch] = valid_resp_loss
-                print('validation loss: ', valid_loss)
 
-                # Update used model
-                if self.model_to_use == 'best_epoch' and (valid_loss < min_valid_loss):
-                    min_valid_loss = valid_loss
-                    self.used_epoch = epoch
-                    print("Update best model! Best epoch: {}".format(self.used_epoch))
-                elif self.model_to_use == 'last_epoch':
-                    self.used_epoch = epoch
-            
+                if self.is_main:
+                    print('validation loss: ', valid_loss)
+                    if self.min_valid_loss is None or valid_loss < self.min_valid_loss:
+                        self.min_valid_loss = valid_loss
+                        self.best_epoch = epoch
+                        print("Update best model! Best epoch: {}".format(self.best_epoch))
+
             # VALIDATION (NOT ENABLED)
-            else: 
-                self.used_epoch = epoch
+            else:
+                self.best_epoch = epoch
 
-            print('')
+            torch.cuda.empty_cache()
 
-        if self.config.TRAIN.PLOT_LOSSES_AND_LR:
+            if self.is_main:
+                print('')
+
+        if self.config.TRAIN.PLOT_LOSSES_AND_LR and self.is_main:
             self.plot_losses_and_lrs(mean_training_losses, mean_valid_losses, lrs, self.config)
 
         # PRINT MODEL TO BE USED FOR TESTING
-        print("Used model trained epoch:{}, val_loss:{}".format(self.used_epoch, min_valid_loss))
-        print('')
+        if self.is_main:
+            if not self.config.TEST.USE_LAST_EPOCH:
+                print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss))
+            print('')
 
 
 
@@ -313,7 +323,8 @@ class BigSmallTrainer(BaseTrainer):
         if data_loader["valid"] is None:
             raise ValueError("No data for valid")
 
-        print("===Validating===")
+        if self.is_main:
+            print("===Validating===")
 
         # INIT PARAMS FOR VALIDATION
         valid_loss = []
@@ -324,9 +335,10 @@ class BigSmallTrainer(BaseTrainer):
 
         # MODEL VALIDATION
         with torch.no_grad():
-            vbar = tqdm(data_loader["valid"], ncols=80)
+            vbar = tqdm(data_loader["valid"], ncols=80) if self.is_main else data_loader["valid"]
             for valid_idx, valid_batch in enumerate(vbar):
-                vbar.set_description("Validation")
+                if self.is_main:
+                    vbar.set_description("Validation")
 
                 # GATHER AND FORMAT BATCH DATA
                 data, labels = valid_batch[0], valid_batch[1]
@@ -334,22 +346,32 @@ class BigSmallTrainer(BaseTrainer):
                 data, labels = self.send_data_to_device(data, labels)
 
                 au_out, bvp_out, resp_out = self.model(data)
-                au_loss = self.criterionAU(au_out, labels[:, self.label_idx_valid_au, 0]) # au loss
-                bvp_loss = self.criterionBVP(bvp_out, labels[:, self.label_idx_valid_bvp, 0]) # bvp loss
-                resp_loss =  self.criterionRESP(resp_out, labels[:, self.label_idx_valid_resp, 0]) # resp loss 
-                loss = au_loss + bvp_loss + resp_loss # sum losses
+                au_loss = self.criterionAU(au_out, labels[:, self.label_idx_valid_au, 0])
+                bvp_loss = self.criterionBVP(bvp_out, labels[:, self.label_idx_valid_bvp, 0])
+                resp_loss = self.criterionRESP(resp_out, labels[:, self.label_idx_valid_resp, 0])
+                loss = au_loss + bvp_loss + resp_loss
 
                 # APPEND VAL LOSS
                 valid_loss.append(loss.item())
                 valid_au_loss.append(au_loss.item())
                 valid_bvp_loss.append(bvp_loss.item())
                 valid_resp_loss.append(resp_loss.item())
-                vbar.set_postfix(loss=loss.item())
+                if self.is_main:
+                    vbar.set_postfix(loss=loss.item())
 
         valid_loss = np.asarray(valid_loss)
         valid_au_loss = np.asarray(valid_au_loss)
         valid_bvp_loss = np.asarray(valid_bvp_loss)
         valid_resp_loss = np.asarray(valid_resp_loss)
+
+        # Aggregate validation losses across ranks
+        if self.world_size > 1:
+            losses = torch.tensor([np.mean(valid_loss), np.mean(valid_au_loss),
+                                   np.mean(valid_bvp_loss), np.mean(valid_resp_loss)],
+                                  device=self.device)
+            dist.all_reduce(losses, op=dist.ReduceOp.AVG)
+            vals = losses.cpu().numpy()
+            return float(vals[0]), float(vals[1]), float(vals[2]), float(vals[3])
         return np.mean(valid_loss), np.mean(valid_au_loss), np.mean(valid_bvp_loss), np.mean(valid_resp_loss)
 
 
@@ -357,12 +379,18 @@ class BigSmallTrainer(BaseTrainer):
     def test(self, data_loader):
         """ Model evaluation on the testing dataset."""
 
+        if not self.is_main:
+            return
+
         print("===Testing===")
         print('')
 
         # SETUP
         if data_loader["test"] is None:
             raise ValueError("No data for test")
+
+        # Unwrap DDP for loading and inference
+        model_to_load = self._unwrap_model()
 
         # Change chunk length to be test chunk length
         self.chunk_len = self.config.TEST.DATA.PREPROCESS.CHUNK_LENGTH
@@ -385,16 +413,21 @@ class BigSmallTrainer(BaseTrainer):
 
         # IF USING MODEL FROM TRAINING
         else:
-            model_path = os.path.join(self.model_dir, 
-                                           self.model_file_name + '_Epoch' + str(self.used_epoch) + '.pth')
-            print("Testing uses non-pretrained model!")
+            if self.config.TEST.USE_LAST_EPOCH:
+                model_path = os.path.join(self.model_dir,
+                                          self.model_file_name + '_Epoch' + str(self.max_epoch_num - 1) + '.pth')
+                print("Testing uses last epoch as non-pretrained model!")
+            else:
+                model_path = os.path.join(self.model_dir,
+                                          self.model_file_name + '_Epoch' + str(self.best_epoch) + '.pth')
+                print("Testing uses best epoch selected using model selection as non-pretrained model!")
             print('Model path:', model_path)
             if not os.path.exists(model_path):
                 raise ValueError("Something went wrong... cant find trained model...")
         print('')
-            
-        # LOAD ABOVED SPECIFIED MODEL FOR TESTING
-        self.model.load_state_dict(torch.load(model_path))
+
+        # LOAD ABOVE SPECIFIED MODEL FOR TESTING
+        model_to_load.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model = self.model.to(self.device)
         self.model.eval()
 
@@ -404,7 +437,7 @@ class BigSmallTrainer(BaseTrainer):
             for _, test_batch in enumerate(tqdm(data_loader["test"], ncols=80)):
 
                 # PROCESSING - ANALYSIS, METRICS, SAVING OUT DATA
-                batch_size = test_batch[1].shape[0] # get batch size
+                batch_size = test_batch[1].shape[0]
 
                 # GATHER AND FORMAT BATCH DATA
                 data, labels = test_batch[0], test_batch[1]
@@ -417,42 +450,39 @@ class BigSmallTrainer(BaseTrainer):
 
                 # GET MODEL PREDICTIONS
                 au_out, bvp_out, resp_out = self.model(data)
-                au_out = torch.sigmoid(au_out) 
+                au_out = torch.sigmoid(au_out)
 
                 # GATHER AND SLICE LABELS USED FOR TEST DATASET
                 TEST_AU = False
-                if len(self.label_idx_test_au) > 0: # if test dataset has AU
+                if len(self.label_idx_test_au) > 0:
                     TEST_AU = True
-                    labels_au = labels[:, self.label_idx_test_au] 
-                else: # if not set whole AU labels array to -1
+                    labels_au = labels[:, self.label_idx_test_au]
+                else:
                     labels_au = np.ones((batch_size, len(self.label_idx_train_au)))
                     labels_au = -1 * labels_au
-                    # labels_au = torch.from_numpy(labels_au)
 
                 TEST_BVP = False
-                if len(self.label_idx_test_bvp) > 0: # if test dataset has BVP
+                if len(self.label_idx_test_bvp) > 0:
                     TEST_BVP = True
                     labels_bvp = labels[:, self.label_idx_test_bvp]
-                else: # if not set whole BVP labels array to -1
+                else:
                     labels_bvp = np.ones((batch_size, len(self.label_idx_train_bvp)))
                     labels_bvp = -1 * labels_bvp
-                    # labels_bvp = torch.from_numpy(labels_bvp)
 
                 TEST_RESP = False
-                if len(self.label_idx_test_resp) > 0: # if test dataset has BVP
+                if len(self.label_idx_test_resp) > 0:
                     TEST_RESP = True
                     labels_resp = labels[:, self.label_idx_test_resp]
-                else: # if not set whole BVP labels array to -1
+                else:
                     labels_resp = np.ones((batch_size, len(self.label_idx_train_resp)))
                     labels_resp = -1 * labels_resp
-                    # labels_resp = torch.from_numpy(labels_resp)
 
                 # ITERATE THROUGH BATCH, SORT, AND ADD TO CORRECT DICTIONARY
                 for idx in range(batch_size):
 
                     # if the labels are cut off due to TSM dataformating
                     if idx * self.chunk_len >= labels.shape[0] and self.using_TSM:
-                        continue 
+                        continue
 
                     subj_index = test_batch[2][idx]
                     sort_index = int(test_batch[3][idx])
@@ -467,8 +497,8 @@ class BigSmallTrainer(BaseTrainer):
                         labels_dict_resp[subj_index] = dict()
 
                     # append predictions and labels to subject dict
-                    preds_dict_au[subj_index][sort_index] = au_out[idx * self.chunk_len:(idx + 1) * self.chunk_len] 
-                    labels_dict_au[subj_index][sort_index] = labels_au[idx * self.chunk_len:(idx + 1) * self.chunk_len] 
+                    preds_dict_au[subj_index][sort_index] = au_out[idx * self.chunk_len:(idx + 1) * self.chunk_len]
+                    labels_dict_au[subj_index][sort_index] = labels_au[idx * self.chunk_len:(idx + 1) * self.chunk_len]
                     preds_dict_bvp[subj_index][sort_index] = bvp_out[idx * self.chunk_len:(idx + 1) * self.chunk_len]
                     labels_dict_bvp[subj_index][sort_index] = labels_bvp[idx * self.chunk_len:(idx + 1) * self.chunk_len]
                     preds_dict_resp[subj_index][sort_index] = resp_out[idx * self.chunk_len:(idx + 1) * self.chunk_len]
@@ -478,7 +508,3 @@ class BigSmallTrainer(BaseTrainer):
         bvp_metric_dict = calculate_bvp_metrics(preds_dict_bvp, labels_dict_bvp, self.config)
         resp_metric_dict = calculate_resp_metrics(preds_dict_resp, labels_dict_resp, self.config)
         au_metric_dict = calculate_bp4d_au_metrics(preds_dict_au, labels_dict_au, self.config)
-
-        
-
-

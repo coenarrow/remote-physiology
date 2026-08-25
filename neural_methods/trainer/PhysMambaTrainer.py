@@ -6,6 +6,8 @@ import math
 import numpy as np
 import torch
 import torch.optim as optim
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 import random
 from evaluation.metrics import calculate_metrics
 from neural_methods.loss.PhysNetNegPearsonLoss import Neg_Pearson
@@ -18,16 +20,14 @@ from scipy.signal import welch
 
 class PhysMambaTrainer(BaseTrainer):
 
-    def __init__(self, config, data_loader):
+    def __init__(self, config, data_loader, **kwargs):
         """Inits parameters from args and the writer for TensorboardX."""
-        super().__init__()
-        self.device = torch.device(config.DEVICE)
+        super().__init__(**kwargs)
+        self.device = torch.device(f'cuda:{self.rank}' if torch.cuda.is_available() else 'cpu')
         self.max_epoch_num = config.TRAIN.EPOCHS
         self.model_dir = config.MODEL.MODEL_DIR
         self.model_file_name = config.TRAIN.MODEL_FILE_NAME
         self.batch_size = config.TRAIN.BATCH_SIZE
-        self.num_of_gpu = config.NUM_OF_GPU_TRAIN
-        self.base_len = self.num_of_gpu
         self.config = config
         self.min_valid_loss = None
         self.best_epoch = 0
@@ -36,11 +36,11 @@ class PhysMambaTrainer(BaseTrainer):
             self.diff_flag = 1
         self.frame_rate = config.TRAIN.DATA.FS
 
-        self.model = PhysMamba().to(self.device)  # [3, T, 128,128]
-        if self.num_of_gpu > 0:
-            self.model = torch.nn.DataParallel(self.model, device_ids=list(range(config.NUM_OF_GPU_TRAIN)))
-
         if config.TOOLBOX_MODE == "train_and_test":
+            self.model = PhysMamba().to(self.device)  # [3, T, 128,128]
+            if self.world_size > 1:
+                self.model = DDP(self.model, device_ids=[self.rank], output_device=self.rank)
+
             self.num_train_batches = len(data_loader["train"])
             self.criterion_Pearson = Neg_Pearson()
             self.optimizer = optim.Adam(
@@ -48,27 +48,47 @@ class PhysMambaTrainer(BaseTrainer):
             # See more details on the OneCycleLR scheduler here: https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html
             self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
                 self.optimizer, max_lr=config.TRAIN.LR, epochs=config.TRAIN.EPOCHS, steps_per_epoch=self.num_train_batches)
+
+            # Track distributed sampler for epoch setting
+            if self.world_size > 1 and data_loader["train"] is not None:
+                self.train_sampler = data_loader["train"].sampler
+            else:
+                self.train_sampler = None
         elif config.TOOLBOX_MODE == "only_test":
+            self.model = PhysMamba().to(self.device)  # [3, T, 128,128]
+            if self.world_size > 1:
+                self.model = DDP(self.model, device_ids=[self.rank], output_device=self.rank)
             self.criterion_Pearson_test = Neg_Pearson()
-            pass
+            self.train_sampler = None
         else:
-            raise ValueError("PhysNet trainer initialized in incorrect toolbox mode!")
+            raise ValueError("PhysMamba trainer initialized in incorrect toolbox mode!")
 
     def train(self, data_loader):
         """Training routine for model"""
         if data_loader["train"] is None:
             raise ValueError("No data for train")
 
+        if self.world_size > 1:
+            dist.barrier()
+
+        mean_training_losses = []
+        mean_valid_losses = []
+        lrs = []
         for epoch in range(self.max_epoch_num):
-            print('')
-            print(f"====Training Epoch: {epoch}====")
-            self.model.train()
-            loss_rPPG_avg = []
+            if self.train_sampler is not None:
+                self.train_sampler.set_epoch(epoch)
+
+            if self.is_main:
+                print('')
+                print(f"====Training Epoch: {epoch}====")
             running_loss = 0.0
+            train_loss = []
+            self.model.train()
             # Model Training
-            tbar = tqdm(data_loader["train"], ncols=80)
+            tbar = tqdm(data_loader["train"], ncols=80) if self.is_main else data_loader["train"]
             for idx, batch in enumerate(tbar):
-                tbar.set_description("Train epoch %s" % epoch)
+                if self.is_main:
+                    tbar.set_description("Train epoch %s" % epoch)
                 data, labels = batch[0].float(), batch[1].float()
                 N, D, C, H, W = data.shape
 
@@ -82,51 +102,69 @@ class PhysMambaTrainer(BaseTrainer):
                 labels = (labels - torch.mean(labels)) / torch.std(labels)
                 loss = self.criterion_Pearson(pred_ppg, labels)
                 loss.backward()
-                if idx % 10 == 0:
-                    tqdm.write(f"GPU Memory: {torch.cuda.memory_allocated()/1e9:.2f}GB")
-                    tqdm.write(f"Maximum {torch.cuda.max_memory_allocated()/1e9:.2f}GB")
-                    # print the available gpu memory
-                    tqdm.write(f"Total GPU Memory: {torch.cuda.get_device_properties(0).total_memory/1e9:.2f}GB")
-                    torch.cuda.reset_peak_memory_stats()
-                running_loss += loss.item()
-                if idx % 100 == 99:  # print every 100 mini-batches
-                    print(
-                        f'[{epoch}, {idx + 1:5d}] loss: {running_loss / 100:.3f}')
-                    running_loss = 0.0
+
+                # Append the current learning rate to the list
+                lrs.append(self.scheduler.get_last_lr())
+
                 self.optimizer.step()
                 self.scheduler.step()
-                tbar.set_postfix(loss=loss.item())
-            
+                running_loss += loss.item()
+                if idx % 100 == 99:  # print every 100 mini-batches
+                    if self.is_main:
+                        print(
+                            f'[{epoch}, {idx + 1:5d}] loss: {running_loss / 100:.3f}')
+                    running_loss = 0.0
+                train_loss.append(loss.item())
+                if self.is_main:
+                    tbar.set_postfix(loss=loss.item())
+
+            # Aggregate training loss across ranks
+            if self.world_size > 1:
+                loss_tensor = torch.tensor([np.mean(train_loss)], device=self.device)
+                dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+                epoch_train_loss = loss_tensor.cpu().item()
+            else:
+                epoch_train_loss = np.mean(train_loss)
+            mean_training_losses.append(epoch_train_loss)
+
             self.save_model(epoch)
-            if not self.config.TEST.USE_LAST_EPOCH: 
+            if not self.config.TEST.USE_LAST_EPOCH:
                 valid_loss = self.valid(data_loader)
-                print('validation loss: ', valid_loss)
-                if self.min_valid_loss is None:
-                    self.min_valid_loss = valid_loss
-                    self.best_epoch = epoch
-                    print("Update best model! Best epoch: {}".format(self.best_epoch))
-                elif (valid_loss < self.min_valid_loss):
-                    self.min_valid_loss = valid_loss
-                    self.best_epoch = epoch
-                    print("Update best model! Best epoch: {}".format(self.best_epoch))
+                mean_valid_losses.append(valid_loss)
+                if self.is_main:
+                    print('validation loss: ', valid_loss)
+                    if self.min_valid_loss is None:
+                        self.min_valid_loss = valid_loss
+                        self.best_epoch = epoch
+                        print("Update best model! Best epoch: {}".format(self.best_epoch))
+                    elif (valid_loss < self.min_valid_loss):
+                        self.min_valid_loss = valid_loss
+                        self.best_epoch = epoch
+                        print("Update best model! Best epoch: {}".format(self.best_epoch))
             torch.cuda.empty_cache()
-        if not self.config.TEST.USE_LAST_EPOCH: 
-            print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss)) 
-        
+
+        if not self.config.TEST.USE_LAST_EPOCH:
+            if self.is_main:
+                print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss))
+        if self.config.TRAIN.PLOT_LOSSES_AND_LR and self.is_main:
+            self.plot_losses_and_lrs(mean_training_losses, mean_valid_losses, lrs, self.config)
+
     def valid(self, data_loader):
         """ Runs the model on valid sets."""
         if data_loader["valid"] is None:
             raise ValueError("No data for valid")
 
-        print('')
-        print(" ====Validing===")
+        if self.is_main:
+            print('')
+            print(" ====Validing===")
         valid_loss = []
         self.model.eval()
         valid_step = 0
         with torch.no_grad():
-            vbar = tqdm(data_loader["valid"], ncols=80)
+            vbar = tqdm(data_loader["valid"], ncols=80) if self.is_main else data_loader["valid"]
             for valid_idx, valid_batch in enumerate(vbar):
-                vbar.set_description("Validation")
+                if self.is_main:
+                    vbar.set_description("Validation")
                 BVP_label = valid_batch[1].to(
                     torch.float32).to(self.device)
                 rPPG = self.model(
@@ -136,24 +174,38 @@ class PhysMambaTrainer(BaseTrainer):
                 loss_ecg = self.criterion_Pearson(rPPG, BVP_label)
                 valid_loss.append(loss_ecg.item())
                 valid_step += 1
-                vbar.set_postfix(loss=loss_ecg.item())
+                if self.is_main:
+                    vbar.set_postfix(loss=loss_ecg.item())
             valid_loss = np.asarray(valid_loss)
+
+        # Aggregate validation loss across ranks
+        if self.world_size > 1:
+            loss_tensor = torch.tensor([np.mean(valid_loss)], device=self.device)
+            dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+            return loss_tensor.cpu().item()
         return np.mean(valid_loss)
 
     def test(self, data_loader):
         """ Runs the model on test sets."""
+        if not self.is_main:
+            return
+
         if data_loader["test"] is None:
             raise ValueError("No data for test")
-        
+
         print('')
         print("===Testing===")
+
+        # Unwrap DDP for loading and inference
+        model_to_load = self._unwrap_model()
+
         predictions = dict()
         labels = dict()
 
         if self.config.TOOLBOX_MODE == "only_test":
             if not os.path.exists(self.config.INFERENCE.MODEL_PATH):
                 raise ValueError("Inference model path error! Please check INFERENCE.MODEL_PATH in your yaml.")
-            self.model.load_state_dict(torch.load(self.config.INFERENCE.MODEL_PATH))
+            model_to_load.load_state_dict(torch.load(self.config.INFERENCE.MODEL_PATH, map_location=self.device))
             print("Testing uses pretrained model!")
             print(self.config.INFERENCE.MODEL_PATH)
         else:
@@ -162,22 +214,22 @@ class PhysMambaTrainer(BaseTrainer):
                 self.model_dir, self.model_file_name + '_Epoch' + str(self.max_epoch_num - 1) + '.pth')
                 print("Testing uses last epoch as non-pretrained model!")
                 print(last_epoch_model_path)
-                self.model.load_state_dict(torch.load(last_epoch_model_path))
+                model_to_load.load_state_dict(torch.load(last_epoch_model_path, map_location=self.device))
             else:
                 best_model_path = os.path.join(
                     self.model_dir, self.model_file_name + '_Epoch' + str(self.best_epoch) + '.pth')
                 print("Testing uses best epoch selected using model selection as non-pretrained model!")
                 print(best_model_path)
-                self.model.load_state_dict(torch.load(best_model_path))
+                model_to_load.load_state_dict(torch.load(best_model_path, map_location=self.device))
 
-        self.model = self.model.to(self.config.DEVICE)
+        self.model = self.model.to(self.device)
         self.model.eval()
         print("Running model evaluation on the testing dataset!")
         with torch.no_grad():
             for _, test_batch in enumerate(tqdm(data_loader["test"], ncols=80)):
                 batch_size = test_batch[0].shape[0]
                 data, label = test_batch[0].to(
-                    self.config.DEVICE), test_batch[1].to(self.config.DEVICE)
+                    self.device), test_batch[1].to(self.device)
                 pred_ppg_test = self.model(data)
 
                 if self.config.TEST.OUTPUT_SAVE_DIR:
@@ -195,15 +247,18 @@ class PhysMambaTrainer(BaseTrainer):
 
         print('')
         calculate_metrics(predictions, labels, self.config)
-        if self.config.TEST.OUTPUT_SAVE_DIR: # saving test outputs 
+        if self.config.TEST.OUTPUT_SAVE_DIR: # saving test outputs
             self.save_test_outputs(predictions, labels, self.config)
 
     def save_model(self, index):
+        if not self.is_main:
+            return
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
         model_path = os.path.join(
             self.model_dir, self.model_file_name + '_Epoch' + str(index) + '.pth')
-        torch.save(self.model.state_dict(), model_path)
+        model_to_save = self._unwrap_model()
+        torch.save(model_to_save.state_dict(), model_path)
         print('Saved Model Path: ', model_path)
 
     # HR calculation based on ground truth label

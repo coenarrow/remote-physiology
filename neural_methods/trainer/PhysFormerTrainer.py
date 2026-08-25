@@ -15,6 +15,8 @@ import numpy as np
 import math
 import torch
 import torch.optim as optim
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from evaluation.metrics import calculate_metrics
 from neural_methods.loss.PhysNetNegPearsonLoss import Neg_Pearson
 from neural_methods.loss.PhysFormerLossComputer import TorchLossComputer
@@ -25,10 +27,10 @@ from scipy.signal import welch
 
 class PhysFormerTrainer(BaseTrainer):
 
-    def __init__(self, config, data_loader):
+    def __init__(self, config, data_loader, **kwargs):
         """Inits parameters from args and the writer for TensorboardX."""
-        super().__init__()
-        self.device = torch.device(config.DEVICE)
+        super().__init__(**kwargs)
+        self.device = torch.device(f'cuda:{self.rank}' if torch.cuda.is_available() else 'cpu')
         self.max_epoch_num = config.TRAIN.EPOCHS
         self.model_dir = config.MODEL.MODEL_DIR
         self.dropout_rate = config.MODEL.DROP_RATE
@@ -40,20 +42,20 @@ class PhysFormerTrainer(BaseTrainer):
         self.theta = config.MODEL.PHYSFORMER.THETA
         self.model_file_name = config.TRAIN.MODEL_FILE_NAME
         self.batch_size = config.TRAIN.BATCH_SIZE
-        self.num_of_gpu = config.NUM_OF_GPU_TRAIN
         self.frame_rate = config.TRAIN.DATA.FS
         self.frame_rate_valid = config.VALID.DATA.FS
-        self.config = config 
+        self.config = config
         self.min_valid_loss = None
         self.best_epoch = 0
 
         if config.TOOLBOX_MODE == "train_and_test":
             self.chunk_len = config.TRAIN.DATA.PREPROCESS.CHUNK_LENGTH
             self.model = ViT_ST_ST_Compact3_TDC_gra_sharp(
-                image_size=(self.chunk_len,config.TRAIN.DATA.PREPROCESS.RESIZE.H,config.TRAIN.DATA.PREPROCESS.RESIZE.W), 
-                patches=(self.patch_size,) * 3, dim=self.dim, ff_dim=self.ff_dim, num_heads=self.num_heads, num_layers=self.num_layers, 
+                image_size=(self.chunk_len,config.TRAIN.DATA.PREPROCESS.RESIZE.H,config.TRAIN.DATA.PREPROCESS.RESIZE.W),
+                patches=(self.patch_size,) * 3, dim=self.dim, ff_dim=self.ff_dim, num_heads=self.num_heads, num_layers=self.num_layers,
                 dropout_rate=self.dropout_rate, theta=self.theta).to(self.device)
-            self.model = torch.nn.DataParallel(self.model, device_ids=list(range(config.NUM_OF_GPU_TRAIN)))
+            if self.world_size > 1:
+                self.model = DDP(self.model, device_ids=[self.rank], output_device=self.rank)
 
             self.num_train_batches = len(data_loader["train"])
             self.criterion_reg = torch.nn.MSELoss()
@@ -61,17 +63,25 @@ class PhysFormerTrainer(BaseTrainer):
             self.criterion_class = torch.nn.CrossEntropyLoss()
             self.criterion_Pearson = Neg_Pearson()
             self.optimizer = optim.Adam(self.model.parameters(), lr=config.TRAIN.LR, weight_decay=0.00005)
-            # TODO: In both the PhysFormer repo's training example and other implementations of a PhysFormer trainer, 
+            # TODO: In both the PhysFormer repo's training example and other implementations of a PhysFormer trainer,
             # a step_size that doesn't end up changing the LR always seems to be used. This seems to defeat the point
             # of using StepLR in the first place. Consider investigating and using another approach (e.g., OneCycleLR).
             self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.5)
+
+            # Track distributed sampler for epoch setting
+            if self.world_size > 1 and data_loader["train"] is not None:
+                self.train_sampler = data_loader["train"].sampler
+            else:
+                self.train_sampler = None
         elif config.TOOLBOX_MODE == "only_test":
             self.chunk_len = config.TEST.DATA.PREPROCESS.CHUNK_LENGTH
             self.model = ViT_ST_ST_Compact3_TDC_gra_sharp(
-                image_size=(self.chunk_len,config.TRAIN.DATA.PREPROCESS.RESIZE.H,config.TRAIN.DATA.PREPROCESS.RESIZE.W), 
-                patches=(self.patch_size,) * 3, dim=self.dim, ff_dim=self.ff_dim, num_heads=self.num_heads, num_layers=self.num_layers, 
+                image_size=(self.chunk_len,config.TRAIN.DATA.PREPROCESS.RESIZE.H,config.TRAIN.DATA.PREPROCESS.RESIZE.W),
+                patches=(self.patch_size,) * 3, dim=self.dim, ff_dim=self.ff_dim, num_heads=self.num_heads, num_layers=self.num_layers,
                 dropout_rate=self.dropout_rate, theta=self.theta).to(self.device)
-            self.model = torch.nn.DataParallel(self.model, device_ids=list(range(config.NUM_OF_GPU_TRAIN)))
+            if self.world_size > 1:
+                self.model = DDP(self.model, device_ids=[self.rank], output_device=self.rank)
+            self.train_sampler = None
         else:
             raise ValueError("Physformer trainer initialized in incorrect toolbox mode!")
 
@@ -80,6 +90,9 @@ class PhysFormerTrainer(BaseTrainer):
         """Training routine for model"""
         if data_loader["train"] is None:
             raise ValueError("No data for train")
+
+        if self.world_size > 1:
+            dist.barrier()
 
         # a --> Pearson loss; b --> frequency loss
         a_start = 1.0
@@ -93,15 +106,19 @@ class PhysFormerTrainer(BaseTrainer):
         lrs = []
 
         for epoch in range(self.max_epoch_num):
-            print('')
-            print(f"====Training Epoch: {epoch}====")
+            if self.train_sampler is not None:
+                self.train_sampler.set_epoch(epoch)
+
+            if self.is_main:
+                print('')
+                print(f"====Training Epoch: {epoch}====")
             loss_rPPG_avg = []
             loss_peak_avg = []
             loss_kl_avg_test = []
             loss_hr_mae = []
 
             self.model.train()
-            tbar = tqdm(data_loader["train"], ncols=80)
+            tbar = tqdm(data_loader["train"], ncols=80) if self.is_main else data_loader["train"]
             for idx, batch in enumerate(tbar):
                 hr = torch.tensor([self.get_hr(i, sr=self.frame_rate) for i in batch[1]]).float().to(self.device)
                 data, label = batch[0].float().to(self.device), batch[1].float().to(self.device)
@@ -150,35 +167,46 @@ class PhysFormerTrainer(BaseTrainer):
                 loss_kl_avg_test.append(float(kl_loss.data))
                 loss_hr_mae.append(float(train_mae))
                 if idx % 100 == 99:  # print every 100 mini-batches
-                    print(f'\nepoch:{epoch}, batch:{idx + 1}, total:{len(data_loader["train"]) // self.batch_size}, '
-                        f'lr:0.0001, sharp:{gra_sharp:.3f}, a:{a:.3f}, NegPearson:{np.mean(loss_rPPG_avg[-2000:]):.4f}, '
-                        f'\nb:{b:.3f}, kl:{np.mean(loss_kl_avg_test[-2000:]):.3f}, fre_CEloss:{np.mean(loss_peak_avg[-2000:]):.3f}, '
-                        f'hr_mae:{np.mean(loss_hr_mae[-2000:]):.3f}')
-                    
+                    if self.is_main:
+                        print(f'\nepoch:{epoch}, batch:{idx + 1}, total:{len(data_loader["train"]) // self.batch_size}, '
+                            f'lr:0.0001, sharp:{gra_sharp:.3f}, a:{a:.3f}, NegPearson:{np.mean(loss_rPPG_avg[-2000:]):.4f}, '
+                            f'\nb:{b:.3f}, kl:{np.mean(loss_kl_avg_test[-2000:]):.3f}, fre_CEloss:{np.mean(loss_peak_avg[-2000:]):.3f}, '
+                            f'hr_mae:{np.mean(loss_hr_mae[-2000:]):.3f}')
+
             # Append the current learning rate to the list
             lrs.append(self.scheduler.get_last_lr())
-            # Append the mean training loss for the epoch
-            mean_training_losses.append(np.mean(loss_rPPG_avg))
+
+            # Aggregate training loss across ranks
+            if self.world_size > 1:
+                loss_tensor = torch.tensor([np.mean(loss_rPPG_avg)], device=self.device)
+                dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+                epoch_train_loss = loss_tensor.cpu().item()
+            else:
+                epoch_train_loss = np.mean(loss_rPPG_avg)
+            mean_training_losses.append(epoch_train_loss)
+
             self.save_model(epoch)
             self.scheduler.step()
             self.model.eval()
 
-            if not self.config.TEST.USE_LAST_EPOCH: 
+            if not self.config.TEST.USE_LAST_EPOCH:
                 valid_loss = self.valid(data_loader)
                 mean_valid_losses.append(valid_loss)
-                print(f'Validation RMSE:{valid_loss:.3f}, batch:{idx+1}')
-                if self.min_valid_loss is None:
-                    self.min_valid_loss = valid_loss
-                    self.best_epoch = epoch
-                    print("Update best model! Best epoch: {}".format(self.best_epoch))
-                elif (valid_loss < self.min_valid_loss):
-                    self.min_valid_loss = valid_loss
-                    self.best_epoch = epoch
-                    print("Update best model! Best epoch: {}".format(self.best_epoch))
-        if not self.config.TEST.USE_LAST_EPOCH: 
-            print("best trained epoch: {}, min_val_loss: {}".format(
-                self.best_epoch, self.min_valid_loss))
-        if self.config.TRAIN.PLOT_LOSSES_AND_LR:
+                if self.is_main:
+                    print(f'Validation RMSE:{valid_loss:.3f}, batch:{idx+1}')
+                    if self.min_valid_loss is None:
+                        self.min_valid_loss = valid_loss
+                        self.best_epoch = epoch
+                        print("Update best model! Best epoch: {}".format(self.best_epoch))
+                    elif (valid_loss < self.min_valid_loss):
+                        self.min_valid_loss = valid_loss
+                        self.best_epoch = epoch
+                        print("Update best model! Best epoch: {}".format(self.best_epoch))
+        if not self.config.TEST.USE_LAST_EPOCH:
+            if self.is_main:
+                print("best trained epoch: {}, min_val_loss: {}".format(
+                    self.best_epoch, self.min_valid_loss))
+        if self.config.TRAIN.PLOT_LOSSES_AND_LR and self.is_main:
             self.plot_losses_and_lrs(mean_training_losses, mean_valid_losses, lrs, self.config)
 
     def valid(self, data_loader):
@@ -186,12 +214,13 @@ class PhysFormerTrainer(BaseTrainer):
         if data_loader["valid"] is None:
             raise ValueError("No data for valid")
 
-        print('')
-        print(" ====Validating===")
+        if self.is_main:
+            print('')
+            print(" ====Validating===")
         self.optimizer.zero_grad()
         with torch.no_grad():
             hrs = []
-            vbar = tqdm(data_loader["valid"], ncols=80)
+            vbar = tqdm(data_loader["valid"], ncols=80) if self.is_main else data_loader["valid"]
             for val_idx, val_batch in enumerate(vbar):
                 data, label = val_batch[0].float().to(self.device), val_batch[1].float().to(self.device)
                 gra_sharp = 2.0
@@ -200,18 +229,30 @@ class PhysFormerTrainer(BaseTrainer):
                 for _1, _2 in zip(rPPG, label):
                     hrs.append((self.get_hr(_1.cpu().detach().numpy(), sr=self.frame_rate_valid), self.get_hr(_2.cpu().detach().numpy(), sr=self.frame_rate_valid)))
             RMSE = np.mean([(i-j)**2 for i, j in hrs])**0.5
+
+        # Aggregate validation loss across ranks
+        if self.world_size > 1:
+            loss_tensor = torch.tensor([RMSE], device=self.device)
+            dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+            return loss_tensor.cpu().item()
         return RMSE
 
     def test(self, data_loader):
         """ Runs the model on test sets."""
+        if not self.is_main:
+            return
+
         if data_loader["test"] is None:
             raise ValueError("No data for test")
-        
+
         print('')
         print("===Testing===")
 
         # Change chunk length to be test chunk length
         self.chunk_len = self.config.TEST.DATA.PREPROCESS.CHUNK_LENGTH
+
+        # Unwrap DDP for loading and inference
+        model_to_load = self._unwrap_model()
 
         predictions = dict()
         labels = dict()
@@ -219,7 +260,7 @@ class PhysFormerTrainer(BaseTrainer):
         if self.config.TOOLBOX_MODE == "only_test":
             if not os.path.exists(self.config.INFERENCE.MODEL_PATH):
                 raise ValueError("Inference model path error! Please check INFERENCE.MODEL_PATH in your yaml.")
-            self.model.load_state_dict(torch.load(self.config.INFERENCE.MODEL_PATH))
+            model_to_load.load_state_dict(torch.load(self.config.INFERENCE.MODEL_PATH, map_location=self.device))
             print("Testing uses pretrained model!")
             print(self.config.INFERENCE.MODEL_PATH)
         else:
@@ -228,22 +269,22 @@ class PhysFormerTrainer(BaseTrainer):
                 self.model_dir, self.model_file_name + '_Epoch' + str(self.max_epoch_num - 1) + '.pth')
                 print("Testing uses last epoch as non-pretrained model!")
                 print(last_epoch_model_path)
-                self.model.load_state_dict(torch.load(last_epoch_model_path))
+                model_to_load.load_state_dict(torch.load(last_epoch_model_path, map_location=self.device))
             else:
                 best_model_path = os.path.join(
                     self.model_dir, self.model_file_name + '_Epoch' + str(self.best_epoch) + '.pth')
                 print("Testing uses best epoch selected using model selection as non-pretrained model!")
                 print(best_model_path)
-                self.model.load_state_dict(torch.load(best_model_path))
+                model_to_load.load_state_dict(torch.load(best_model_path, map_location=self.device))
 
-        self.model = self.model.to(self.config.DEVICE)
+        self.model = self.model.to(self.device)
         self.model.eval()
         print("Running model evaluation on the testing dataset!")
         with torch.no_grad():
             for _, test_batch in enumerate(tqdm(data_loader["test"], ncols=80)):
                 batch_size = test_batch[0].shape[0]
                 data, label = test_batch[0].to(
-                    self.config.DEVICE), test_batch[1].to(self.config.DEVICE)
+                    self.device), test_batch[1].to(self.device)
                 gra_sharp = 2.0
                 pred_ppg_test, _, _, _ = self.model(data, gra_sharp)
                 for idx in range(batch_size):
@@ -261,11 +302,14 @@ class PhysFormerTrainer(BaseTrainer):
             self.save_test_outputs(predictions, labels, self.config)
 
     def save_model(self, index):
+        if not self.is_main:
+            return
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
         model_path = os.path.join(
             self.model_dir, self.model_file_name + '_Epoch' + str(index) + '.pth')
-        torch.save(self.model.state_dict(), model_path)
+        model_to_save = self._unwrap_model()
+        torch.save(model_to_save.state_dict(), model_path)
         print('Saved Model Path: ', model_path)
 
     # HR calculation based on ground truth label

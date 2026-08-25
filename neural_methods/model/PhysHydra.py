@@ -53,8 +53,7 @@ class CDC_T(nn.Module):
         """Temporal difference convolution
         theta: float, difference weighting factor"""
         super().__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride, 
-                            padding, dilation, groups, bias)
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
         self.theta = theta
 
     def forward(self, x):
@@ -63,8 +62,7 @@ class CDC_T(nn.Module):
             return out
         kernel_diff = self.conv.weight[:,:,0].sum((2,3)) + self.conv.weight[:,:,2].sum((2,3))
         kernel_diff = kernel_diff[:,:,None,None,None]
-        out_diff = F.conv3d(x, kernel_diff, self.conv.bias, self.conv.stride,
-                          0, self.conv.dilation, self.conv.groups)
+        out_diff = F.conv3d(x, kernel_diff, self.conv.bias, self.conv.stride, 0, self.conv.dilation, self.conv.groups)
         return out - self.theta * out_diff
 
 class MambaLayer(nn.Module):
