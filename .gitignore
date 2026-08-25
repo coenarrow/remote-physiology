@@ -14,3 +14,4 @@ logs/
 .claude
 .configs
 .slurm_scripts
+.DS_Store
