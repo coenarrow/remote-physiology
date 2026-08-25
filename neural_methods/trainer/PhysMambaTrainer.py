@@ -23,7 +23,12 @@ class PhysMambaTrainer(BaseTrainer):
     def __init__(self, config, data_loader, **kwargs):
         """Inits parameters from args and the writer for TensorboardX."""
         super().__init__(**kwargs)
-        self.device = torch.device(f'cuda:{self.rank}' if torch.cuda.is_available() else 'cpu')
+        if torch.cuda.is_available():
+            self.device = torch.device(f'cuda:{self.rank}')
+        elif torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
         self.max_epoch_num = config.TRAIN.EPOCHS
         self.model_dir = config.MODEL.MODEL_DIR
         self.model_file_name = config.TRAIN.MODEL_FILE_NAME

@@ -249,7 +249,12 @@ class PhysHydraTrainer(BaseTrainer):
         self.rank = rank
         self.world_size = world_size
         self.is_main = (rank == 0)  # Only main process saves/logs
-        self.device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+        if torch.cuda.is_available():
+            self.device = torch.device(f'cuda:{rank}')
+        elif torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
         self.debug = debug
         self.debug_gpu = debug_gpu
         
@@ -294,6 +299,11 @@ class PhysHydraTrainer(BaseTrainer):
         # Mixed precision training setup
         self.use_amp = config.TRAIN.get('USE_AMP', False)  # Default to False for backward compatibility
         self.amp_dtype = getattr(config.TRAIN, 'AMP_DTYPE', 'float32')  # 'float16' or 'bfloat16', defaults to 'float32'
+
+        if self.use_amp and self.device.type != 'cuda':
+            if self.is_main:
+                tqdm.write(f"WARNING: AMP requested but device is {self.device.type}; disabling AMP")
+            self.use_amp = False
 
         if self.use_amp:
             if self.amp_dtype == 'bfloat16' and not torch.cuda.is_bf16_supported():

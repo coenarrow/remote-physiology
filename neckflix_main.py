@@ -39,6 +39,10 @@ Notes:
 """
 
 import argparse
+import os
+# Must be set before importing torch: lets ops missing on Apple MPS
+# (e.g. aten::max_pool3d_with_indices) fall back to CPU transparently.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import random
 import time
 import numpy as np
@@ -49,7 +53,6 @@ from dataset import data_loader
 from neural_methods import trainer
 from unsupervised_methods.unsupervised_predictor import unsupervised_predict
 from torch.utils.data import DataLoader
-import os
 from pathlib import Path
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
