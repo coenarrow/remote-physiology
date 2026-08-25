@@ -26,17 +26,19 @@ class Attention_mask(nn.Module):
 
 class DeepPhys(nn.Module):
 
-    def __init__(self, in_channels=3, nb_filters1=32, nb_filters2=64, kernel_size=3, dropout_rate1=0.25,
+    def __init__(self, in_channels=3, out_signals=1, nb_filters1=32, nb_filters2=64, kernel_size=3, dropout_rate1=0.25,
                  dropout_rate2=0.5, pool_size=(2, 2), nb_dense=128, img_size=36):
         """Definition of DeepPhys.
         Args:
           in_channels: the number of input channel. Default: 3
+          out_signals: the number of output signals. Default: 1
           img_size: height/width of each frame. Default: 36.
         Returns:
           DeepPhys model.
         """
         super(DeepPhys, self).__init__()
         self.in_channels = in_channels
+        self.out_signals = out_signals
         self.kernel_size = kernel_size
         self.dropout_rate1 = dropout_rate1
         self.dropout_rate2 = dropout_rate2
@@ -73,20 +75,15 @@ class DeepPhys(nn.Module):
         self.dropout_3 = nn.Dropout(self.dropout_rate1)
         self.dropout_4 = nn.Dropout(self.dropout_rate2)
         # Dense layers
-        if img_size == 36:
-            self.final_dense_1 = nn.Linear(3136, self.nb_dense, bias=True)
-        elif img_size == 72:
-            self.final_dense_1 = nn.Linear(16384, self.nb_dense, bias=True)
-        elif img_size == 96:
-            self.final_dense_1 = nn.Linear(30976, self.nb_dense, bias=True)
-        else:
-            raise Exception('Unsupported image size')
-        self.final_dense_2 = nn.Linear(self.nb_dense, 1, bias=True)
+        h1 = (img_size - 2) // 2          # conv2 (valid) then pool /2
+        h2 = (h1 - 2) // 2                # conv4 (valid) then pool /2
+        self.final_dense_1 = nn.Linear(self.nb_filters2 * h2 * h2, self.nb_dense, bias=True)
+        self.final_dense_2 = nn.Linear(self.nb_dense, out_signals, bias=True)
 
     def forward(self, inputs, params=None):
 
-        diff_input = inputs[:, :3, :, :]
-        raw_input = inputs[:, 3:, :, :]
+        diff_input = inputs[:, :self.in_channels, :, :]
+        raw_input = inputs[:, self.in_channels:2 * self.in_channels, :, :]
 
         d1 = torch.tanh(self.motion_conv1(diff_input))
         d2 = torch.tanh(self.motion_conv2(d1))
