@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from timm.models.layers import trunc_normal_, DropPath
 from mamba_ssm import Mamba
+from neural_methods.model.mamba_compat import make_mamba
 from torch.nn import functional as F
 
 class ChannelAttention3D(nn.Module):
@@ -88,7 +89,7 @@ class MambaLayer(nn.Module):
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
         drop_path = 0
-        self.mamba = Mamba(
+        self.mamba = make_mamba(
                 d_model=dim, # Model dimension d_model
                 d_state=d_state,  # SSM state expansion factor
                 d_conv=d_conv,    # Local convolution width
