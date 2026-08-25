@@ -39,32 +39,45 @@ class LateralConnection(nn.Module):
         return fast_path + slow_path
 
 class CDC_T(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
-                 padding=1, dilation=1, groups=1, bias=False, theta=0.2):
-
+    def __init__(self, 
+                 in_channels, 
+                 out_channels, 
+                 kernel_size=3, 
+                 stride=1,
+                 padding=1, 
+                 dilation=1, 
+                 groups=1, 
+                 bias=False, 
+                 theta=0.2):
         super(CDC_T, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding,
-                              dilation=dilation, groups=groups, bias=bias)
+        self.conv = nn.Conv3d(in_channels, 
+                              out_channels, 
+                              kernel_size=kernel_size, 
+                              stride=stride, 
+                              padding=padding,
+                              dilation=dilation, 
+                              groups=groups, 
+                              bias=bias)
         self.theta = theta
 
     def forward(self, x):
-
         out_normal = self.conv(x)
-
         if math.fabs(self.theta - 0.0) < 1e-8:
             return out_normal
         else:
             [C_out, C_in, t, kernel_size, kernel_size] = self.conv.weight.shape
-
             # only CD works on temporal kernel size>1
             if self.conv.weight.shape[2] > 1:
-                kernel_diff = self.conv.weight[:, :, 0, :, :].sum(2).sum(2) + self.conv.weight[:, :, 2, :, :].sum(
-                    2).sum(2)
+                kernel_diff = self.conv.weight[:, :, 0, :, :].sum(2).sum(2) + self.conv.weight[:, :, 2, :, :].sum(2).sum(2)
                 kernel_diff = kernel_diff[:, :, None, None, None]
-                out_diff = F.conv3d(input=x, weight=kernel_diff, bias=self.conv.bias, stride=self.conv.stride,
-                                    padding=0, dilation=self.conv.dilation, groups=self.conv.groups)
+                out_diff = F.conv3d(input=x, 
+                                    weight=kernel_diff, 
+                                    bias=self.conv.bias, 
+                                    stride=self.conv.stride,
+                                    padding=0, 
+                                    dilation=self.conv.dilation, 
+                                    groups=self.conv.groups)
                 return out_normal - self.theta * out_diff
-
             else:
                 return out_normal
     
@@ -128,7 +141,6 @@ def conv_block(in_channels, out_channels, kernel_size, stride, padding, bn=True,
     elif activation == 'elu':
         layers.append(nn.ELU(inplace=True))
     return nn.Sequential(*layers)
-
 
 class PhysMamba(nn.Module):
     def __init__(self, theta=0.5, drop_rate1=0.25, drop_rate2=0.5, frames=128):

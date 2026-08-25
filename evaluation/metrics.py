@@ -34,10 +34,11 @@ def _reform_data_from_dict(data, flatten=True):
     sort_data = [i[1] for i in sort_data]
     sort_data = torch.cat(sort_data, dim=0)
 
+    # Convert to float32 before numpy conversion to handle bfloat16/float16 from AMP
     if flatten:
-        sort_data = np.reshape(sort_data.cpu(), (-1))
+        sort_data = np.reshape(sort_data.float().cpu(), (-1))
     else:
-        sort_data = np.array(sort_data.cpu())
+        sort_data = np.array(sort_data.float().cpu())
 
     return sort_data
 

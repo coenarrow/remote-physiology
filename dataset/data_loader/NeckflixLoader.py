@@ -15,15 +15,18 @@ from dataset.data_loader.BaseLoader import BaseLoader
 class NeckflixLoader(BaseLoader):
     """The data loader for the Neckflix dataset."""
 
-    def __init__(self, name, data_path, config_data,device=None):
+    def __init__(self, name, data_path, config_data, device=None,test_participants:list = [],get_raw_resized=False):
         """Initializes an Neckflix dataloader.
             Args:
         """
         self.inputs = list()
         self.labels = list()
+        self.name = name
         self.config_data = config_data
         self.cached_path = Path(self.config_data.CACHED_PATH)
         self.data_format = config_data.DATA_FORMAT
+        self.test_participants = test_participants
+        self.get_raw_resized = get_raw_resized
         # check if cuda is available
         if torch.cuda.is_available():
             self.device = "cuda"
@@ -39,7 +42,7 @@ class NeckflixLoader(BaseLoader):
 
     def __getitem__(self, index):
         raw_input, raw_label = self.load_recording(index=index)
-        input, label = self.process_item(raw_input, raw_label)
+        input, label, resized_input = self.process_item(raw_input, raw_label)
         # input shape is currently (D, C, H, W)
         if self.data_format == 'NDCHW':
             input = input
@@ -52,20 +55,23 @@ class NeckflixLoader(BaseLoader):
         filename = Path(self.inputs[index][0]).name
         chunk_id = self.inputs[index][1]
         label = label.squeeze()
-        return input, label, filename, chunk_id
+        if self.get_raw_resized:
+            return input, label, filename, chunk_id, resized_input
+        else:
+            return input, label, filename, chunk_id
 
     def get_cached_file_list(self):
         config_data = self.config_data
         selected_channels = config_data.PREPROCESS.NECKFLIX.CHANNELS
         selected_traces = config_data.PREPROCESS.NECKFLIX.TRACES
         selected_postures = config_data.PREPROCESS.NECKFLIX.POSTURES
-        with open(config_data.FOLD.FOLD_PATH, 'r') as f:
-            selected_participants = set(f.read().splitlines())
         cached_dir = Path(config_data.CACHED_PATH)
         selected_files = []
         for file in cached_dir.glob("*.hdf5"):
             participant = file.name.split('_')[0]
-            if participant not in selected_participants:
+            if self.name == 'train' and participant in self.test_participants:
+                continue
+            elif self.name == 'test' and participant not in self.test_participants:
                 continue
             posture = file.name.split('_')[3]
             if posture not in selected_postures:
@@ -95,7 +101,8 @@ class NeckflixLoader(BaseLoader):
                 raise ValueError("Not all selected channels are present in the HDF5 file.")
             for ch in selected_channels:
                 if not all(tr in f[ch] for tr in selected_traces):
-                    raise ValueError(f"Not all selected traces are present in channel {ch}.")
+                    raise ValueError(f"Expected {selected_traces} in {h5_filepath}\
+                    but missing in channel {ch}.")
 
             # Infer length from first trace of first channel
             n_total = f[selected_channels[0]][selected_traces[0]].shape[0]
@@ -150,15 +157,11 @@ class NeckflixLoader(BaseLoader):
         torch.Tensor: Resized frames of shape (N, C, new_height, new_width) on the specified device
         """
         # Convert numpy input to torch
-        frames = torch.from_numpy(frames).permute(0,3,1,2).to(self.device)
+        frames = torch.from_numpy(frames).permute(0,3,1,2)
         N, C, H, W = frames.shape
         new_height = self.config_data.PREPROCESS.RESIZE.H
         new_width = self.config_data.PREPROCESS.RESIZE.W
-        resized_frames = torch.empty((N, C, new_height, new_width),
-                                    dtype=frames.dtype, device=self.device)
-
-        for i in range(N):
-            resized_frames[i] = F.resize(frames[i], [new_height, new_width], antialias=True)
+        resized_frames = torch.nn.functional.interpolate(frames, size=(new_height, new_width), mode="bilinear", align_corners=False)
         return resized_frames
 
     def normalise_trace(self, raw_trace:np.ndarray, trace_type:str) -> np.ndarray:
@@ -187,13 +190,14 @@ class NeckflixLoader(BaseLoader):
         return raw_trace
 
     def process_item(self, input, label) -> tuple[np.ndarray, np.ndarray]:
-        processed_input = self.resize_frames(input)
+        resized_input = self.resize_frames(input)
+        processed_input = resized_input.clone()
 
         for process in self.config_data.PREPROCESS.DATA_TYPE:
             if process == 'Standardized':
-                processed_input = self.zstand(processed_input, exclude_mask=True, device=self.device)
+                processed_input = self.zstand(processed_input, exclude_mask=True)
             elif process == 'DiffNormalized':
-                processed_input = self.diffnorm(processed_input, exclude_mask=True, device=self.device)
+                processed_input = self.diffnorm(processed_input, exclude_mask=True)
             elif process == '':
                 pass
             else:
@@ -207,7 +211,7 @@ class NeckflixLoader(BaseLoader):
             processed_label.append(normed_trace)
 
         processed_label = np.stack(processed_label, axis=-1)
-        return processed_input, processed_label
+        return processed_input, processed_label, resized_input
 
     def load(self):
         self.config_data.PREPROCESS.NECKFLIX
@@ -227,11 +231,15 @@ class NeckflixLoader(BaseLoader):
                 else:
                     inputs.append((file.as_posix(), 0))
                     labels.append((file.as_posix(), 0))
+        begin_idx = int(len(inputs)*self.config_data.BEGIN)
+        end_idx = int(len(inputs)*self.config_data.END)
+        inputs = inputs[begin_idx:end_idx]
+        labels = labels[begin_idx:end_idx]
         self.inputs = inputs
         self.labels = labels
 
     @staticmethod
-    def diffnorm(frames, exclude_mask: bool = True, precision=torch.float32, device: str | torch.device = "cuda", eps: float = 1e-7):
+    def diffnorm(frames, exclude_mask: bool = True, precision=torch.float32, eps: float = 1e-7):
         """
         Input shape: (T, C, H, W) or (B, T, C, H, W), channel-first.
         Returns same shape and same type (torch or numpy). Values are float.
@@ -240,7 +248,7 @@ class NeckflixLoader(BaseLoader):
         x = torch.from_numpy(frames) if is_numpy else frames
         if x.ndim not in (4, 5):
             raise ValueError("frames must be 4D (T,C,H,W) or 5D (B,T,C,H,W)")
-        x = x.to(device=device, dtype=precision)
+        x = x.to(dtype=precision)
 
         # Axes
         tdim = 1 if x.ndim == 5 else 0
@@ -276,7 +284,7 @@ class NeckflixLoader(BaseLoader):
         return out
     
     @staticmethod
-    def zstand(frames, exclude_mask: bool = True, precision=torch.float32, device: str | torch.device = "cuda"):
+    def zstand(frames, exclude_mask: bool = True, precision=torch.float32):
         """
         Z-score standardization per channel for video tensors.
         Input shape: (T,C,H,W) or (B,T,C,H,W)
@@ -286,7 +294,7 @@ class NeckflixLoader(BaseLoader):
         x = torch.from_numpy(frames) if is_numpy else frames
         if x.ndim not in (4, 5):
             raise ValueError("frames must be 4D (T,C,H,W) or 5D (B,T,C,H,W)")
-        x = x.to(device=device, dtype=precision)
+        x = x.to(dtype=precision)
 
         # Identify dimensions
         cdim = 2 if x.ndim == 5 else 1

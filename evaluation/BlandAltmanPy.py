@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import math
 from scipy.stats import gaussian_kde
@@ -138,8 +138,8 @@ class BlandAltman():
         ax.axhline(self.mean_error,color='black',label='Mean Error')
         ax.axhline(self.CI95[0],color='black',linestyle='--',label='+95% Confidence Interval')
         ax.axhline(self.CI95[1],color='black',linestyle='--',label='-95% Confidence Interval')
-        ax.set_ylabel(x_label)
-        ax.set_xlabel(y_label)
+        ax.set_ylabel(y_label)
+        ax.set_xlabel(x_label)
         ax.set_title(the_title)
         if show_legend:
             ax.legend()
