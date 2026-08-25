@@ -4,11 +4,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=32G
 #SBATCH --gres=gpu:v100:2
 #SBATCH --time=2:00:00
-#SBATCH --output=logs/DeepPhys_UBFC_2GPU_%j.out
-#SBATCH --error=logs/DeepPhys_UBFC_2GPU_%j.err
+#SBATCH --output=logs/%j_DeepPhys_UBFC_2GPU.out
+#SBATCH --error=logs/%j_DeepPhys_UBFC_2GPU.err
 
 mkdir -p logs
 

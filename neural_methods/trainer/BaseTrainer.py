@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Variable
+from torch.nn.parallel import DistributedDataParallel as DDP
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter, MaxNLocator
 import os
@@ -14,8 +15,14 @@ class BaseTrainer:
         parser.add_argument('--model_file_name', default=None, type=float)
         return parser
 
-    def __init__(self):
-        pass
+    def __init__(self, rank=0, world_size=1, **kwargs):
+        self.rank = rank
+        self.world_size = world_size
+        self.is_main = (rank == 0)
+
+    def _unwrap_model(self):
+        """Returns the underlying model, unwrapping DDP if necessary."""
+        return self.model.module if isinstance(self.model, DDP) else self.model
 
     def train(self, data_loader):
         pass

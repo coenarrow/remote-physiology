@@ -12,10 +12,10 @@ TRAIN:
     DO_PREPROCESS: True
     DATA_FORMAT: NDCHW
     DATA_PATH: "/group/pgh004/carrow/zipped_datasets/UBFC-rPPG"
-    CACHED_PATH: "/group/pgh004/carrow/zipped_datasets/PreprocessedData"
-    EXP_DATA_NAME: ""
+    CACHED_PATH: "/group/pgh004/carrow/repo/rPPG-Toolbox/PreprocessedData/UBFC-rPPG_RhythmFormer"
+    EXP_DATA_NAME: "UBFC-rPPG_RhythmFormer"
     BEGIN: 0.0
-    END: 0.1
+    END: 0.8
     PREPROCESS :
       DATA_TYPE: ['Standardized']
       DATA_AUG: ['None']    # 'None' or 'Motion' is supported, used if the data path points to an augmented dataset or requires augmentation
@@ -41,8 +41,8 @@ VALID:
     DO_PREPROCESS: True
     DATA_FORMAT: NDCHW
     DATA_PATH: "/group/pgh004/carrow/zipped_datasets/UBFC-rPPG"
-    CACHED_PATH: "/group/pgh004/carrow/zipped_datasets/PreprocessedData"
-    EXP_DATA_NAME: ""
+    CACHED_PATH: "/group/pgh004/carrow/repo/rPPG-Toolbox/PreprocessedData/UBFC-rPPG_RhythmFormer"
+    EXP_DATA_NAME: "UBFC-rPPG_RhythmFormer"
     BEGIN: 0.8
     END: 0.9
     PREPROCESS :
@@ -72,8 +72,8 @@ TEST:
     DO_PREPROCESS: True
     DATA_FORMAT: NDCHW
     DATA_PATH: "/group/pgh004/carrow/zipped_datasets/UBFC-rPPG"
-    CACHED_PATH: "/group/pgh004/carrow/zipped_datasets/PreprocessedData"
-    EXP_DATA_NAME: ""
+    CACHED_PATH: "/group/pgh004/carrow/repo/rPPG-Toolbox/PreprocessedData/UBFC-rPPG_RhythmFormer"
+    EXP_DATA_NAME: "UBFC-rPPG_RhythmFormer"
     BEGIN: 0.9
     END: 1.0
     PREPROCESS :

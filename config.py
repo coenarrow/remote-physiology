@@ -13,11 +13,14 @@ _C = CN()
 
 # Base config files
 _C.BASE = ['']
+_C.DEBUG = False
 # -----------------------------------------------------------------------------
 # Train settings
 # -----------------------------------------------------------------------------\
 _C.TOOLBOX_MODE = ""
 _C.TRAIN = CN()
+_C.TRAIN.USE_AMP = True
+_C.TRAIN.AMP_DTYPE = 'bfloat16'
 _C.TRAIN.EPOCHS = 50
 _C.TRAIN.BATCH_SIZE = 4
 _C.TRAIN.LR = 1e-4
@@ -385,6 +388,17 @@ _C.MODEL.PHYSFORMER.THETA = 0.7
 _C.MODEL.PHYSHYDRA = CN()
 _C.MODEL.PHYSHYDRA.NUM_CHANNELS = 3
 _C.MODEL.PHYSHYDRA.NUM_LABELS = 1
+_C.MODEL.PHYSHYDRA.INTERPRETABLE = True
+_C.MODEL.PHYSHYDRA.PRESERVE_CHANNELS = True
+_C.MODEL.PHYSHYDRA.LAMBDA_SPARSITY = 0.01
+_C.MODEL.PHYSHYDRA.LAMBDA_SMOOTHNESS = 0.001
+_C.MODEL.PHYSHYDRA.SAVE_ATTENTION_MAPS = True
+_C.MODEL.PHYSHYDRA.W_CCC = 0.25
+_C.MODEL.PHYSHYDRA.W_MEAN = 0.1
+_C.MODEL.PHYSHYDRA.W_MAX = 0.2
+_C.MODEL.PHYSHYDRA.W_MIN = 0.2
+_C.MODEL.PHYSHYDRA.W_SPEC = 0.25
+
 
 # -----------------------------------------------------------------------------
 # Inference settings
