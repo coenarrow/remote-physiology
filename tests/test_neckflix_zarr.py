@@ -46,3 +46,30 @@ def test_main_still_imports_and_neckflix_unregistered():
     import main
     with pytest.raises(ValueError, match="Unsupported dataset"):
         main.get_loader_class("Neckflix")
+
+
+# --------------------------------------------------------------------------
+# End-to-end smoke: data loads through a real DataLoader
+# --------------------------------------------------------------------------
+def test_dataloader_end_to_end_smoke(tmp_path):
+    from torch.utils.data import DataLoader
+
+    make_store(tmp_path, "P030_S01_R1_0_D", num_frames=12)
+    make_store(tmp_path, "P031_S01_R1_45_D", num_frames=12)
+    ds = NeckflixDataset(base_cfg(tmp_path, window_size=4))
+    assert len(ds) == 6                                  # 2 recordings x 3 windows
+
+    batch = next(iter(DataLoader(ds, batch_size=4, shuffle=False)))
+    assert set(batch) == {"frames", "labels", "label_stats",
+                          "channel_mask", "label_mask", "metadata"}
+    for ch in ("R", "G", "B", "I", "D"):
+        assert batch["frames"][ch].shape == (4, 1, 4, 8, 8)
+        assert batch["frames"][ch].dtype == torch.float32
+        assert batch["channel_mask"][ch].dtype == torch.bool
+    for sig in ("ABP", "CVP"):
+        assert batch["labels"][sig].shape == (4, 4)
+        assert torch.isfinite(batch["labels"][sig]).all()
+        assert batch["label_stats"][sig]["mean"].shape == (4,)
+        assert batch["label_mask"][sig].all()
+    assert batch["metadata"]["recording_id"][0] == "P030_S01_R1_0_D"
+    assert batch["metadata"]["start_frame"].dtype == torch.int64
