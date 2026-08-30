@@ -71,7 +71,6 @@ LOADER_REGISTRY = {
     "UBFC-PHYS": data_loader.UBFCPHYSLoader.UBFCPHYSLoader,
     "iBVP": data_loader.iBVPLoader.iBVPLoader,
     "PhysDrive": data_loader.PhysDriveLoader.PhysDriveLoader,
-    "Neckflix": data_loader.NeckflixLoader.NeckflixLoader,
     "LADH": data_loader.LADHLoader.LADHLoader,
     "SUMS": data_loader.SUMSLoader.SUMSLoader,
 }
@@ -128,12 +127,6 @@ def create_dataset(loader_class, name, data_path, config_data, device,
         "config_data": config_data,
         "device": device,
     }
-    # Neckflix-specific parameters
-    if loader_class == data_loader.NeckflixLoader.NeckflixLoader:
-        if test_participants is not None:
-            kwargs["test_participants"] = test_participants
-        if name == "test":
-            kwargs["get_raw_resized"] = get_raw_resized
     return loader_class(**kwargs)
 
 
