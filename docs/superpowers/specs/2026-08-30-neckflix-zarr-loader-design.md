@@ -115,7 +115,9 @@ _CHANNEL_MAP = {
 `{cache_dir}/{recording}.zarr`, zarr v3 (written by `neckflix-preprocess` ≥1.0.0):
 
 - root attrs: `recording`, `participant`, `session`, `repeat`, `posture`,
-  `light`, `source_resolution`, `resized_to`, `tool_version`, `complete`.
+  `source_resolution`, `resized_to`, `tool_version`, `complete`. A store may
+  carry additional attrs; unreferenced attrs are ignored, and deviation 2
+  covers filters naming attrs a store lacks.
   **Value format:** `participant` is an *unprefixed* zero-padded string
   (e.g. `"030"`, from `P030_...` — the writer strips the `P`); the repo's
   P-prefixed convention (`--test_participants P030`) must be translated by
@@ -219,7 +221,7 @@ sample:
   (`"1"`/`"2"`), not root attrs. Filter values for `perspective` are
   `str()`-coerced before comparison, so the natural YAML spelling
   `include: [1]` works. All other attributes read root attrs (`participant`,
-  `posture`, `light`, `session`, `repeat`, ...) and compare as stored. Note the
+  `posture`, `session`, `repeat`, ...) and compare as stored. Note the
   store attr is named `posture` — configs filter on `posture`, not `position`.
 
 LOSO usage (by the future wiring code, and by tests) — note the unprefixed

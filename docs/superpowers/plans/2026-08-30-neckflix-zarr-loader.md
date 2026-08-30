@@ -433,7 +433,6 @@ def test_store_schema_matches_preprocessor_output(tmp_path):
     attrs = dict(root.attrs)
     assert attrs["participant"] == "030"          # unprefixed (spec: value format)
     assert attrs["posture"] == "0"
-    assert attrs["light"] == "D"
     assert attrs["recording"] == "P030_S01_R1_0_D"
     assert attrs["complete"] is True
     assert attrs["tool_version"] == TOOL_VERSION
@@ -516,7 +515,11 @@ TRACE_OFFSETS = {"abp": 100.0, "cvp": 5.0, "ecg": 0.5}
 
 
 def default_attrs(name):
-    """Root attrs derived from a P{NNN}_{session}_{repeat}_{posture}_{light} name."""
+    """Root attrs derived from a recording name like ``P030_S01_R1_0_D``.
+
+    ``posture`` is the second-to-last underscore token; the trailing token is
+    part of the name only and maps to no attr.
+    """
     parts = name.split("_")
     return {
         "recording": name,
@@ -524,7 +527,6 @@ def default_attrs(name):
         "session": parts[1],
         "repeat": parts[2],
         "posture": parts[-2],
-        "light": parts[-1],
         "source_resolution": [650, 650],
         "resized_to": None,
         "tool_version": TOOL_VERSION,
@@ -1372,12 +1374,12 @@ def test_attribute_values(tmp_path):
 
 
 def test_attribute_values_respects_filters_and_skips_missing(tmp_path):
-    make_store(tmp_path, "P030_S01_R1_0_D", attrs={"light": None})
+    make_store(tmp_path, "P030_S01_R1_0_D", attrs={"session": None})
     make_store(tmp_path, "P031_S01_R1_45_D")
     ds = NeckflixDataset(base_cfg(
         tmp_path, filters={"participant": {"include": [], "exclude": ["031"]}}))
     assert ds.attribute_values("participant") == ["030"]
-    assert ds.attribute_values("light") == []      # missing attr silently skipped
+    assert ds.attribute_values("session") == []    # missing attr silently skipped
 ```
 
 - [ ] **Step 2: Run to verify failures**
