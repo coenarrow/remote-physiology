@@ -4,6 +4,8 @@ import torch
 from dataset.data_loader.label_transforms import (
     EPS,
     STAT_NAMES,
+    apply_norm,
+    finite_stats,
     minmax,
     minmax_inverse,
     zscore,
@@ -79,3 +81,55 @@ def test_round_trip_exact_in_sub_eps_band():
     t = torch.full((8,), 3.0) + torch.linspace(0, EPS / 10, 8)
     normed, stats = zscore(t)
     assert torch.allclose(zscore_inverse(normed, stats), t, atol=1e-6)
+
+
+def test_finite_stats_all_finite_bit_identical_to_stats():
+    t = _trace()
+    fs = finite_stats(t)
+    _, zs = zscore(t)
+    for key in STAT_NAMES:
+        assert torch.equal(fs[key], zs[key])
+
+
+def test_apply_norm_bit_identical_to_verbatim_transforms():
+    t = _trace()
+    assert torch.equal(apply_norm(t, finite_stats(t), "zscore"), zscore(t)[0])
+    assert torch.equal(apply_norm(t, finite_stats(t), "minmax"), minmax(t)[0])
+
+
+def test_finite_stats_ignores_nans():
+    t = _trace()
+    dirty = t.clone()
+    dirty[3] = float("nan")
+    dirty[40] = float("inf")
+    keep = torch.ones_like(t, dtype=torch.bool)
+    keep[3] = keep[40] = False
+    fs = finite_stats(dirty)
+    clean = t[keep]
+    assert torch.equal(fs["mean"], clean.mean())
+    assert torch.equal(fs["std"], clean.std(correction=1))
+    assert torch.equal(fs["min"], clean.amin())
+    assert torch.equal(fs["max"], clean.amax())
+
+
+def test_finite_stats_all_nan_gives_zero_stats():
+    t = torch.full((8,), float("nan"))
+    fs = finite_stats(t)
+    assert all(v.item() == 0.0 for v in fs.values())
+    assert all(v.dim() == 0 for v in fs.values())
+
+
+def test_finite_stats_single_finite_entry_std_zero():
+    t = torch.full((8,), float("nan"))
+    t[2] = 42.0
+    fs = finite_stats(t)
+    assert fs["mean"].item() == 42.0
+    assert fs["std"].item() == 0.0          # not NaN
+    assert fs["min"].item() == 42.0
+    assert fs["max"].item() == 42.0
+
+
+def test_apply_norm_rejects_bad_mode():
+    t = _trace()
+    with pytest.raises(ValueError, match="mode"):
+        apply_norm(t, finite_stats(t), "fixed")
