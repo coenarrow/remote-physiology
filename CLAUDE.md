@@ -6,7 +6,7 @@ Extending the rPPG-Toolbox to support cardiovascular pressure waveform estimatio
 ## Quick Start
 - **Main entry points**: `main.py` (original), `neckflix_main.py` (Neckflix-specific)
 - **Run with**: `uv run python <script>.py --config_file <path/to/config.yaml>`
-- **SLURM scripts**: `z_slurm_scripts/` for HPC job submission
+- **SLURM scripts**: `.slurm_scripts/` for HPC job submission
 - **Configs**: `configs/train_configs/`, `configs/infer_configs/`, `physhydra_configs/`
 
 ## Repository Context
@@ -58,9 +58,9 @@ Extending the rPPG-Toolbox to support cardiovascular pressure waveform estimatio
 - **`physhydra_configs/`**: PhysHydra-specific configs (pressure estimation)
 
 ### HPC & Execution
-- **`z_slurm_scripts/`**: SLURM batch scripts for cluster jobs
-  - Current: `cvp_rgb.slurm`, `abp_rgb.slurm` (job arrays for LOSO)
-  - Pattern: Multi-GPU with `torch.distributed.run`
+
+- **`.slurm_scripts/`**: SLURM batch scripts for cluster jobs (multi-GPU via `torch.distributed.run`)
+- Partitions, GPU selection, and job submission: see the [running-hpc-jobs](.claude/skills/running-hpc-jobs/SKILL.md) skill
 
 ## Development Workflows
 
@@ -132,68 +132,9 @@ Extending the rPPG-Toolbox to support cardiovascular pressure waveform estimatio
 
 ### SLURM Job Management
 
-**Slurm Scripts**:
-Slurm scripts are to be saved to `.slurm_scripts/*.slurm`. New scripts should use existing scripts as templates.
-Logs should be saved in the following format:
-
-```
-#SBATCH --output=logs/%j_<Model>_<Datasets>_<Options>.out
-#SBATCH --output=logs/%j_<Model>_<Datasets>_<Options>.out
-```
-
-For example:
-
-```
-#SBATCH --output=logs/%j_DeepPhys_UBFC_2GPU.out
-#SBATCH --error=logs/%j_DeepPhys_UBFC_2GPU.err
-```
-
-Where the DeepPhys model is only being used on the UBFC dataset, and in this case uses the options of 2GPUs. 
-
-**Available GPU Resources**:
-
-| Partition | Max GPUs | Resource Flag | Notes |
-|-----------|----------|---------------|-------|
-| `gpu` | 2x V100 | `--gres=gpu:v100:N` | Development/testing (preferred) |
-| `pophealth` | 4x A100 | `--gres=gpu:a100:N` | Fallback for dev, production runs |
-| `medical` | 4x H100 | `--gres=gpu:h100:N` | Last resort for dev, primary for production |
-
-**GPU Scheduling for Development/Test Runs (<10 min expected runtime)**:
-
-When submitting short development or validation runs, follow this escalation order:
-1. **First choice**: Submit to `gpu` partition with V100s (2 GPU max)
-2. **If pending**: Cancel the job, resubmit to `pophealth` with A100s
-3. **If still pending**: Cancel the job, resubmit to `medical` with H100s
-4. **If all three are pending**: Go back to V100 (`gpu` partition) and let it queue
-
-Test runs should use **2 GPUs** — if it works on 2, we can assume it works on 3 and 4.
-
-**Multi-GPU Distributed Training**:
-- Adjust `--nproc_per_node` to match GPU count (2 for V100, up to 4 for H100/A100)
-- Port management: `PORT=$((29500 + (SLURM_JOB_ID % 1000)))` — always use dynamic ports to avoid collisions
-- Memory: Set `--mem` to the minimum required for the job (e.g., 64G for 2-GPU UBFC-rPPG runs). Never use `--mem=0` unless explicitly testing memory requirements.
-
-**LOSO Cross-Validation** (for journal reporting):
-```bash
-#SBATCH --partition=medical  # or pophealth
-#SBATCH --gres=gpu:h100:4    # adjust based on availability
-#SBATCH --array=1-57%1       # One job per participant
-PARTICIPANT=$(printf "P%03d" "${SLURM_ARRAY_TASK_ID}")
-uv run python -m torch.distributed.run --nproc_per_node=4 \  # match GPU count
-    neckflix_main.py --config_file <config> --test_participants "${PARTICIPANT}"
-```
-
-**Hyperparameter Sweeps** (development phase):
-- Use job arrays with config variations
-- Or integrate with Hydra/Weights & Biases for systematic sweeps
-- Consider V100 partition for quick iterative testing
-
-**Key practices**:
-- Logs go to `logs/` directory (auto-created)
-- Use `uv run` for dependency management
-- Load CUDA module: `module load cuda`
-- Working directory: `/group/pgh004/carrow/repo/rPPG-Toolbox`
-- **Config adjustments for different GPUs**: May need to modify image size, chunk length, batch size in YAML configs
+**Use the [running-hpc-jobs](.claude/skills/running-hpc-jobs/SKILL.md) skill.** It covers partition and GPU
+selection, `.slurm` script conventions and log naming, multi-GPU distributed training, LOSO job
+arrays, interactive sessions, monitoring, and troubleshooting.
 
 ## Key Files and Conventions
 
@@ -264,7 +205,7 @@ uv run python neckflix_main.py --config_file path/to/config.yaml \
 **Models**: PascalCase (e.g., `PhysMamba.py`, `PhysFormer.py`)
 **Trainers**: `<Model>Trainer.py` (e.g., `PhysMambaTrainer.py`)
 **Configs**: `<DATASET>_<TASK>_<MODEL>.yaml` or semantic names
-**SLURM scripts**: `<task>_<modality>.slurm` (e.g., `cvp_rgb.slurm`)
+**SLURM scripts**: `<Dataset>_<Model>_<Options>.slurm` (e.g., `UBFC-rPPG_DeepPhys_2GPU.slurm`)
 
 ### Git Workflow
 
@@ -283,35 +224,8 @@ uv run python neckflix_main.py --config_file path/to/config.yaml \
 
 **IMPORTANT**: We are on a **login node** - NEVER run computational tasks directly. Always use SLURM.
 
-**Interactive testing** (for development/debugging):
-```bash
-# Request interactive session
-salloc --job-name=Interactive_Session --partition=pophealth \
-    --nodes=1 --mem=160000 --ntasks=16 --gres=gpu:a100:1 --time=5:00:00
-
-# Once allocated, load CUDA and run
-module load cuda
-cd /mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox
-uv run python neckflix_main.py --config_file physhydra_configs/physHydra_RGB_CVP.yaml
-```
-
-**SLURM batch submission** (for production runs):
-```bash
-cd /mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox
-sbatch z_slurm_scripts/cvp_rgb.slurm
-```
-
-**Monitor jobs**:
-```bash
-squeue -u $USER                    # Check job status
-tail -f logs/<jobname>_<id>.out   # Follow log output
-scancel <jobid>                    # Cancel job
-```
-
-**Interactive session options**:
-- **Quick tests**: V100 on gpu/pophealth partition (2 GPUs max)
-- **Development**: A100 on pophealth (up to 4 GPUs)
-- **Full scale**: H100 on medical via sbatch (4 GPUs)
+See the [running-hpc-jobs](.claude/skills/running-hpc-jobs/SKILL.md) skill for `sbatch` submission, `salloc`
+interactive sessions, and job monitoring.
 
 ### Preprocessing Data
 
@@ -355,20 +269,8 @@ TRAIN:
 
 ### Debugging Distributed Training
 
-**Common issues**:
-- **Port conflicts**: Ensure unique ports per job
-  ```bash
-  PORT=$((29500 + (SLURM_JOBID % 1000) + SLURM_ARRAY_TASK_ID))
-  ```
-- **GPU count mismatch**: `--nproc_per_node` must match `--gres` GPU count
-- **CUDA module**: Always `module load cuda` in SLURM scripts and interactive sessions
-- **Memory issues**: Check logs for OOM errors, reduce batch size or image resolution
-
-**Debugging workflow**:
-1. Use `salloc` for interactive session with single GPU
-2. Test with smaller config (lower resolution, shorter chunks)
-3. Check logs in `logs/` directory for errors
-4. Scale up to multi-GPU via sbatch once working
+Port conflicts, GPU count mismatches, missing CUDA modules, and OOM errors are covered in the
+[running-hpc-jobs](.claude/skills/running-hpc-jobs/SKILL.md) skill.
 
 ### Experiment Tracking
 
@@ -430,8 +332,6 @@ Additional datasets will be added to `/group/pgh004/carrow/zipped_datasets/` ove
 - HDF5 storage format vs individual video files
 - Preprocessing scripts in Neckflix repo: `preprocess.py`, `simple_preprocess.py`
 
-**Integration status**: See [.claude/plans/project-roadmap.md](.claude/plans/project-roadmap.md)
-
 ### Pressure Estimation vs Heart Rate
 
 **Key differences**:
@@ -439,12 +339,6 @@ Additional datasets will be added to `/group/pgh004/carrow/zipped_datasets/` ove
 - **Loss functions**: Waveform regression loss vs rate estimation loss
 - **Metrics**: Morphology, pressure ranges, clinical agreement (TBD)
 - **Temporal resolution**: Higher sampling rate for waveform details
-
-**Models under development**: See [.claude/plans/project-roadmap.md](.claude/plans/project-roadmap.md)
-
-### Current Development Status
-
-See [.claude/plans/project-roadmap.md](.claude/plans/project-roadmap.md) for the full project roadmap (completed, in progress, and to-do items).
 
 ### Known Issues and Considerations
 
@@ -455,7 +349,7 @@ See [.claude/plans/project-roadmap.md](.claude/plans/project-roadmap.md) for the
 
 **Config management**:
 - Multiple config systems in use (YAML + Hydra)
-- See `physhydra_configs/` and `test_config_hydra.yaml`
+- Hydra configs live in `physhydra_configs/`
 - Config files now saved to output directories (recent change)
 
 **Data synchronization**:
@@ -493,16 +387,8 @@ See [.claude/plans/project-roadmap.md](.claude/plans/project-roadmap.md) for the
 
 ### HPC Environment
 
-**Cluster**: HPC environment with SLURM scheduler
-
-**Modules**:
-- CUDA: `module load cuda` (required for GPU jobs)
-
-**Partitions and resources**: See "SLURM Job Management" section above
-
-**File paths**:
-- Working directory: `/mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox`
-- Group storage: `/group/pgh004/` (accessible in SLURM jobs)
+SLURM cluster. Partitions, modules, GPU resources, and cluster paths are documented in the
+[running-hpc-jobs](.claude/skills/running-hpc-jobs/SKILL.md) skill.
 
 ### Python Environment
 
@@ -532,32 +418,13 @@ See README.md for dataset structure and citations.
 
 ### Useful Commands
 
-**SLURM**:
-```bash
-squeue -u $USER              # Check your jobs
-sinfo -p medical             # Check partition status
-scancel <jobid>              # Cancel job
-scontrol show job <jobid>    # Job details
-```
-
-**Interactive sessions**:
-```bash
-salloc --partition=pophealth --gres=gpu:a100:1 --time=2:00:00
-exit  # When done with interactive session
-```
+**SLURM, interactive sessions, and job monitoring**: see the [running-hpc-jobs](.claude/skills/running-hpc-jobs/SKILL.md) skill.
 
 **Git**:
 ```bash
 git log --oneline -10        # Recent commits
 git status                   # Current changes
 git diff                     # View modifications
-```
-
-**Monitoring**:
-```bash
-watch -n 1 squeue -u $USER   # Auto-refresh job queue
-tail -f logs/*.out           # Follow log output
-nvidia-smi                   # GPU status (in compute session only)
 ```
 
 ---
@@ -570,4 +437,4 @@ nvidia-smi                   # GPU status (in compute session only)
 
 **Debug job**: Check `logs/<job>.err` → Test with `salloc` → Adjust config/code
 
-**Last updated**: 2026-02-09
+**Last updated**: 2026-08-30
