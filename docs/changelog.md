@@ -6,6 +6,164 @@ This file tracks development milestones. As of 2026-08-25 all branches (HPC, Mac
 
 ---
 
+## 2026-08-31 — Branch: `main`
+
+Carried the Neckflix loader's dicts through the whole pipeline; got all seven
+unsupervised methods and PhysMamba running on the zarr cache.
+
+Design: `docs/superpowers/specs/2026-08-31-neckflix-dict-contract-design.md`.
+
+### The contract
+- `neural_methods/batch.py`: the batch-dict key names and the two einops shape
+  moves (`stack_frames`, `split_signals`) plus their inverses and traversal
+  helpers. A model now returns *the input dict plus* `predictions`, so frames,
+  labels, stats, masks, metadata and predictions travel together, each
+  identifiable by key.
+- `neural_methods/model/DictModel.py`: base class owning channel/trace order and
+  the frame transform. Subclasses implement only
+  `forward_video(video) -> (B, S, T)`. A plain tensor in still gets a plain
+  tensor out, so the upstream tuple-contract trainers are unaffected.
+- `neural_methods/frame_transforms.py`: `DATA_TYPE`
+  (Raw/Standardized/DiffNormalized, concatenated along channels) and spatial
+  resize moved consumer-side, since the zarr loader emits raw pixels.
+- Every reshape in new or touched code is einops.
+
+### Models and training
+- `PhysMamba` is a `DictModel`: configurable input channels and output signals,
+  `AdaptiveAvgPool3d((None, 1, 1))` so one model serves any `CHUNK_LENGTH`,
+  einops throughout. Architecture unchanged.
+- `SignalDictWrapper` rebuilt as a `DictModel` adapter (`frames2d` / `video3d`),
+  which is how DeepPhys joins the contract untouched.
+- `neural_methods/trainer/MultiSignalTrainer.py`: one trainer for every
+  dict-contract model, driven by `MODEL_REGISTRY` (PhysMamba, DeepPhys). Masked
+  multi-signal loss, DDP, AMP, signal-keyed saved outputs, and per-signal
+  metrics reported in both normalised and **physical** units (mmHg for ABP/CVP,
+  via each window's own `label_stats` and the exact inverse of its
+  normalisation).
+- `mamba_compat.MambaRef`: pure-PyTorch selective-SSM block used where
+  `mamba_ssm` has no wheel (Windows), so PhysMamba is runnable and testable
+  everywhere. Fused CUDA path untouched where the package exists; warns once
+  about the memory cost of materialising the hidden state.
+
+### Wiring
+- `neckflix_main.py` rebuilt around the zarr loader: LOSO by participant filter,
+  optional DDP, `--valid_participants`, `--limit_windows` for smoke runs, and a
+  refusal when `USE_LAST_EPOCH: False` has no validation split to select on
+  (which would otherwise silently test epoch 0).
+- `dataset/data_loader/neckflix_config.py`: yacs -> loader plain-dict
+  translation, including `P015` -> `"015"`.
+- `config.py`: `CHUNK_STRIDE`, `TRAIN.LOSS`, and `NECKFLIX.{LABEL_NORM,
+  ALLOW_MISSING, MIN_CHANNELS, MIN_LABELS, PERSPECTIVES, LIGHT, SESSIONS,
+  PARTICIPANTS}`, added uniformly to all four data blocks.
+- Configs: `configs/neckflix/NECKFLIX_UNSUPERVISED.yaml`,
+  `NECKFLIX_PHYSMAMBA.yaml`, `NECKFLIX_PHYSMAMBA_SMOKE.yaml`.
+- `tools/list_neckflix_folds.py` enumerates LOSO folds (metadata-only, login-node
+  safe); `tools/summarise_neckflix_outputs.py` turns a saved test pickle into a
+  per-window table and per-signal summary offline (replacing the broken
+  `neckflix_metrics.py` scratch file's job); SLURM scripts for the unsupervised
+  sweep, a LOSO array, and a 4-GPU fold.
+
+### Unsupervised methods — three were hard-broken by NumPy 2
+- **POS** and **ICA** used `np.mat`, removed in NumPy 2.0. Rewritten on plain
+  ndarrays with einops reshapes; pinned in tests against frozen pre-NumPy-2
+  originals (`tests/reference/`) to 1e-10 / 1e-8.
+- **PBV** relied on `linalg.solve` treating a 2-D right-hand side as a stack of
+  vectors, which NumPy 2.0 changed to a matrix solve. Fixed with an explicit
+  trailing axis.
+- POS's per-frame overlap-add is now a strided sliding window (~960x faster);
+  GREEN/LGI/OMIT/CHROM reshapes moved to einops.
+- `unsupervised_predict` accepts both dataset contracts and, for Neckflix,
+  scores each window against **every** trace the recording carries (ABP/CVP/ECG),
+  honouring `label_mask`. `unsupervised_predict_many` runs all seven methods in
+  one pass over the data.
+- `evaluation/metrics_report.py` extracted so both predictors share the metric
+  aggregation.
+- A fourth `np.mat` break sat outside `unsupervised_methods/`:
+  `BaseLoader.generate_pos_psuedo_labels` and its verbatim twin in
+  `BP4DPlusBigSmallLoader` each carried an inline copy of POS, so
+  `USE_PSUEDO_PPG_LABEL: True` was broken for every dataset. Both now call the
+  shared `POS_WANG.pos_signal`, pinned to the original to 1e-10.
+
+### Shared post-processing (exact-equivalent, much faster)
+- `_detrend`: the smoothness-priors detrend built a dense n x n matrix and
+  inverted it. `I + lambda^2 D'D` is symmetric pentadiagonal, so it is now a
+  banded Cholesky solve — O(n) instead of O(n^3), 0.75 s -> 0.09 ms at n=300,
+  matching the dense form to 5e-11. Benefits every dataset.
+- `_compute_macc`: the per-lag `corrcoef` loop is one circular cross-correlation;
+  by FFT it is bit-identical and ~350x faster.
+
+### Robustness fixes surfaced by running it
+- Bland-Altman plots survive degenerate data (`gaussian_kde` raises on a
+  singular covariance; density colouring now degrades to a constant).
+- The HR report says *why* Pearson is undefined instead of printing
+  `nan +/- nan`.
+- `MultiSignalTrainer` indexes its GPU by `LOCAL_RANK`, not the global rank
+  (multi-node correctness), and honours `DEVICE: cpu`; `neckflix_main` picks the
+  DDP backend from where the model will actually live.
+
+### mamba-ssm now builds on Windows (native, no WSL)
+Three independent blockers, all confirmed rather than guessed:
+- **No Windows wheel exists.** PyPI carries an sdist only; the GitHub release
+  assets are `linux_x86_64` / `linux_aarch64`. Windows must compile
+  `selective_scan_cuda` itself.
+- **`triton` is unsatisfiable on Windows** — wheels-only on PyPI, zero Windows
+  files, no sdist — and `selective_scan_interface` imports it unguarded. This
+  bites before any compiler runs: uv resolves, then refuses to install anything.
+  Fixed with `triton-windows` (the same 3.2 series torch 2.6 pairs with, which
+  imports as `triton`) plus `override-dependencies` confining `triton` to Linux.
+- **The CUDA sources do not compile with MSVC.** `#ifndef USE_ROCM` sits inside a
+  `BOOL_SWITCH(...)` macro argument (UB; GCC accepts it, MSVC/EDG says `"#" not
+  expected here`); `M_LOG2E` needs `_USE_MATH_DEFINES`; and `BOOL_SWITCH` passes
+  an enclosing `constexpr` as a template argument from inside a lambda, which
+  needs `/Zc:lambda` (`error C2975`).
+
+`vendor/mamba-ssm` is upstream 2.3.1 with those three fixes, regenerated and
+verifiable by `tools/vendor_mamba_windows.py` (`--check`). `pyproject.toml`
+points `mamba-ssm` there **only** under `sys_platform == 'win32'`; the lock keeps
+separate entries for linux-x86_64 (PyPI 2.3.1) and aarch64 (2.3.2.post1), so HPC
+resolution is unchanged. `causal-conv1d` needed no patch, only the marker
+widened. `uv sync` builds both in ~21 min and caches the result.
+
+Verified against a Quadro RTX 5000 (sm_75), CUDA 12.4, MSVC 14.44:
+- Kernel correctness: `selective_scan_cuda` vs `selective_scan_ref`, forward
+  2.8e-05 on a signal of scale 168, worst gradient 3.0e-04 — fp32
+  accumulation-order noise.
+- PhysMamba at the production 128x128x128: **229 ms/step and 1.38 GiB**, against
+  1959 ms and 5.13 GiB for the `MambaRef` fallback — 8.6x faster, 3.7x smaller.
+
+### A latent bug this exposed
+Installing `mamba-ssm` made PhysMamba and PhysHydra unrunnable on CPU — the
+fused kernels raise `Expected x.is_cuda() to be true` — so 24 CPU tests failed
+on exactly the machines that have the fast path. That was already true of the
+HPC; Windows had been passing only because `MambaRef` stood in.
+`mamba_compat.PortableMamba` subclasses `Mamba` and runs the reference math over
+*the same module's own weights* off CUDA. The parameter sets are provably
+identical (strict `load_state_dict` both ways), so there is one checkpoint and
+one parameter set, and the two paths agree to 1e-07 in output and 4e-06 in
+gradients.
+
+### Verified
+- 241 tests pass, none skipped, with `mamba_ssm` installed — the parallel-scan
+  test that used to skip for want of the package now runs against it. Included
+  is a regression test that drives the real `PhysMambaTrainer` over the upstream
+  tuple contract, since PhysMamba and the post-processing both changed
+  under the non-Neckflix datasets.
+- All seven unsupervised methods over 1243 real windows (44 participants), the
+  whole sweep in ~4 minutes on CPU. Best HR agreement against the ABP reference:
+  CHROM (MAE 3.83 bpm, Pearson 0.64), POS (4.12, 0.62), ICA (5.79, 0.48);
+  GREEN and PBV worst (~9.4). CVP and ECG references agree far less well, as
+  expected — ABP is a pressure pulse, whereas an FFT "HR" from CVP or from
+  bandpassed ECG is unreliable. The per-signal table says so rather than
+  averaging them together.
+- PhysMamba trains and tests end to end on the real cache predicting ABP + CVP +
+  ECG together, on CPU at 32x32 and on GPU at the production 128x128x128. A
+  small learning check (8 epochs, 600 windows at 72x72, P015 held out) takes the
+  loss from ~0.99 to ~0.40 and reaches ABP waveform Pearson 0.76 / MACC 0.87 /
+  HR MAE 8.7 bpm on the unseen subject -- untuned, but well clear of chance, and
+  ordered ABP > CVP > ECG exactly as the unsupervised baselines suggest.
+
+---
+
 ## 2026-08-25 — Branch: `main`
 
 Unified branches, wired local Neckflix subset, replaced the vendored mamba fork.

@@ -64,24 +64,34 @@ Extending the rPPG-Toolbox to support cardiovascular pressure waveform estimatio
 
 ## Development Workflows
 
-### Adding a New Dataset (Neckflix Integration)
+### Adding a New Dataset
 
 **Pattern**: Follow `dataset/data_loader/BaseLoader.py` interface
 
-1. **Create loader**: `dataset/data_loader/NeckflixLoader.py`
+1. **Create loader**: `dataset/data_loader/<Name>Loader.py`
 2. **Implement required methods**:
    - `preprocess_dataset(config_preprocess)`: Convert raw data to preprocessed format
-   - `read_video(video_file)`: Load video frames (multimodal: RGB/IR/Depth)
-   - `read_wave(bvp_file)`: Load physiological traces (ABP/CVP/ECG from HDF5)
+   - `read_video(video_file)`: Load video frames
+   - `read_wave(bvp_file)`: Load the physiological trace
 3. **Optional overrides**: `__len__`, `__getitem__`, `save`, `load` (generally not recommended)
-4. **Update config.py**: Add dataset parameters and paths
+4. **Register** in `main.py`'s `LOADER_REGISTRY`
 5. **Create YAML configs**: Define preprocessing and training parameters
 
-**Neckflix-specific considerations**:
-- HDF5 storage format with `hdf5plugin` for compression
-- Multiple camera modalities (RGB, IR, Depth) synchronized with traces
-- Pressure waveforms (ABP, CVP) require different preprocessing than PPG
-- See `/mmfs1/data/group/pgh004/carrow/repo/Neckflix` for preprocessing examples
+**Neckflix does NOT follow this pattern.** Its cache is an external input (zarr
+stores written by `ghcr.io/coenarrow/neckflix`), so `NeckflixDataset` is a lazy
+`torch.utils.data.Dataset` over that cache with no preprocessing step of its
+own, and it emits nested dicts rather than the tuple contract. It is reached
+through `neckflix_main.py`, not `main.py`. See **The Neckflix Batch-Dict
+Contract** below and `docs/architecture.md`.
+
+**A second zarr-cached dataset** needs only a `channel_map`:
+
+```python
+class MyDataset(BaseZarrDataset):
+    @property
+    def channel_map(self):
+        return {"R": ("rgb", 0), "G": ("rgb", 1), "B": ("rgb", 2)}
+```
 
 ### Adding a New Neural Model
 
@@ -156,10 +166,26 @@ arrays, interactive sessions, monitoring, and troubleshooting.
 - **`METRICS`**: List of evaluation metrics ['MAE', 'RMSE', 'MAPE', 'Pearson', 'SNR', 'BA']
 - **`LOG.PATH`**: Output directory for runs (default: `runs/exp`)
 
-**For Neckflix/Pressure estimation**:
-- See `physhydra_configs/` for examples
-- May need custom parameters for multimodal inputs
-- Pressure waveform-specific preprocessing settings
+**For Neckflix/Pressure estimation**: see `configs/neckflix/`. Keys the zarr
+loader reads (all four data blocks carry them):
+
+- `PREPROCESS.CHANNELS` -- ordered camera channels, subset of `R,G,B,I,D`
+- `PREPROCESS.TRACES` -- signals to predict, e.g. `['ABP','CVP','ECG']`
+- `PREPROCESS.CHUNK_LENGTH` / `CHUNK_STRIDE` -- window size and stride in frames
+  (stride `0` means "no overlap")
+- `PREPROCESS.RESIZE.H/W` -- what the model sees; resizing happens
+  consumer-side, so it need not match the cache resolution
+- `PREPROCESS.DATA_TYPE` -- `Raw` / `Standardized` / `DiffNormalized`, applied
+  consumer-side and concatenated along channels if several are listed
+- `NECKFLIX.LABEL_NORM` -- `zscore` or `minmax`, per window
+- `NECKFLIX.ALLOW_MISSING` / `MIN_CHANNELS` / `MIN_LABELS` -- keep recordings
+  that lack some traces (the normal case: trace coverage varies per recording)
+- `NECKFLIX.POSTURES` / `PERSPECTIVES` / `LIGHT` / `SESSIONS` / `PARTICIPANTS` --
+  attribute include filters; `[]` means no filter
+- `TRAIN.LOSS` -- `negpearson` or `mse`, the base of the masked multi-signal loss
+
+`DO_PREPROCESS`, `BEGIN`/`END`, `FILE_LIST_PATH` and the face-detection block do
+nothing for Neckflix.
 
 ### Python Entry Points
 
@@ -167,10 +193,11 @@ arrays, interactive sessions, monitoring, and troubleshooting.
 - Supports all standard datasets (UBFC-rPPG, PURE, SCAMPS, etc.)
 - Both supervised and unsupervised methods
 
-**`neckflix_main.py`**: Neckflix-specific entry
-- Custom handling for HDF5 multimodal data
-- Pressure waveform-specific logic
-- Distributed training support via `torch.distributed.run`
+**`neckflix_main.py`**: Neckflix entry (zarr cache, batch-dict contract)
+- LOSO splits by participant filter (`--test_participants P015`), no percentage slicing
+- DDP optional: used under `torch.distributed.run`, skipped otherwise
+- `--limit_windows N` subsamples evenly for smoke runs
+- Modes: `train_and_test`, `only_test`, `unsupervised_method`
 
 **Usage**:
 ```bash
@@ -282,33 +309,91 @@ Port conflicts, GPU count mismatches, missing CUDA modules, and OOM errors are c
 
 **File lists**: Check `CACHED_PATH/DataFileLists/` for train/val/test splits used
 
-### Working with HDF5 Data (Neckflix)
+### The Neckflix Batch-Dict Contract
 
-**Dependencies**: `hdf5plugin` for compressed HDF5 support
+Everything downstream of the Neckflix loader passes nested dicts keyed by
+canonical channel and signal names, so any tensor is identifiable by its key at
+any point. `neural_methods/batch.py` owns the key names and the shape moves.
 
-**Pattern** (see `/mmfs1/data/group/pgh004/carrow/repo/Neckflix` for examples):
+**Per sample** (dataset `__getitem__`; `default_collate` adds the batch axis):
+
 ```python
-import h5py
-import hdf5plugin
-
-with h5py.File('data.h5', 'r') as f:
-    video = f['RGB'][:]      # Load RGB frames
-    ir = f['IR'][:]          # Load IR frames
-    depth = f['DEPTH'][:]    # Load depth frames
-    abp = f['ABP'][:]        # Load ABP trace
-    cvp = f['CVP'][:]        # Load CVP trace
+{"frames":       {ch:  (1, T, H, W) float32},   # raw pixels, zero-filled where absent
+ "labels":       {sig: (T,)         float32},   # per-window normalised
+ "label_stats":  {sig: {stat: ()    float32}},  # physical units, for exact inversion
+ "channel_mask": {ch:  ()           bool},      # True = real data, not zero fill
+ "label_mask":   {sig: ()           bool},
+ "metadata":     {"recording_id": str, "camera_id": str, "start_frame": int}}
 ```
 
-**Preprocessing considerations**:
-- Multiple modalities may have different frame rates
-- Synchronization between video and physiological traces critical
-- Chunk-based processing for memory efficiency
+**Through a model** -- the same dict comes back with `predictions` added:
+
+```python
+out = model(batch)
+out["predictions"]                  # {signal: (B, T)}
+out["frames"] is batch["frames"]    # nothing is dropped in transit
+```
+
+**Rules**
+- Channel and signal *order* lives on the model (`model.channels`,
+  `model.traces`); dict iteration order is never load-bearing.
+- **Use einops for every reshape** (`rearrange` / `reduce` / `einsum`), not
+  `view` / `permute` / `reshape`.
+- Frame preprocessing is consumer-side: the loader emits raw pixels and
+  `neural_methods/frame_transforms.py` applies `DATA_TYPE` + resize, carried by
+  the model.
+- `label_mask` is load-bearing, not an edge case: trace coverage genuinely
+  varies per recording, and `MaskedMultiSignalLoss` makes an absent signal
+  contribute exactly 0 rather than NaN.
+
+**Reading the cache directly** (for inspection):
+
+```python
+import zarr
+root = zarr.open_group("/path/to/cache/P015_S01_R3_0_D.zarr", mode="r")
+dict(root.attrs)                      # recording, participant "015", posture, ...
+root["1"]["rgb"]["video"]["frames"]   # (C, T, H, W) uint8
+root["1"]["rgb"]["abp"]["data"]       # (T,) float64, physical units
+```
+
+### Running Neckflix experiments
+
+```bash
+# All seven unsupervised methods (CPU), scored per trace
+uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
+
+# PhysMamba, one LOSO fold
+uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
+
+# Multi-GPU
+uv run python -m torch.distributed.run --nproc_per_node=4 neckflix_main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
+
+# Enumerate LOSO folds (metadata-only; safe on a login node)
+uv run python tools/list_neckflix_folds.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --prefix P
+
+# Summarise a finished run (per-signal, physical units; --by adds participant etc.)
+uv run python tools/summarise_neckflix_outputs.py runs/neckflix_physmamba --by signal participant --csv windows.csv
+
+# Smoke run before submitting anything
+uv run python neckflix_main.py --limit_windows 8 --test_participants P015 --config_file configs/neckflix/NECKFLIX_PHYSMAMBA_SMOKE.yaml
+```
+
+**Adding a model to the Neckflix pipeline**: no new trainer needed.
+`MultiSignalTrainer` serves every dict-contract model.
+1. Make the architecture a `DictModel` implementing
+   `forward_video(video) -> (B, S, T)`, taking its width from
+   `self.in_channels` / `self.out_signals`. A per-frame 2-D backbone needs no
+   change at all -- wrap it in `SignalDictWrapper(..., input_mode='frames2d')`.
+2. Add a builder to `MODEL_REGISTRY` in
+   `neural_methods/trainer/MultiSignalTrainer.py`.
+3. Point a config at it with `MODEL.NAME`.
 
 ## Dataset Locations
 
 | Dataset | Path | Notes |
 |---------|------|-------|
-| Neckflix | `/group/pgh004/carrow/repo/Neckflix/dataset` | HDF5 multimodal (RGB/IR/Depth + ABP/CVP/ECG) |
+| Neckflix (raw) | `/group/pgh004/carrow/repo/Neckflix/dataset` | Raw captures; input to the external preprocessor |
+| Neckflix (zarr cache) | set by `CACHED_PATH` | One `*.zarr` per recording; what this repo reads |
 | PURE | `/group/pgh004/carrow/zipped_datasets/PURE` | Standard rPPG dataset |
 | UBFC-rPPG | `/group/pgh004/carrow/zipped_datasets/UBFC-rPPG` | Standard rPPG dataset |
 
@@ -318,19 +403,27 @@ Additional datasets will be added to `/group/pgh004/carrow/zipped_datasets/` ove
 
 ### Neckflix Dataset Characteristics
 
-**Location**: `/group/pgh004/carrow/repo/Neckflix/dataset`
+**What this repo reads**: a zarr cache, one store per recording, written by the
+external preprocessor (`ghcr.io/coenarrow/neckflix` >= 1.0.0) and pointed at by
+`CACHED_PATH`. This repo never writes it. Stores are admitted only if their root
+attrs carry `complete: true` and `tool_version >= 1.0.0`; anything else is
+skipped with a warning (pre-1.0.0 frames were delta-encoded and would decode to
+garbage).
 
-**Data format**: HDF5 with compression via `hdf5plugin`
+**Store layout**: `{recording}.zarr` -> perspective (`"1"`/`"2"`) -> stream
+(`rgb`/`ir`/`depth`) -> `video/frames` `(C, T, H, W)` plus `{abp,cvp,ecg}/data`
+`(T,)` in physical units, index-aligned to the frames. Root attrs carry
+`participant` **unprefixed** (`"015"`, not `P015`).
 
-**Modalities**:
-- **Video**: RGB, IR (Infrared), Depth, IR_RAW, DEPTH_RAW, EV (Event camera)
-- **Physiological traces**: ABP (Arterial Blood Pressure), CVP (Central Venous Pressure), ECG
+**Modalities**: RGB, IR, Depth. **Traces**: ABP, CVP, ECG.
 
 **Key differences from standard rPPG datasets**:
 - Multimodal camera inputs (not just RGB)
 - Pressure waveforms instead of/in addition to PPG
-- HDF5 storage format vs individual video files
-- Preprocessing scripts in Neckflix repo: `preprocess.py`, `simple_preprocess.py`
+- **Trace coverage varies per recording** -- some have ABP+CVP, some CVP+ECG,
+  some all three. `ALLOW_MISSING` + `label_mask` is the normal configuration.
+- Two camera perspectives per recording, treated as independent samples
+- Splits are participant filters, not `BEGIN`/`END` percentages
 
 ### Pressure Estimation vs Heart Rate
 
@@ -393,9 +486,28 @@ SLURM cluster. Partitions, modules, GPU resources, and cluster paths are documen
 ### Python Environment
 
 **Package manager**: `uv` (fast Python package manager)
-- Install dependencies: Handled by `setup.sh uv`
+- Install dependencies: `uv sync` (the older `setup.sh uv` predates `pyproject.toml`)
 - Run scripts: `uv run python <script.py>`
 - Virtual env: `.venv/` (auto-managed by uv)
+
+**Platform split for the Mamba kernels** — `mamba-ssm` publishes Linux wheels
+only, and its CUDA sources do not compile with MSVC as published:
+
+| | source of `mamba-ssm` | `causal-conv1d` | `triton` |
+|---|---|---|---|
+| Linux | PyPI (prebuilt wheel via its `setup.py`) | PyPI sdist | PyPI |
+| Windows | `vendor/mamba-ssm` (patched, compiled here) | PyPI sdist | `triton-windows` |
+| macOS | `mamba-ssm-macos` | — | — |
+
+`tools/vendor_mamba_windows.py` regenerates the vendored tree and documents the
+three patches; `--check` verifies it still matches upstream. Do not hand-edit
+`vendor/mamba-ssm`. `override-dependencies` in `pyproject.toml` confines
+`triton` to Linux — without it nothing installs on Windows at all, since
+`triton` has neither a Windows wheel nor an sdist.
+
+Where no `mamba_ssm` is installed, `mamba_compat.MambaRef` stands in: a
+pure-PyTorch selective-SSM block, parameter-compatible with the real one, that
+trains but materialises the hidden state. Correctness path, not a speed one.
 
 **Key dependencies**:
 - PyTorch (with CUDA support)
