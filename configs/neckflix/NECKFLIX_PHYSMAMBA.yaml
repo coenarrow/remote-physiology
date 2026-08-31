@@ -1,0 +1,123 @@
+# PhysMamba on the Neckflix zarr cache, predicting ABP + CVP + ECG together.
+#
+# LOSO: the participant(s) named with --test_participants are held out of
+# training and are the whole test set. Recordings that lack one of the traces
+# still train the others (ALLOW_MISSING + label_mask).
+#
+#   uv run python neckflix_main.py \
+#       --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml \
+#       --test_participants P015
+BASE: ['']
+TOOLBOX_MODE: "train_and_test"
+DEVICE: cuda:0
+LOG:
+  PATH: "runs/neckflix_physmamba"
+
+TRAIN:
+  BATCH_SIZE: 4
+  EPOCHS: 30
+  LR: 1e-3
+  LOSS: 'negpearson'            # waveform shape; 'mse' for pointwise
+  USE_AMP: True
+  AMP_DTYPE: 'bfloat16'
+  MODEL_FILE_NAME: neckflix_physmamba_rgb
+  PLOT_LOSSES_AND_LR: True
+  DATA:
+    FS: 30
+    DATASET: Neckflix
+    DATA_FORMAT: NCDHW
+    DATA_PATH: ""                                          # unused: the zarr cache is authoritative
+    CACHED_PATH: "C:/Users/20759193/neckflix_cache/rgb128"
+    EXP_DATA_NAME: ""
+    PREPROCESS:
+      DATA_TYPE: ['DiffNormalized']
+      LABEL_TYPE: Raw                                      # the loader z-scores each window
+      DO_CHUNK: True
+      CHUNK_LENGTH: 128
+      CHUNK_STRIDE: 64                                     # 50% overlap between training windows
+      CHANNELS: ['R', 'G', 'B']
+      TRACES: ['ABP', 'CVP', 'ECG']
+      RESIZE:
+        H: 128
+        W: 128
+      NECKFLIX:
+        CHANNELS: ['R', 'G', 'B']
+        TRACES: ['ABP', 'CVP', 'ECG']
+        POSTURES: ['0', '45', '90']
+        RANDOM_CHUNK: False
+        LABEL_NORM: 'zscore'
+        ALLOW_MISSING: True
+        MIN_CHANNELS: 1
+        MIN_LABELS: 1
+
+VALID:
+  DATA:
+    FS: 30
+    DATASET: Neckflix
+    DATA_FORMAT: NCDHW
+    DATA_PATH: ""
+    CACHED_PATH: "C:/Users/20759193/neckflix_cache/rgb128"
+    EXP_DATA_NAME: ""
+    PREPROCESS:
+      DATA_TYPE: ['DiffNormalized']
+      LABEL_TYPE: Raw
+      DO_CHUNK: True
+      CHUNK_LENGTH: 128
+      CHUNK_STRIDE: 128
+      CHANNELS: ['R', 'G', 'B']
+      TRACES: ['ABP', 'CVP', 'ECG']
+      RESIZE:
+        H: 128
+        W: 128
+      NECKFLIX:
+        CHANNELS: ['R', 'G', 'B']
+        TRACES: ['ABP', 'CVP', 'ECG']
+        POSTURES: ['0', '45', '90']
+        RANDOM_CHUNK: False
+        LABEL_NORM: 'zscore'
+        ALLOW_MISSING: True
+        MIN_CHANNELS: 1
+        MIN_LABELS: 1
+
+TEST:
+  METRICS: ['MAE', 'RMSE', 'MAPE', 'MACC', 'Pearson', 'SNR', 'BA']
+  USE_LAST_EPOCH: True          # set False and pass --valid_participants for model selection
+  DATA:
+    FS: 30
+    DATASET: Neckflix
+    DO_PREPROCESS: False
+    DATA_FORMAT: NCDHW
+    DATA_PATH: ""
+    CACHED_PATH: "C:/Users/20759193/neckflix_cache/rgb128"
+    EXP_DATA_NAME: ""
+    PREPROCESS:
+      DATA_TYPE: ['DiffNormalized']
+      LABEL_TYPE: Raw
+      DO_CHUNK: True
+      CHUNK_LENGTH: 128
+      CHUNK_STRIDE: 128         # non-overlapping windows at evaluation time
+      CHANNELS: ['R', 'G', 'B']
+      TRACES: ['ABP', 'CVP', 'ECG']
+      RESIZE:
+        H: 128
+        W: 128
+      NECKFLIX:
+        CHANNELS: ['R', 'G', 'B']
+        TRACES: ['ABP', 'CVP', 'ECG']
+        POSTURES: ['0', '45', '90']
+        RANDOM_CHUNK: False
+        LABEL_NORM: 'zscore'
+        ALLOW_MISSING: True
+        MIN_CHANNELS: 1
+        MIN_LABELS: 1
+
+MODEL:
+  NAME: PhysMamba
+  DROP_RATE: 0.2
+
+INFERENCE:
+  BATCH_SIZE: 4
+  EVALUATION_METHOD: "FFT"
+  EVALUATION_WINDOW:
+    USE_SMALLER_WINDOW: False
+    WINDOW_SIZE: 10

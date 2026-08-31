@@ -22,6 +22,9 @@ _C.TOOLBOX_MODE = ""
 _C.TRAIN = CN()
 _C.TRAIN.USE_AMP = True
 _C.TRAIN.AMP_DTYPE = 'bfloat16'
+# Base loss for the masked multi-signal (dict-contract) trainer:
+# 'negpearson' (waveform shape) or 'mse' (pointwise).
+_C.TRAIN.LOSS = 'negpearson'
 _C.TRAIN.EPOCHS = 50
 _C.TRAIN.BATCH_SIZE = 4
 _C.TRAIN.LR = 1e-4
@@ -331,6 +334,43 @@ _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = False
+
+# -----------------------------------------------------------------------------
+# Keys the zarr-backed Neckflix loader needs, added uniformly to every data
+# block so TRAIN/VALID/TEST/UNSUPERVISED cannot drift apart. Defined here in one
+# pass rather than repeated four times above; see
+# dataset/data_loader/neckflix_config.py for how each is consumed.
+# -----------------------------------------------------------------------------
+def _add_neckflix_zarr_keys(preprocess):
+    """Give one ``DATA.PREPROCESS`` node the zarr-loader keys it may lack."""
+    if 'CHANNELS' not in preprocess:
+        preprocess.CHANNELS = []        # global channel slots; [] -> legacy NECKFLIX.CHANNELS
+    if 'TRACES' not in preprocess:
+        preprocess.TRACES = []          # global signal targets; [] -> legacy NECKFLIX.TRACES
+    if 'SIGNAL_NORMS' not in preprocess:
+        preprocess.SIGNAL_NORMS = CN()
+        for _s, _m in _SIGNAL_REGISTRY.items():
+            preprocess.SIGNAL_NORMS[_s] = list(_m['norm'])
+    # Window stride in frames; 0 means "stride by a whole window" (no overlap).
+    preprocess.CHUNK_STRIDE = 0
+    neckflix = preprocess.NECKFLIX
+    # Per-window label normalisation: 'zscore' or 'minmax'.
+    neckflix.LABEL_NORM = 'zscore'
+    # Keep samples that are missing some configured streams/labels.
+    neckflix.ALLOW_MISSING = True
+    neckflix.MIN_CHANNELS = 1
+    neckflix.MIN_LABELS = 1
+    # Store-attribute include filters; [] means "no filter on this attribute".
+    neckflix.PERSPECTIVES = []      # camera keys, e.g. ['1'] or [1]
+    neckflix.LIGHT = []             # 'D' / 'N'
+    neckflix.SESSIONS = []          # e.g. ['S01']
+    neckflix.PARTICIPANTS = []      # explicit include list; LOSO uses --test_participants
+
+
+for _preprocess in (_C.TRAIN.DATA.PREPROCESS, _C.VALID.DATA.PREPROCESS,
+                    _C.TEST.DATA.PREPROCESS, _C.UNSUPERVISED.DATA.PREPROCESS):
+    _add_neckflix_zarr_keys(_preprocess)
+
 ### -----------------------------------------------------------------------------
 # Model settings
 # -----------------------------------------------------------------------------

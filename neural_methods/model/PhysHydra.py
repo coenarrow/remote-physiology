@@ -2,7 +2,6 @@ import math
 import torch
 import torch.nn as nn
 from timm.models.layers import trunc_normal_, DropPath
-from mamba_ssm import Mamba
 from neural_methods.model.mamba_compat import make_mamba
 from torch.nn import functional as F
 

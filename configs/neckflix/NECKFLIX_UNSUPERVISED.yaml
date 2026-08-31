@@ -1,0 +1,48 @@
+# Traditional (unsupervised) rPPG over the Neckflix zarr cache.
+#
+# The cache carries no PPG; ABP, CVP and ECG each carry the cardiac rhythm, so
+# every window is scored separately against whichever of them that recording
+# actually has (label_mask decides). Run with:
+#   uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
+BASE: ['']
+TOOLBOX_MODE: "unsupervised_method"
+DEVICE: cpu
+LOG:
+  PATH: "runs/neckflix_unsupervised"
+UNSUPERVISED:
+  METHOD: ["ICA", "POS", "CHROM", "GREEN", "LGI", "PBV", "OMIT"]
+  METRICS: ['MAE', 'RMSE', 'MAPE', 'MACC', 'Pearson', 'SNR', 'BA']
+  DATA:
+    FS: 30
+    DATASET: Neckflix
+    DO_PREPROCESS: False
+    DATA_FORMAT: NCDHW
+    DATA_PATH: ""                                        # unused: the zarr cache is authoritative
+    CACHED_PATH: "C:/Users/20759193/neckflix_cache/rgb128"
+    EXP_DATA_NAME: ""
+    PREPROCESS:
+      DATA_TYPE: ['Raw']                                 # the methods want raw pixels
+      LABEL_TYPE: Raw
+      DO_CHUNK: True
+      CHUNK_LENGTH: 300                                  # 10 s windows at 30 fps
+      CHUNK_STRIDE: 300
+      CHANNELS: ['R', 'G', 'B']
+      TRACES: ['ABP', 'CVP', 'ECG']
+      RESIZE:
+        H: 128
+        W: 128
+      NECKFLIX:
+        CHANNELS: ['R', 'G', 'B']
+        TRACES: ['ABP', 'CVP', 'ECG']
+        POSTURES: ['0', '45', '90']
+        RANDOM_CHUNK: False
+        LABEL_NORM: 'zscore'
+        ALLOW_MISSING: True                              # recordings carry different trace subsets
+        MIN_CHANNELS: 1
+        MIN_LABELS: 1
+INFERENCE:
+  BATCH_SIZE: 4
+  EVALUATION_METHOD: "FFT"        # "FFT" or "peak detection"
+  EVALUATION_WINDOW:
+    USE_SMALLER_WINDOW: False
+    WINDOW_SIZE: 10               # seconds

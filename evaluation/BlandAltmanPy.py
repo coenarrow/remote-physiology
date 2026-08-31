@@ -88,6 +88,21 @@ class BlandAltman():
         stdev = .01 * (max(arr) - min(arr))
         return arr + np.random.randn(len(arr)) * stdev
 
+    @staticmethod
+    def _point_density(x, y):
+        """Per-point KDE density for colouring, or a constant when degenerate.
+
+        ``gaussian_kde`` raises ``LinAlgError`` on a singular covariance, which
+        happens for real reasons: a handful of windows, or an untrained model
+        predicting a near-constant rate. The plot is still worth writing, just
+        without the density shading.
+        """
+        try:
+            xy = np.vstack([x, y])
+            return gaussian_kde(xy)(xy)
+        except (np.linalg.LinAlgError, ValueError):
+            return np.full(len(x), 0.5)
+
     def scatter_plot(self,x_label='Gold Standard',y_label='New Measure',
                     figure_size=(4,4), show_legend=True,
                     the_title=' ',
@@ -104,8 +119,7 @@ class BlandAltman():
 
         fig = plt.figure(figsize=figure_size)
         ax=fig.add_axes([0,0,1,1])
-        xy = np.vstack([self.gold_std,self.new_measure])
-        z = gaussian_kde(xy)(xy)
+        z = self._point_density(self.gold_std, self.new_measure)
         ax.scatter(self.gold_std,self.new_measure, c=z, s=50)
         x_vals = np.array(ax.get_xlim())
         ax.plot(x_vals,x_vals,'--',color='black', label='Line of Slope = 1')
@@ -133,8 +147,7 @@ class BlandAltman():
 
         fig = plt.figure(figsize=figure_size)
         ax = fig.add_axes([0,0,1,1])
-        xy = np.vstack([avgs,diffs])
-        z = gaussian_kde(xy)(xy)
+        z = self._point_density(avgs, diffs)
         ax.scatter(avgs,diffs, c=z, label='Observations')
         x_vals = np.array(ax.get_xlim())
         ax.axhline(self.mean_error,color='black',label='Mean Error')
