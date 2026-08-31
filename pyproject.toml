@@ -5,18 +5,10 @@ description = "Multi-signal remote physiology toolkit (BVP, ABP, CVP, RR, ...) �
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "black>=25.1.0",
+    # ---- The coupled GPU cluster: pinned, moves together (targets chosen
+    # from docs/plans/platform-reports/; see the roadmap, Phase 3.5). ----
     # Builds from its PyPI sdist on Windows as-is; only mamba-ssm needs patching.
     "causal-conv1d>=1.7.0 ; sys_platform != 'darwin'",
-    "cryptography>=46.0.3",
-    "einops>=0.8.1",
-    "fsspec==2026.7.0",
-    "h5py==3.16.0",
-    "huggingface-hub>=0.34.4",
-    "ipykernel==7.3.0",
-    "ipympl>=0.9.8",
-    "ipywidgets==8.1.9",
-    "isort>=6.0.1",
     # Pinned exact on every platform: 2.3.2+ hard-requires tilelang /
     # quack-kernels / apache-tvm-ffi (Linux-only, for Mamba3 backends we do
     # not use), which breaks Windows and bloats the HPC env.
@@ -26,40 +18,50 @@ dependencies = [
     # tool.uv.sources below and tools/vendor_mamba_windows.py). Pinned rather
     # than >=, because the vendored tree is one specific upstream release.
     "mamba-ssm==2.3.1 ; sys_platform == 'win32'",
-    "matplotlib==3.11.1",
-    "neurokit2==0.2.13",
-    "numpy==2.5.2",
-    # pandas 3.x is out but neurokit2 (FactorizePhys' FSAM) caps at <3.0.
-    "pandas>=2.3.2,<3",
-    "pymupdf>=1.26.6",
-    "pypdf>=6.4.0",
-    # Interactive matplotlib backend. Excluded on Windows: PyQt5-Qt5 has shipped
-    # no win_amd64 wheel since 5.15.2, and that release is macOS x86_64 only, so
-    # pinning it to regain Windows would break Apple Silicon. Windows falls back
-    # to TkAgg; HPC and CI force Agg regardless.
-    "pyqt5>=5.15.11 ; sys_platform != 'win32'",
-    "pytest>=8.4.2",
-    "pyyaml==6.0.3",
-    "scikit-image==0.26.0",
-    "scikit-learn==1.9.0",
-    "scipy==1.18.1",
-    "seaborn>=0.13.2",
-    "timm==1.0.29",
     # cu126 is the newest wheel family the fleet can run: the V100 partition
     # is sm_70 (dropped from cu128+/cu130) and the cluster driver (575.57)
     # caps CUDA at 12.9. torch 2.12 is the newest torch with a triton-windows
     # release; see docs/plans/platform-reports/.
     "torch==2.12.1",
-    "torchvision==0.27.1",
-    "tqdm==4.70.0",
-    "transformers>=4.56.1",
+    # Nothing here imports torchvision (timm requires it), but tool.uv.sources
+    # only applies to declared dependencies, so it is declared to force the
+    # cu126 index — the PyPI wheel is a different CUDA variant. No pin needed:
+    # each torchvision requires its exact torch partner, so torch's pin
+    # transitively pins this.
+    "torchvision>=0.27",
     # `triton` publishes no Windows wheel and no sdist, so mamba-ssm's dependency
     # on it makes the whole environment uninstallable here. triton-windows is the
     # same 3.8 series (what torch 2.12 pairs with) rebuilt for win_amd64, and it
     # imports as `triton`. See override-dependencies below.
     "triton-windows>=3.8,<3.9 ; sys_platform == 'win32'",
-    "yacs==0.1.8",
-    "zarr>=3.3,<4",
+    # ---- Everything else floats: floors are the tested baseline, uv.lock is
+    # the reproducibility record. Audited 2026-08-31 — each entry below has a
+    # live import; transitive-only packages (transformers, huggingface-hub,
+    # fsspec, ...) are not repeated here. ----
+    "einops>=0.8.2",
+    "h5py>=3.16",          # PhysHydraTrainer only; leaves in Phase 6
+    "matplotlib>=3.11",
+    "numpy>=2.5",
+    "pandas>=3",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.9",   # bigsmall_multitask_metrics only; leaves in Phase 6
+    "scipy>=1.18",
+    "timm>=1.0.29",
+    "tqdm>=4.70",
+    "yacs>=0.1.8",         # legacy config machinery; dies in Phase 5
+    "zarr>=3.3",
+]
+
+[dependency-groups]
+# Installed by `uv sync` by default; skip on the HPC with `uv sync --no-dev`.
+dev = [
+    "black>=25.1",
+    "ipykernel>=7.3",
+    "ipympl>=0.9.8",
+    "ipywidgets>=8.1.9",
+    "isort>=6",
+    "pytest>=8.4",
+    "seaborn>=0.13.2",     # prototype notebooks only
 ]
 
 [tool.uv]
@@ -110,5 +112,3 @@ explicit = true
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
-
-[tool.uv.extra-build-dependencies]

@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.batchnorm import _BatchNorm
 import numpy as np
-import neurokit2 as nk
 
 
 class _MatrixDecompositionBase(nn.Module):
