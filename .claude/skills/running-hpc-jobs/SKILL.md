@@ -56,7 +56,7 @@ Copy an existing script rather than writing from scratch —
 #SBATCH --error=logs/%j_Neckflix_PhysMamba_2GPU.err
 
 mkdir -p logs
-cd "/group/pgh004/carrow/repo/rPPG-Toolbox"
+cd "/group/pgh004/carrow/repo/remote-physiology"
 module load cuda
 
 uv run python -m torch.distributed.run --nproc_per_node=2 \
@@ -98,7 +98,7 @@ salloc --job-name=Interactive_Session --partition=pophealth \
     --nodes=1 --mem=160000 --ntasks=16 --gres=gpu:a100:1 --time=5:00:00
 
 module load cuda
-cd /mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox
+cd /mmfs1/data/group/pgh004/carrow/repo/remote-physiology
 uv run python main.py --limit_windows 8 --test_participants P015 \
     --config_file configs/neckflix/NECKFLIX_PHYSMAMBA_SMOKE.yaml
 exit    # release the allocation when done
@@ -134,8 +134,8 @@ shorter chunks) → read `logs/*.err` → scale back up via `sbatch` once it wor
 
 ## Paths
 
-- Working directory: `/mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox` (also reachable as
-  `/group/pgh004/carrow/repo/rPPG-Toolbox`, which is what the SLURM scripts use)
+- Working directory: `/mmfs1/data/group/pgh004/carrow/repo/remote-physiology` (also reachable as
+  `/group/pgh004/carrow/repo/remote-physiology`, which is what the SLURM scripts use)
 - Group storage: `/group/pgh004/` — accessible from compute nodes
 
 ## Red Flags — Stop

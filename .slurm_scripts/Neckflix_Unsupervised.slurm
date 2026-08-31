@@ -15,7 +15,7 @@
 
 mkdir -p logs
 
-cd "/group/pgh004/carrow/repo/rPPG-Toolbox"
+cd "/group/pgh004/carrow/repo/remote-physiology"
 
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURMD_NODENAME}"
