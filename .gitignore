@@ -14,9 +14,10 @@ temp
 *.out
 .venv
 .uv_cache
-uv.lock
 logs/
-.claude
+model_outputs/
+# Local Claude state stays out, but the checked-in skills travel with the repo
+.claude/*
+!.claude/skills/
 .configs
-.slurm_scripts
 .DS_Store
