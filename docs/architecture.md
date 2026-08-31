@@ -478,7 +478,7 @@ The project uses **uv** as its Python package manager. The virtual environment (
 - `h5py` / `hdf5plugin` for the other datasets' loaders
 - Standard scientific Python stack (numpy, scipy, matplotlib)
 
-All scripts are invoked via `uv run python` to ensure the correct environment is used. Full dependency specifications are in `pyproject.toml` and `requirements.txt`, with the lockfile at `uv.lock`.
+All scripts are invoked via `uv run python` to ensure the correct environment is used. Full dependency specifications are in `pyproject.toml`, with the lockfile at `uv.lock`.
 
 
 ## Related Repositories
