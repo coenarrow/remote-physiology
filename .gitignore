@@ -1,5 +1,10 @@
 __pycache__/
 *.py[cod]
+# Build artefacts if the vendored mamba-ssm tree is ever compiled in place
+# (uv builds it out-of-tree); --check writes .mamba-ssm-check and removes it.
+vendor/*/build/
+vendor/*/*.egg-info/
+vendor/.mamba-ssm-check/
 *.log
 *.mat
 PreprocessedData

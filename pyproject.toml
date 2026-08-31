@@ -6,7 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "black>=25.1.0",
-    "causal-conv1d>=1.7.0 ; sys_platform == 'linux'",
+    # Builds from its PyPI sdist on Windows as-is; only mamba-ssm needs patching.
+    "causal-conv1d>=1.7.0 ; sys_platform != 'darwin'",
     "cryptography>=46.0.3",
     "einops>=0.8.1",
     "fsspec==2025.7.0",
@@ -18,6 +19,10 @@ dependencies = [
     "isort>=6.0.1",
     "mamba-ssm>=2.3.1 ; sys_platform == 'linux'",
     "mamba-ssm-macos>=1.0.2 ; sys_platform == 'darwin'",
+    # Windows builds the patched vendor/mamba-ssm tree instead (see
+    # tool.uv.sources below and tools/vendor_mamba_windows.py). Pinned rather
+    # than >=, because the vendored tree is one specific upstream release.
+    "mamba-ssm==2.3.1 ; sys_platform == 'win32'",
     "mat73==0.65",
     "matplotlib==3.10.6",
     "neurokit2==0.2.12",
@@ -27,7 +32,11 @@ dependencies = [
     "protobuf==6.32.0",
     "pymupdf>=1.26.6",
     "pypdf>=6.4.0",
-    "pyqt5>=5.15.11",
+    # Interactive matplotlib backend. Excluded on Windows: PyQt5-Qt5 has shipped
+    # no win_amd64 wheel since 5.15.2, and that release is macOS x86_64 only, so
+    # pinning it to regain Windows would break Apple Silicon. Windows falls back
+    # to TkAgg; HPC and CI force Agg regardless.
+    "pyqt5>=5.15.11 ; sys_platform != 'win32'",
     "pytest>=8.4.2",
     "pyyaml==6.0.2",
     "scikit-image==0.25.2",
@@ -41,6 +50,11 @@ dependencies = [
     "torchvision==0.21.0",
     "tqdm==4.67.1",
     "transformers>=4.56.1",
+    # `triton` publishes no Windows wheel and no sdist, so mamba-ssm's dependency
+    # on it makes the whole environment uninstallable here. triton-windows is the
+    # same 3.2 series (what torch 2.6 pairs with) rebuilt for win_amd64, and it
+    # imports as `triton`. See override-dependencies below.
+    "triton-windows>=3.2,<3.3 ; sys_platform == 'win32'",
     "yacs==0.1.8",
     "zarr>=3.3,<4",
 ]
@@ -49,7 +63,29 @@ dependencies = [
 link-mode = "copy"
 cache-dir = ".uv_cache"
 
+# Confine `triton` to the one platform it ships wheels for. Both torch and
+# mamba-ssm require it unconditionally; on Windows it has neither a wheel nor an
+# sdist, so without this uv resolves fine and then refuses to install anything.
+# The Windows replacement, triton-windows, is a normal dependency above.
+override-dependencies = ["triton ; sys_platform == 'linux'"]
+
+# mamba-ssm and causal-conv1d compile CUDA against whatever torch they import at
+# build time. An isolated build env resolves `torch` from PyPI, which on Windows
+# is the CPU-only wheel -- `torch.version.cuda` is None and c10_cuda.lib is not
+# there to link against -- so they build against this project's torch instead.
+# The cost is that torch must already be installed when they are built; into a
+# fresh environment, run
+#     uv sync --no-install-package mamba-ssm --no-install-package causal-conv1d
+# first. `setup.sh` has always done the same thing by hand.
+no-build-isolation-package = ["mamba-ssm", "causal-conv1d"]
+
 [tool.uv.sources]
+# Windows only: the published sdist does not compile with MSVC. vendor/mamba-ssm
+# is the same 2.3.1 release with three mechanical fixes, regenerated (and
+# verifiable) by tools/vendor_mamba_windows.py. Linux and macOS are untouched.
+mamba-ssm = [
+  { path = "vendor/mamba-ssm", marker = "sys_platform == 'win32'" },
+]
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
   { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" },
