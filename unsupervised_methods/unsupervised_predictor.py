@@ -1,193 +1,220 @@
-"""Unsupervised learning methods including POS, GREEN, CHROME, ICA, LGI and PBV."""
+"""Evaluation driver for the traditional (unsupervised) rPPG methods.
+
+Handles both dataset contracts:
+
+* the legacy tuple ``(frames, labels, filename, chunk_id)`` the upstream
+  loaders emit, evaluated against its single label; and
+* the Neckflix nested batch dict, evaluated **per label signal** -- ABP, CVP and
+  ECG each carry the cardiac rhythm, so one video yields one HR estimate scored
+  against every reference trace that recording actually has. ``label_mask``
+  decides which those are, so a recording missing ABP simply contributes
+  nothing to the ABP row instead of being dropped.
+
+Both paths funnel into the same per-window HR comparison and the same metric
+report (:mod:`evaluation.metrics_report`).
+"""
+
+from collections import defaultdict
+
 import numpy as np
-from evaluation.post_process import *
-from unsupervised_methods.methods.CHROME_DEHAAN import *
-from unsupervised_methods.methods.GREEN import *
-from unsupervised_methods.methods.ICA_POH import *
-from unsupervised_methods.methods.LGI import *
-from unsupervised_methods.methods.PBV import *
-from unsupervised_methods.methods.POS_WANG import *
-from unsupervised_methods.methods.OMIT import *
 from tqdm import tqdm
-from evaluation.BlandAltmanPy import BlandAltman
+
+from evaluation.metrics_report import report_hr_metrics
+from evaluation.post_process import calculate_metric_per_video
+from neural_methods.batch import (
+    CHANNEL_MASK, FRAMES, LABEL_MASK, LABELS, METADATA,
+    frames_to_rgb_trace, is_batch_dict, iter_samples,
+)
+from unsupervised_methods.methods.CHROME_DEHAAN import CHROME_DEHAAN
+from unsupervised_methods.methods.GREEN import GREEN
+from unsupervised_methods.methods.ICA_POH import ICA_POH
+from unsupervised_methods.methods.LGI import LGI
+from unsupervised_methods.methods.OMIT import OMIT
+from unsupervised_methods.methods.PBV import PBV
+from unsupervised_methods.methods.POS_WANG import POS_WANG
+from unsupervised_methods.utils import rgb_trace
+
+#: Every supported method, as ``(clip_or_trace, fs) -> BVP``. The rate-free
+#: methods ignore ``fs``; wrapping them here keeps the dispatch a lookup, not a
+#: chain.
+BVP_ESTIMATORS = {
+    "POS": lambda video, fs: POS_WANG(video, fs),
+    "CHROM": lambda video, fs: CHROME_DEHAAN(video, fs),
+    "ICA": lambda video, fs: ICA_POH(video, fs),
+    "GREEN": lambda video, fs: GREEN(video),
+    "LGI": lambda video, fs: LGI(video),
+    "PBV": lambda video, fs: PBV(video),
+    "OMIT": lambda video, fs: OMIT(video),
+}
+
+#: The three channels every traditional method consumes.
+RGB_CHANNELS = ("R", "G", "B")
+
+#: Shortest window ``calculate_metric_per_video`` can filter (filtfilt padlen).
+MIN_WINDOW = 9
+
+#: Signal name reported for the legacy single-label datasets.
+LEGACY_SIGNAL = "PPG"
+
+
+def estimate_bvp(method_name, video, fs):
+    """Run one named method over a ``(T, H, W, 3)`` clip or a ``(T, 3)`` trace."""
+    try:
+        estimator = BVP_ESTIMATORS[method_name]
+    except KeyError:
+        raise ValueError(
+            f"unsupervised method name wrong: {method_name!r}; "
+            f"known: {', '.join(sorted(BVP_ESTIMATORS))}"
+        ) from None
+    return np.asarray(estimator(video, fs))
+
+
+def _dict_windows(batch):
+    """Yield ``(rgb_trace, {signal: reference_trace}, name)`` from a Neckflix batch.
+
+    The clip is reduced to its per-frame mean RGB here, once, because that is
+    all any of the methods consume.
+    """
+    for sample in iter_samples(batch):
+        frames = sample[FRAMES]
+        missing = [ch for ch in RGB_CHANNELS if ch not in frames]
+        if missing:
+            raise ValueError(
+                f"The unsupervised methods need channels {list(RGB_CHANNELS)}; the "
+                f"batch is missing {missing}. Set PREPROCESS.CHANNELS to include them."
+            )
+        absent = [ch for ch in RGB_CHANNELS if not bool(sample[CHANNEL_MASK][ch])]
+        if absent:
+            continue  # zero-filled RGB carries no pulse; scoring it is meaningless
+        references = {
+            signal: trace.numpy()
+            for signal, trace in sample[LABELS].items()
+            if bool(sample[LABEL_MASK][signal])
+        }
+        if not references:
+            continue
+        meta = sample[METADATA]
+        name = "{}_cam{}@{}".format(
+            meta["recording_id"], meta["camera_id"], int(meta["start_frame"]))
+        yield frames_to_rgb_trace(frames, RGB_CHANNELS), references, name
+
+
+def _legacy_windows(batch):
+    """Yield the same triples from the upstream ``(frames, labels, ...)`` tuple."""
+    frames, labels = batch[0], batch[1]
+    for idx in range(frames.shape[0]):
+        video = rgb_trace(frames[idx].cpu().numpy()[..., :3])
+        reference = labels[idx].cpu().numpy()
+        name = str(batch[2][idx]) if len(batch) > 2 else str(idx)
+        yield video, {LEGACY_SIGNAL: reference}, name
+
+
+def _window_size(config, n_frames):
+    """Evaluation window length in frames, clipped to what the clip provides."""
+    window_cfg = config.INFERENCE.EVALUATION_WINDOW
+    if not window_cfg.USE_SMALLER_WINDOW:
+        return n_frames
+    return min(window_cfg.WINDOW_SIZE * config.UNSUPERVISED.DATA.FS, n_frames)
+
+
+def _hr_method(config):
+    method = config.INFERENCE.EVALUATION_METHOD
+    if method == "peak detection":
+        return "Peak"
+    if method == "FFT":
+        return "FFT"
+    raise ValueError(f"Inference evaluation method name wrong: {method!r}")
+
+
+def _accumulate(config, data_loader, method_names):
+    """One pass over the data, scoring every named method on every label signal.
+
+    Loading a Neckflix window means decompressing a few hundred frames out of
+    zarr, so the seven methods share a single pass rather than each triggering
+    its own: the spatial means they consume come from the same decoded clip.
+
+    Returns ``{method: {signal: {"gt"/"pred"/"snr"/"macc": [...]}}}``.
+    """
+    hr_method = _hr_method(config)
+    fs = config.UNSUPERVISED.DATA.FS
+    groups = {method: defaultdict(lambda: defaultdict(list)) for method in method_names}
+
+    for test_batch in tqdm(data_loader, ncols=80):
+        windows = _dict_windows(test_batch) if is_batch_dict(test_batch) \
+            else _legacy_windows(test_batch)
+        for video, references, _name in windows:
+            window_frame_size = _window_size(config, video.shape[0])
+            for method_name in method_names:
+                bvp = estimate_bvp(method_name, video, fs)
+                for start in range(0, len(bvp), window_frame_size):
+                    bvp_window = bvp[start:start + window_frame_size]
+                    if len(bvp_window) < MIN_WINDOW:
+                        print(f"Window frame size of {len(bvp_window)} is smaller than "
+                              f"minimum pad length of {MIN_WINDOW}. Window ignored!")
+                        continue
+                    for signal, reference in references.items():
+                        label_window = reference[start:start + len(bvp_window)]
+                        # A method whose output is shorter than the video (CHROM
+                        # drops a partial final window) must not be compared
+                        # against a longer label slice.
+                        usable = min(len(bvp_window), len(label_window))
+                        if usable < MIN_WINDOW:
+                            continue
+                        gt_hr, pred_hr, snr, macc = calculate_metric_per_video(
+                            bvp_window[:usable], label_window[:usable],
+                            diff_flag=False, fs=fs, hr_method=hr_method)
+                        group = groups[method_name][signal]
+                        group["gt"].append(gt_hr)
+                        group["pred"].append(pred_hr)
+                        group["snr"].append(snr)
+                        group["macc"].append(macc)
+    return groups
+
+
+def _report(config, method_name, signal_groups):
+    """Print and return the metric table for one method."""
+    print("Used Unsupervised Method: " + method_name)
+    # Filename ID to be used in any results files (e.g., Bland-Altman plots) that get saved
+    if config.TOOLBOX_MODE != "unsupervised_method":
+        raise ValueError(
+            "unsupervised_predictor.py evaluation only supports unsupervised_method!")
+    filename_id = method_name + "_" + config.UNSUPERVISED.DATA.DATASET
+
+    if not signal_groups:
+        print("No evaluable windows found - check the label masks and channels.")
+        return {}
+
+    hr_method = _hr_method(config)
+    multi_signal = set(signal_groups) != {LEGACY_SIGNAL}
+    report = {}
+    for signal in sorted(signal_groups):
+        group = signal_groups[signal]
+        report[signal] = report_hr_metrics(
+            group["gt"], group["pred"], group["snr"], group["macc"],
+            metrics=config.UNSUPERVISED.METRICS, config=config,
+            filename_id=filename_id, hr_method=hr_method,
+            scope=signal if multi_signal else "")
+    return report
+
 
 def unsupervised_predict(config, data_loader, method_name):
-    """ Model evaluation on the testing dataset."""
+    """Model evaluation on the testing dataset."""
     if data_loader["unsupervised"] is None:
         raise ValueError("No data for unsupervised method predicting")
     print("===Unsupervised Method ( " + method_name + " ) Predicting ===")
-    predict_hr_peak_all = []
-    gt_hr_peak_all = []
-    predict_hr_fft_all = []
-    gt_hr_fft_all = []
-    SNR_all = []
-    MACC_all = []
-    sbar = tqdm(data_loader["unsupervised"], ncols=80)
-    for _, test_batch in enumerate(sbar):
-        batch_size = test_batch[0].shape[0]
-        for idx in range(batch_size):
-            data_input, labels_input = test_batch[0][idx].cpu().numpy(), test_batch[1][idx].cpu().numpy()
-            data_input = data_input[..., :3]
-            if method_name == "POS":
-                BVP = POS_WANG(data_input, config.UNSUPERVISED.DATA.FS)
-            elif method_name == "CHROM":
-                BVP = CHROME_DEHAAN(data_input, config.UNSUPERVISED.DATA.FS)
-            elif method_name == "ICA":
-                BVP = ICA_POH(data_input, config.UNSUPERVISED.DATA.FS)
-            elif method_name == "GREEN":
-                BVP = GREEN(data_input)
-            elif method_name == "LGI":
-                BVP = LGI(data_input)
-            elif method_name == "PBV":
-                BVP = PBV(data_input)
-            elif method_name == "OMIT":
-                BVP = OMIT(data_input)
-            else:
-                raise ValueError("unsupervised method name wrong!")
+    groups = _accumulate(config, data_loader["unsupervised"], [method_name])
+    return _report(config, method_name, groups[method_name])
 
-            video_frame_size = test_batch[0].shape[1]
-            if config.INFERENCE.EVALUATION_WINDOW.USE_SMALLER_WINDOW:
-                window_frame_size = config.INFERENCE.EVALUATION_WINDOW.WINDOW_SIZE * config.UNSUPERVISED.DATA.FS
-                if window_frame_size > video_frame_size:
-                    window_frame_size = video_frame_size
-            else:
-                window_frame_size = video_frame_size
 
-            for i in range(0, len(BVP), window_frame_size):
-                BVP_window = BVP[i:i+window_frame_size]
-                label_window = labels_input[i:i+window_frame_size]
+def unsupervised_predict_many(config, data_loader, method_names):
+    """Evaluate several methods in a single pass over the data.
 
-                if len(BVP_window) < 9:
-                    print(f"Window frame size of {len(BVP_window)} is smaller than minimum pad length of 9. Window ignored!")
-                    continue
-
-                if config.INFERENCE.EVALUATION_METHOD == "peak detection":
-                    gt_hr, pre_hr, SNR, macc = calculate_metric_per_video(BVP_window, label_window, diff_flag=False,
-                                                                    fs=config.UNSUPERVISED.DATA.FS, hr_method='Peak')
-                    gt_hr_peak_all.append(gt_hr)
-                    predict_hr_peak_all.append(pre_hr)
-                    SNR_all.append(SNR)
-                    MACC_all.append(macc)
-                elif config.INFERENCE.EVALUATION_METHOD == "FFT":
-                    gt_fft_hr, pre_fft_hr, SNR, macc = calculate_metric_per_video(BVP_window, label_window, diff_flag=False,
-                                                                    fs=config.UNSUPERVISED.DATA.FS, hr_method='FFT')
-                    gt_hr_fft_all.append(gt_fft_hr)
-                    predict_hr_fft_all.append(pre_fft_hr)
-                    SNR_all.append(SNR)
-                    MACC_all.append(macc)
-                else:
-                    raise ValueError("Inference evaluation method name wrong!")
-    print("Used Unsupervised Method: " + method_name)
-
-    # Filename ID to be used in any results files (e.g., Bland-Altman plots) that get saved
-    if config.TOOLBOX_MODE == 'unsupervised_method':
-        filename_id = method_name + "_" + config.UNSUPERVISED.DATA.DATASET
-    else:
-        raise ValueError('unsupervised_predictor.py evaluation only supports unsupervised_method!')
-
-    if config.INFERENCE.EVALUATION_METHOD == "peak detection":
-        predict_hr_peak_all = np.array(predict_hr_peak_all)
-        gt_hr_peak_all = np.array(gt_hr_peak_all)
-        SNR_all = np.array(SNR_all)
-        MACC_all = np.array(MACC_all)
-        num_test_samples = len(predict_hr_peak_all)
-        for metric in config.UNSUPERVISED.METRICS:
-            if metric == "MAE":
-                MAE_PEAK = np.mean(np.abs(predict_hr_peak_all - gt_hr_peak_all))
-                standard_error = np.std(np.abs(predict_hr_peak_all - gt_hr_peak_all)) / np.sqrt(num_test_samples)
-                print("Peak MAE (Peak Label): {0} +/- {1}".format(MAE_PEAK, standard_error))
-            elif metric == "RMSE":
-                # Calculate the squared errors, then RMSE, in order to allow
-                # for a more robust and intuitive standard error that won't
-                # be influenced by abnormal distributions of errors.
-                squared_errors = np.square(predict_hr_peak_all - gt_hr_peak_all)
-                RMSE_PEAK = np.sqrt(np.mean(squared_errors))
-                standard_error = np.sqrt(np.std(squared_errors) / np.sqrt(num_test_samples))
-                print("PEAK RMSE (Peak Label): {0} +/- {1}".format(RMSE_PEAK, standard_error))
-            elif metric == "MAPE":
-                MAPE_PEAK = np.mean(np.abs((predict_hr_peak_all - gt_hr_peak_all) / gt_hr_peak_all)) * 100
-                standard_error = np.std(np.abs((predict_hr_peak_all - gt_hr_peak_all) / gt_hr_peak_all)) / np.sqrt(num_test_samples) * 100
-                print("PEAK MAPE (Peak Label): {0} +/- {1}".format(MAPE_PEAK, standard_error))
-            elif metric == "Pearson":
-                Pearson_PEAK = np.corrcoef(predict_hr_peak_all, gt_hr_peak_all)
-                correlation_coefficient = Pearson_PEAK[0][1]
-                standard_error = np.sqrt((1 - correlation_coefficient**2) / (num_test_samples - 2))
-                print("PEAK Pearson (Peak Label): {0} +/- {1}".format(correlation_coefficient, standard_error))
-            elif metric == "SNR":
-                SNR_FFT = np.mean(SNR_all)
-                standard_error = np.std(SNR_all) / np.sqrt(num_test_samples)
-                print("FFT SNR (FFT Label): {0} +/- {1} (dB)".format(SNR_FFT, standard_error))
-            elif metric == "MACC":
-                MACC_avg = np.mean(MACC_all)
-                standard_error = np.std(MACC_all) / np.sqrt(num_test_samples)
-                print("MACC (avg): {0} +/- {1}".format(MACC_avg, standard_error))
-            elif "BA" in metric:
-                compare = BlandAltman(gt_hr_peak_all, predict_hr_peak_all, config, averaged=True)
-                compare.scatter_plot(
-                    x_label='GT PPG HR [bpm]',
-                    y_label='rPPG HR [bpm]',
-                    show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_Peak_BlandAltman_ScatterPlot',
-                    file_name=f'{filename_id}_Peak_BlandAltman_ScatterPlot.pdf')
-                compare.difference_plot(
-                    x_label='Difference between rPPG HR and GT PPG HR [bpm]',
-                    y_label='Average of rPPG HR and GT PPG HR [bpm]',
-                    show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_Peak_BlandAltman_DifferencePlot',
-                    file_name=f'{filename_id}_Peak_BlandAltman_DifferencePlot.pdf')
-            else:
-                raise ValueError("Wrong Test Metric Type")
-    elif config.INFERENCE.EVALUATION_METHOD == "FFT":
-        predict_hr_fft_all = np.array(predict_hr_fft_all)
-        gt_hr_fft_all = np.array(gt_hr_fft_all)
-        SNR_all = np.array(SNR_all)
-        MACC_all = np.array(MACC_all)
-        num_test_samples = len(predict_hr_fft_all)
-        for metric in config.UNSUPERVISED.METRICS:
-            if metric == "MAE":
-                MAE_FFT = np.mean(np.abs(predict_hr_fft_all - gt_hr_fft_all))
-                standard_error = np.std(np.abs(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
-                print("FFT MAE (FFT Label): {0} +/- {1}".format(MAE_FFT, standard_error))
-            elif metric == "RMSE":
-                # Calculate the squared errors, then RMSE, in order to allow
-                # for a more robust and intuitive standard error that won't
-                # be influenced by abnormal distributions of errors.
-                squared_errors = np.square(predict_hr_fft_all - gt_hr_fft_all)
-                RMSE_FFT = np.sqrt(np.mean(squared_errors))
-                standard_error = np.sqrt(np.std(squared_errors) / np.sqrt(num_test_samples))
-                print("FFT RMSE (FFT Label): {0} +/- {1}".format(RMSE_FFT, standard_error))
-            elif metric == "MAPE":
-                MAPE_FFT = np.mean(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) * 100
-                standard_error = np.std(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) / np.sqrt(num_test_samples) * 100
-                print("FFT MAPE (FFT Label): {0} +/- {1}".format(MAPE_FFT, standard_error))
-            elif metric == "Pearson":
-                Pearson_FFT = np.corrcoef(predict_hr_fft_all, gt_hr_fft_all)
-                correlation_coefficient = Pearson_FFT[0][1]
-                standard_error = np.sqrt((1 - correlation_coefficient**2) / (num_test_samples - 2))
-                print("FFT Pearson (FFT Label): {0} +/- {1}".format(correlation_coefficient, standard_error))
-            elif metric == "SNR":
-                SNR_PEAK = np.mean(SNR_all)
-                standard_error = np.std(SNR_all) / np.sqrt(num_test_samples)
-                print("FFT SNR (FFT Label): {0} +/- {1} (dB)".format(SNR_PEAK, standard_error))
-            elif metric == "MACC":
-                MACC_avg = np.mean(MACC_all)
-                standard_error = np.std(MACC_all) / np.sqrt(num_test_samples)
-                print("MACC (avg): {0} +/- {1}".format(MACC_avg, standard_error))
-            elif "BA" in metric:
-                compare = BlandAltman(gt_hr_fft_all, predict_hr_fft_all, config, averaged=True)
-                compare.scatter_plot(
-                    x_label='GT PPG HR [bpm]',
-                    y_label='rPPG HR [bpm]',
-                    show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_FFT_BlandAltman_ScatterPlot',
-                    file_name=f'{filename_id}_FFT_BlandAltman_ScatterPlot.pdf')
-                compare.difference_plot(
-                    x_label='Difference between rPPG HR and GT PPG HR [bpm]', 
-                    y_label='Average of rPPG HR and GT PPG HR [bpm]', 
-                    show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_FFT_BlandAltman_DifferencePlot',
-                    file_name=f'{filename_id}_FFT_BlandAltman_DifferencePlot.pdf')
-            else:
-                raise ValueError("Wrong Test Metric Type")
-    else:
-        raise ValueError("Inference evaluation method name wrong!")
+    Equivalent to calling :func:`unsupervised_predict` once per method, but
+    decodes each video once instead of once per method.
+    """
+    if data_loader["unsupervised"] is None:
+        raise ValueError("No data for unsupervised method predicting")
+    method_names = list(method_names)
+    print("===Unsupervised Methods ( " + ", ".join(method_names) + " ) Predicting ===")
+    groups = _accumulate(config, data_loader["unsupervised"], method_names)
+    return {method: _report(config, method, groups[method]) for method in method_names}

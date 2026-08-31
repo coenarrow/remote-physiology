@@ -36,7 +36,6 @@ import pandas as pd
 import pickle 
 
 from unsupervised_methods.methods import POS_WANG
-from unsupervised_methods import utils
 from scipy import signal
 from scipy import sparse
 import math
@@ -296,28 +295,10 @@ class BP4DPlusBigSmallLoader(BaseLoader):
 
         frames = data_dict['X']
 
-        # GENERATE POS PPG SIGNAL
-        WinSec = 1.6
-        RGB = POS_WANG._process_video(frames)
-        N = RGB.shape[0]
-        H = np.zeros((1, N))
-        l = math.ceil(WinSec * fs)
-
-        for n in range(N):
-            m = n - l
-            if m >= 0:
-                Cn = np.true_divide(RGB[m:n, :], np.mean(RGB[m:n, :], axis=0))
-                Cn = np.mat(Cn).H
-                S = np.matmul(np.array([[0, 1, -1], [-2, 1, 1]]), Cn)
-                h = S[0, :] + (np.std(S[0, :]) / np.std(S[1, :])) * S[1, :]
-                mean_h = np.mean(h)
-                for temp in range(h.shape[1]):
-                    h[0, temp] = h[0, temp] - mean_h
-                H[0, m:n] = H[0, m:n] + (h[0])
-
-        bvp = H
-        bvp = utils.detrend(np.mat(bvp).H, 100)
-        bvp = np.asarray(np.transpose(bvp))[0]
+        # GENERATE POS PPG SIGNAL (shared implementation; the aggressive
+        # HR-adaptive bandpass below is this method's own, which is why the
+        # unfiltered signal is what we ask for)
+        bvp = POS_WANG.pos_signal(frames, fs)
 
         # AGGRESSIVELY FILTER PPG SIGNAL
         hr_arr = data_dict['HR_bpm'] # get hr freq from GT label

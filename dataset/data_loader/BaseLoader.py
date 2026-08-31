@@ -13,7 +13,6 @@ from math import ceil
 from scipy import signal
 from scipy import sparse
 from unsupervised_methods.methods import POS_WANG
-from unsupervised_methods import utils
 import math
 import multiprocessing as mp
 
@@ -168,28 +167,9 @@ class BaseLoader(Dataset):
             env_norm_bvp: Hilbert envlope normalized POS PPG signal, filtered are HR frequency
         """
 
-        # generate POS PPG signal
-        WinSec = 1.6
-        RGB = POS_WANG._process_video(frames)
-        N = RGB.shape[0]
-        H = np.zeros((1, N))
-        l = math.ceil(WinSec * fs)
-
-        for n in range(N):
-            m = n - l
-            if m >= 0:
-                Cn = np.true_divide(RGB[m:n, :], np.mean(RGB[m:n, :], axis=0))
-                Cn = np.mat(Cn).H
-                S = np.matmul(np.array([[0, 1, -1], [-2, 1, 1]]), Cn)
-                h = S[0, :] + (np.std(S[0, :]) / np.std(S[1, :])) * S[1, :]
-                mean_h = np.mean(h)
-                for temp in range(h.shape[1]):
-                    h[0, temp] = h[0, temp] - mean_h
-                H[0, m:n] = H[0, m:n] + (h[0])
-
-        bvp = H
-        bvp = utils.detrend(np.mat(bvp).H, 100)
-        bvp = np.asarray(np.transpose(bvp))[0]
+        # generate POS PPG signal (shared implementation; the bandpass below is
+        # this method's own, which is why the unfiltered signal is what we ask for)
+        bvp = POS_WANG.pos_signal(frames, fs)
 
         # filter POS PPG w/ 2nd order butterworth filter (around HR freq)
         # min freq of 0.7Hz was experimentally found to work better than 0.75Hz

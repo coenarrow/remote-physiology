@@ -6,16 +6,15 @@ IEEE Journal of Biomedical and Health Informatics.
 """
 
 import numpy as np
+from einops import rearrange
+
 from unsupervised_methods import utils
 
 
 def OMIT(frames):
-    precessed_data = utils.process_video(frames)
-    precessed_data = precessed_data[0]
-    Q, R = np.linalg.qr(precessed_data)
-    S = Q[:, 0].reshape(1, -1)
-    P = np.identity(3) - np.matmul(S.T, S)
-    Y = np.dot(P, precessed_data)
-    bvp = Y[1, :]
-    bvp = bvp.reshape(-1)
-    return bvp
+    rgb = utils.process_video(frames)[0]                  # (3, T)
+    Q, _ = np.linalg.qr(rgb)
+    leading = rearrange(Q[:, 0], "c -> 1 c")              # first orthonormal direction
+    projector = np.identity(3) - leading.T @ leading
+    Y = projector @ rgb                                   # (3, T)
+    return Y[1, :]
