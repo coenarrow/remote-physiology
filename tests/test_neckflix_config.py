@@ -81,21 +81,31 @@ def test_empty_config_lists_mean_no_filter():
     config = load(UNSUPERVISED_CONFIG)
     config.defrost()
     neckflix = config.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX
-    neckflix.POSTURES = []
+    neckflix.FILTERS.posture = []
     assert build_filters(config.UNSUPERVISED.DATA) == {}
 
 
 def test_configured_attribute_lists_become_include_filters():
+    """FILTERS keys are store attrs verbatim — no fixed list, any attr works."""
     config = load(UNSUPERVISED_CONFIG)
     config.defrost()
     neckflix = config.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX
-    neckflix.PERSPECTIVES = [1]
-    neckflix.LIGHT = ["D"]
-    neckflix.SESSIONS = ["S01"]
+    neckflix.FILTERS.perspective = [1]
+    neckflix.FILTERS.light = ["D"]
+    neckflix.FILTERS.site = ["A"]      # an attr the old fixed list never knew
     filters = build_filters(config.UNSUPERVISED.DATA)
     assert filters["perspective"]["include"] == [1]
     assert filters["light"]["include"] == ["D"]
-    assert filters["session"]["include"] == ["S01"]
+    assert filters["site"]["include"] == ["A"]
+
+
+def test_participant_key_in_filters_is_refused():
+    """Participants go through PARTICIPANTS/CLI so their ids get normalised."""
+    config = load(UNSUPERVISED_CONFIG)
+    config.defrost()
+    config.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.FILTERS.participant = ["P015"]
+    with pytest.raises(ValueError, match="PARTICIPANTS"):
+        build_filters(config.UNSUPERVISED.DATA)
 
 
 def test_explicit_participants_list_is_used_when_no_cli_argument():
@@ -146,6 +156,6 @@ def test_posture_filter_from_the_config_reaches_the_loader(tmp_path):
     data.PREPROCESS.CHUNK_LENGTH = 8
     data.PREPROCESS.CHUNK_STRIDE = 8
     data.PREPROCESS.TRACES = ["ABP"]
-    data.PREPROCESS.NECKFLIX.POSTURES = ["45"]
+    data.PREPROCESS.NECKFLIX.FILTERS.posture = ["45"]
     dataset = NeckflixDataset(zarr_config(data))
     assert {rec for rec, _ in dataset.samples} == {"P020_S01_R2_45_D"}

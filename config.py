@@ -108,7 +108,6 @@ _C.TRAIN.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
 _C.TRAIN.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
 _C.TRAIN.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
 _C.TRAIN.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
-_C.TRAIN.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
 _C.TRAIN.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = True
 
 
@@ -186,7 +185,6 @@ _C.VALID.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
 _C.VALID.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
 _C.VALID.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
 _C.VALID.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
-_C.VALID.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
 _C.VALID.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = True
 
 # -----------------------------------------------------------------------------
@@ -266,7 +264,6 @@ _C.TEST.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
 _C.TEST.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
 _C.TEST.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
 _C.TEST.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
-_C.TEST.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
 _C.TEST.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = False
 # -----------------------------------------------------------------------------
 # Unsupervised method settings
@@ -332,7 +329,6 @@ _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.TRACES= ['CVP','ABP','ECG']
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.CVP_NORM= [-20,30]
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.ABP_NORM= [0,200]
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.ECG_NORM= [-1500,1500]
-_C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.POSTURES = ['0','45','90']
 _C.UNSUPERVISED.DATA.PREPROCESS.NECKFLIX.RANDOM_CHUNK = False
 
 # -----------------------------------------------------------------------------
@@ -360,10 +356,10 @@ def _add_neckflix_zarr_keys(preprocess):
     neckflix.ALLOW_MISSING = True
     neckflix.MIN_CHANNELS = 1
     neckflix.MIN_LABELS = 1
-    # Store-attribute include filters; [] means "no filter on this attribute".
-    neckflix.PERSPECTIVES = []      # camera keys, e.g. ['1'] or [1]
-    neckflix.LIGHT = []             # 'D' / 'N'
-    neckflix.SESSIONS = []          # e.g. ['S01']
+    # Store-attribute include filters, keyed by the attr as the store spells it
+    # (plus the 'perspective' pseudo-attr): FILTERS: {posture: ['0','45'], light:
+    # ['D']}. new_allowed, so a YAML can filter on any attr its cache carries.
+    neckflix.FILTERS = CN(new_allowed=True)
     neckflix.PARTICIPANTS = []      # explicit include list; LOSO uses --test_participants
 
 

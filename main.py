@@ -184,7 +184,7 @@ def _require_non_empty(dataset, split):
     if len(dataset) == 0:
         raise ValueError(
             f"The {split} dataset is empty. Check CACHED_PATH, the participant "
-            "arguments and the NECKFLIX filters (POSTURES/LIGHT/PERSPECTIVES)."
+            "arguments and the NECKFLIX.FILTERS attribute filters."
         )
 
 
@@ -206,15 +206,18 @@ def apply_experiment_naming(config, args):
                 ("resize height", train_pre.RESIZE.H, test_pre.RESIZE.H),
                 ("channels", resolve_channels(config.TRAIN.DATA), resolve_channels(config.TEST.DATA)),
                 ("traces", resolve_traces(config.TRAIN.DATA), resolve_traces(config.TEST.DATA)),
-                ("postures", train_pre.NECKFLIX.POSTURES, test_pre.NECKFLIX.POSTURES)):
+                ("filters", train_pre.NECKFLIX.FILTERS, test_pre.NECKFLIX.FILTERS)):
             if left != right:
                 raise ValueError(f"Train and test {name} must be the same!")
 
     preprocess = naming_data.PREPROCESS
     channels = ''.join(resolve_channels(naming_data))
     traces = '-'.join(resolve_traces(naming_data))
-    postures = '-'.join(preprocess.NECKFLIX.POSTURES)
-    exp_name = f"TRACES-{traces}_POSTURES-{postures}_CHANNELS-{channels}" \
+    filters = ''.join(
+        f"_{str(attr).upper()}-" + '-'.join(str(v) for v in values)
+        for attr, values in sorted(preprocess.NECKFLIX.FILTERS.items()) if values
+    )
+    exp_name = f"TRACES-{traces}{filters}_CHANNELS-{channels}" \
                f"_H-{preprocess.RESIZE.H}_W-{preprocess.RESIZE.W}"
     if args.test_participants:
         held_out = '_'.join(normalise_participant(p) for p in args.test_participants)

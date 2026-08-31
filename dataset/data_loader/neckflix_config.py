@@ -14,14 +14,6 @@ import re
 
 from neural_methods.signals import resolve_channels, resolve_traces
 
-#: Attribute each config list filters on, in store-attr terms.
-_LIST_FILTERS = (
-    ("POSTURES", "posture"),
-    ("PERSPECTIVES", "perspective"),
-    ("LIGHT", "light"),
-    ("SESSIONS", "session"),
-)
-
 _PARTICIPANT_PREFIX = re.compile(r"^[Pp](?=\d)")
 
 
@@ -48,16 +40,27 @@ def participant_filter(include=(), exclude=()) -> dict:
 def build_filters(config_data, *, include_participants=(), exclude_participants=()) -> dict:
     """Attribute include/exclude filters from a ``DATA`` block plus LOSO ids.
 
-    A configured list of ``[]`` means "do not filter on this attribute"; a
-    non-empty list becomes an include whitelist. Values are left as configured
-    — the loader ``str()``-coerces where it must (``perspective``).
+    ``NECKFLIX.FILTERS`` maps store root attrs (or the ``perspective``
+    pseudo-attr) to include whitelists — whatever attrs the cache carries, no
+    fixed key list. ``[]`` means "do not filter on this attribute". Values are
+    left as configured — the loader ``str()``-coerces where it must
+    (``perspective``). Participants stay a separate surface
+    (``PARTICIPANTS`` / the LOSO arguments) because their ids are normalised;
+    a ``participant`` key in ``FILTERS`` is refused rather than left to
+    bypass that normalisation.
     """
     neckflix = config_data.PREPROCESS.NECKFLIX
     filters = {}
-    for key, attribute in _LIST_FILTERS:
-        values = list(getattr(neckflix, key, []) or [])
+    for attribute, values in getattr(neckflix, "FILTERS", {}).items():
+        if str(attribute) == "participant":
+            raise ValueError(
+                "Filter participants with NECKFLIX.PARTICIPANTS or the "
+                "participant arguments, not FILTERS.participant — those "
+                "paths normalise ids (P015 -> 015); this one would not."
+            )
+        values = list(values or [])
         if values:
-            filters[attribute] = {"include": values, "exclude": []}
+            filters[str(attribute)] = {"include": values, "exclude": []}
 
     configured = list(getattr(neckflix, "PARTICIPANTS", []) or [])
     include = list(include_participants or ()) or configured

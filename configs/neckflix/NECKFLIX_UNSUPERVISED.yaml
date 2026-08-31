@@ -34,7 +34,8 @@ UNSUPERVISED:
       NECKFLIX:
         CHANNELS: ['R', 'G', 'B']
         TRACES: ['ABP', 'CVP', 'ECG']
-        POSTURES: ['0', '45', '90']
+        FILTERS:
+          posture: ['0', '45', '90']
         RANDOM_CHUNK: False
         LABEL_NORM: 'zscore'
         ALLOW_MISSING: True                              # recordings carry different trace subsets
