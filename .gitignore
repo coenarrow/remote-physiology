@@ -16,6 +16,10 @@ temp
 .uv_cache
 logs/
 model_outputs/
+
+# VSCode Settings
+.vscode
+
 # Local Claude state stays out, but the checked-in skills travel with the repo
 .claude/*
 !.claude/skills/
