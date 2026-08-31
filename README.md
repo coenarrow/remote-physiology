@@ -29,8 +29,10 @@ key at any point; `neural_methods/batch.py` owns the key names.
 Models are `DictModel`s implementing `forward_video(video) -> (B, S, T)`; a
 single `MultiSignalTrainer` serves all of them, so adding a model is a builder
 function and a registry line, not a new trainer. See
-[docs/architecture.md](docs/architecture.md) for the full contract and
-[CLAUDE.md](CLAUDE.md) for working conventions.
+[docs/architecture.md](docs/architecture.md) for the batch-dict and zarr cache
+contracts and [CLAUDE.md](CLAUDE.md) for working conventions; per-dataset
+cache specs live alongside the loaders in
+[dataset/data_loader/](dataset/data_loader/).
 
 ```bash
 # All seven traditional methods over Neckflix, scored against every trace

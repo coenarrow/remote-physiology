@@ -345,9 +345,84 @@ For Neckflix, no new trainer is needed -- `MultiSignalTrainer` serves every dict
 3. Add the metric name to the `METRICS` list in experiment YAML configs
 
 
+## The Zarr Cache Contract
+
+Every dataset reaches this repository the same way: a directory of **zarr
+stores, one per recording**, written by an external preprocessor. This repo
+reads the cache and never writes it. The contract below is what
+`dataset/data_loader/zarr_dataset.py` (`BaseZarrDataset`) actually enforces —
+it is dataset-agnostic; Neckflix (next section) is the worked example, and
+each legacy dataset has a markdown cache spec in `dataset/data_loader/`
+describing how its raw files map onto this schema.
+
+**Store discovery.** The configured cache directory is globbed for `*.zarr`;
+the store's filename stem is the recording name. Nothing else in the
+directory is consulted.
+
+**Admission gate** (violations skip the store with a warning; a cache where
+every store fails raises):
+
+- Root attrs must carry `complete: true` — the JSON boolean, not a string.
+  Partial preprocessor runs never get it, so half-written stores are invisible.
+- Root attrs must carry `tool_version` parsing to `>= 1.0.0` (unparseable
+  counts as 0). Pre-1.0.0 Neckflix stores were delta-encoded and would decode
+  to garbage; the floor is the raw-frame format.
+
+**Structure.** Inside a store:
+
+```
+{recording}.zarr
+  attrs: complete, tool_version, [recording], [any filterable attributes...]
+  {perspective}/              one group per camera view ("1", "2", ...)
+    {stream}/                 one group per modality (rgb, ir, depth, ...)
+      video/frames            (C, T, H, W) array of raw pixels
+      video/  attrs: num_frames (required), fps
+      {trace}/data            (T,) float, physical units, lowercase key
+```
+
+- A group under a perspective counts as a *stream* only if it has a `video`
+  child; anything else (e.g. a root-level `events/` group) is ignored.
+- `video.attrs["num_frames"]` is **required** — window enumeration reads it
+  without touching pixels; a stream missing it is an error, not a skip.
+- `fps` is written by the preprocessor but currently informational: the
+  sampling rate used for evaluation comes from the config's `FS`.
+- Trace groups sit *inside* each stream group, keyed **lowercase** (`abp`,
+  `cvp`, `ecg`, `bvp`, ...), index-aligned to that stream's frames. A trace
+  may be shorter than `num_frames` (trailing-NaN trimming); the loader
+  NaN-pads the tail. When several streams carry the same trace, the loader
+  takes the position-wise finite mean across copies.
+
+**Root attrs are the filter surface.** Any root attr (`participant`,
+`posture`, `light`, `session`, ...) can drive include/exclude filters and
+LOSO fold enumeration; `perspective` works as a pseudo-attribute. Attrs are
+free-form per dataset — the cache spec for each dataset says which it
+guarantees. A store lacking a filtered attr fails any non-empty include and
+passes an exclude-only filter, with a warning.
+
+**Per-dataset code is a `channel_map` only.** A subclass declares how
+canonical channel names map onto `(stream_group, channel_index)`:
+
+```python
+class NeckflixDataset(BaseZarrDataset):
+    @property
+    def channel_map(self):
+        return {"R": ("rgb", 0), "G": ("rgb", 1), "B": ("rgb", 2),
+                "I": ("ir", 0), "D": ("depth", 0)}
+```
+
+Everything else — admission, filtering, windowing, dense zero-filled
+channels, per-window label normalisation, masks — is `BaseZarrDataset`.
+
+**What the cache does NOT contain**: no face crops, no chunking, no
+normalised pixels, no train/test splits. Frames are raw uint8/uint16 at one
+resolution; `DATA_TYPE` normalisation and resizing happen consumer-side
+(`neural_methods/frame_transforms.py`), and splits are attribute filters at
+load time. One cache serves every experiment.
+
+
 ## Neckflix Dataset
 
-The Neckflix dataset is a multimodal collection for cardiovascular pressure estimation. It reaches this repository as a **zarr cache**, one store per recording, produced by the external Neckflix preprocessor (`ghcr.io/coenarrow/neckflix` >= 1.0.0). This repo reads that cache and never writes it; the HDF5 loader it replaced is gone.
+The Neckflix dataset is a multimodal collection for cardiovascular pressure estimation — the worked example of the cache contract above. Its stores are produced by the external Neckflix preprocessor (`ghcr.io/coenarrow/neckflix` >= 1.0.0); the HDF5 loader they replaced is gone.
 
 **Cache layout** (`{cache_dir}/{recording}.zarr`, zarr v3):
 
