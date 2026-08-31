@@ -7,7 +7,7 @@ from torch import nn, Tensor, LongTensor
 from torch.nn import functional as F
 import math
 from typing import Tuple, Union
-from timm.models.layers import trunc_normal_, DropPath
+from timm.layers import trunc_normal_, DropPath
 
 
 

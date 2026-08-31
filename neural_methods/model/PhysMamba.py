@@ -21,7 +21,7 @@ import math
 import torch
 import torch.nn as nn
 from einops import rearrange
-from timm.models.layers import trunc_normal_, DropPath
+from timm.layers import trunc_normal_, DropPath
 from torch.nn import functional as F
 
 from neural_methods.model.DictModel import DictModel
