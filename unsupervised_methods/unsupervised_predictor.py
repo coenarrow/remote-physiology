@@ -1,17 +1,15 @@
 """Evaluation driver for the traditional (unsupervised) rPPG methods.
 
-Handles both dataset contracts:
+Speaks the nested batch-dict contract, evaluated **per label signal** -- ABP,
+CVP and ECG each carry the cardiac rhythm, so one video yields one HR estimate
+scored against every reference trace that recording actually has.
+``label_mask`` decides which those are, so a recording missing ABP simply
+contributes nothing to the ABP row instead of being dropped. Every window
+funnels into the same per-window HR comparison and the same metric report
+(:mod:`evaluation.metrics_report`).
 
-* the legacy tuple ``(frames, labels, filename, chunk_id)`` the upstream
-  loaders emit, evaluated against its single label; and
-* the Neckflix nested batch dict, evaluated **per label signal** -- ABP, CVP and
-  ECG each carry the cardiac rhythm, so one video yields one HR estimate scored
-  against every reference trace that recording actually has. ``label_mask``
-  decides which those are, so a recording missing ABP simply contributes
-  nothing to the ABP row instead of being dropped.
-
-Both paths funnel into the same per-window HR comparison and the same metric
-report (:mod:`evaluation.metrics_report`).
+The legacy tuple path ``(frames, labels, filename, chunk_id)`` died with
+``main.py``; the ``pre-overhaul`` tag has it.
 """
 
 from collections import defaultdict
@@ -32,7 +30,6 @@ from unsupervised_methods.methods.LGI import LGI
 from unsupervised_methods.methods.OMIT import OMIT
 from unsupervised_methods.methods.PBV import PBV
 from unsupervised_methods.methods.POS_WANG import POS_WANG
-from unsupervised_methods.utils import rgb_trace
 
 #: Every supported method, as ``(clip_or_trace, fs) -> BVP``. The rate-free
 #: methods ignore ``fs``; wrapping them here keeps the dispatch a lookup, not a
@@ -52,9 +49,6 @@ RGB_CHANNELS = ("R", "G", "B")
 
 #: Shortest window ``calculate_metric_per_video`` can filter (filtfilt padlen).
 MIN_WINDOW = 9
-
-#: Signal name reported for the legacy single-label datasets.
-LEGACY_SIGNAL = "PPG"
 
 
 def estimate_bvp(method_name, video, fs):
@@ -99,16 +93,6 @@ def _dict_windows(batch):
         yield frames_to_rgb_trace(frames, RGB_CHANNELS), references, name
 
 
-def _legacy_windows(batch):
-    """Yield the same triples from the upstream ``(frames, labels, ...)`` tuple."""
-    frames, labels = batch[0], batch[1]
-    for idx in range(frames.shape[0]):
-        video = rgb_trace(frames[idx].cpu().numpy()[..., :3])
-        reference = labels[idx].cpu().numpy()
-        name = str(batch[2][idx]) if len(batch) > 2 else str(idx)
-        yield video, {LEGACY_SIGNAL: reference}, name
-
-
 def _window_size(config, n_frames):
     """Evaluation window length in frames, clipped to what the clip provides."""
     window_cfg = config.INFERENCE.EVALUATION_WINDOW
@@ -140,9 +124,13 @@ def _accumulate(config, data_loader, method_names):
     groups = {method: defaultdict(lambda: defaultdict(list)) for method in method_names}
 
     for test_batch in tqdm(data_loader, ncols=80):
-        windows = _dict_windows(test_batch) if is_batch_dict(test_batch) \
-            else _legacy_windows(test_batch)
-        for video, references, _name in windows:
+        if not is_batch_dict(test_batch):
+            raise TypeError(
+                "unsupervised_predictor speaks only the batch-dict contract; "
+                "the legacy tuple path died with main.py (see the "
+                "pre-overhaul tag)."
+            )
+        for video, references, _name in _dict_windows(test_batch):
             window_frame_size = _window_size(config, video.shape[0])
             for method_name in method_names:
                 bvp = estimate_bvp(method_name, video, fs)
@@ -185,7 +173,6 @@ def _report(config, method_name, signal_groups):
         return {}
 
     hr_method = _hr_method(config)
-    multi_signal = set(signal_groups) != {LEGACY_SIGNAL}
     report = {}
     for signal in sorted(signal_groups):
         group = signal_groups[signal]
@@ -193,7 +180,7 @@ def _report(config, method_name, signal_groups):
             group["gt"], group["pred"], group["snr"], group["macc"],
             metrics=config.UNSUPERVISED.METRICS, config=config,
             filename_id=filename_id, hr_method=hr_method,
-            scope=signal if multi_signal else "")
+            scope=signal)
     return report
 
 

@@ -22,7 +22,7 @@ from unsupervised_methods.methods.OMIT import OMIT
 from unsupervised_methods.methods.PBV import PBV
 from unsupervised_methods.methods.POS_WANG import POS_WANG
 from unsupervised_methods.unsupervised_predictor import (
-    BVP_ESTIMATORS, MIN_WINDOW, _dict_windows, _legacy_windows, estimate_bvp,
+    BVP_ESTIMATORS, MIN_WINDOW, _dict_windows, estimate_bvp,
 )
 
 FS = 30
@@ -164,16 +164,6 @@ def test_dict_windows_requires_rgb_channels():
         list(_dict_windows(batch))
 
 
-def test_legacy_tuple_contract_still_supported():
-    clip = pulsatile_clip(n_frames=64, hw=(5, 4))
-    batch = (torch.from_numpy(clip).float().unsqueeze(0),
-             torch.randn(1, 64), ["subject3"], torch.tensor([0]))
-    (trace, references, name), = list(_legacy_windows(batch))
-    assert trace.shape == (64, 3)
-    assert set(references) == {"PPG"}
-    assert name == "subject3"
-
-
 @pytest.mark.parametrize("method", ALL_METHODS)
 def test_every_method_runs_over_a_dict_batch(method):
     batch = default_collate([_neckflix_sample(t=256), _neckflix_sample(t=256)])
@@ -229,14 +219,14 @@ def test_predictor_reports_one_row_per_signal_over_dict_batches():
     assert all(row["n"] > 0 for row in report.values())
 
 
-def test_predictor_still_handles_the_legacy_tuple_contract():
+def test_predictor_rejects_a_legacy_tuple_batch():
+    """The tuple path died with main.py; a clear TypeError beats silent nonsense."""
     from unsupervised_methods.unsupervised_predictor import unsupervised_predict
     clip = pulsatile_clip(n_frames=256, hw=(5, 4))
     batches = [(torch.from_numpy(clip).float().unsqueeze(0),
-                torch.from_numpy(np.sin(2 * np.pi * 1.2 * np.arange(256) / FS)).float().unsqueeze(0),
-                ["subject1"], torch.tensor([0]))]
-    report = unsupervised_predict(_predictor_config(), {"unsupervised": batches}, "CHROM")
-    assert set(report) == {"PPG"}
+                torch.randn(1, 256), ["subject1"], torch.tensor([0]))]
+    with pytest.raises(TypeError, match="batch-dict contract"):
+        unsupervised_predict(_predictor_config(), {"unsupervised": batches}, "CHROM")
 
 
 def test_predict_many_matches_running_each_method_alone():
