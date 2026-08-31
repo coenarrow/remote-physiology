@@ -1,9 +1,10 @@
-"""Lazy torch datasets over external Neckflix-preprocessor zarr caches.
+"""Lazy torch datasets over external zarr caches.
 
-Ported from CardioHydra src/dataset/base.py; see the design spec at
-docs/superpowers/specs/2026-08-30-neckflix-zarr-loader-design.md for the
-contract and the sanctioned deviations (1-7). The cache is an external input
-produced by ghcr.io/coenarrow/neckflix (>= 1.0.0); this module never writes it.
+The cache contract — store layout, root attrs, admission rules — is documented
+in docs/architecture.md. Each cache is an external input written by its
+dataset's preprocessor (for Neckflix: ghcr.io/coenarrow/neckflix >= 1.0.0);
+this module never writes it. Per-dataset code is a ``channel_map`` subclass
+plus a markdown cache spec beside it in this directory.
 """
 
 import warnings
@@ -16,16 +17,15 @@ import zarr
 
 from dataset.data_loader.label_transforms import STAT_NAMES, apply_norm, finite_stats
 
-# Sentinel for root attrs absent from a store (deviation 2).
+# Sentinel for root attrs absent from a store.
 _MISSING = object()
 
 
 def _validate_filters(filters):
-    """Reject overlapping include/exclude upfront (deviation 6).
+    """Reject overlapping include/exclude at construction.
 
-    CardioHydra checks lazily inside the per-sample loop, where an overlap can
-    pass silently when no sample reaches that attribute; this port validates
-    unconditionally at construction.
+    A lazy per-sample check could pass silently when no admitted sample
+    carries the attribute, so this validates unconditionally upfront.
     """
     for attribute, spec in (filters or {}).items():
         overlap = set(spec.get("include", [])) & set(spec.get("exclude", []))
@@ -36,10 +36,11 @@ def _validate_filters(filters):
 
 
 class BaseZarrDataset(ABC, torch.utils.data.Dataset):
-    """Abstract lazy dataset over Neckflix-preprocessor zarr stores.
+    """Abstract lazy dataset over external zarr stores.
 
     Subclasses provide only ``channel_map``. Construction is metadata-only:
-    no pixel data is read until ``__getitem__``.
+    no pixel data is read until ``__getitem__``. Attribute filtering is
+    generic — whatever root attrs a store carries can be filtered on.
     """
 
     MIN_TOOL_VERSION = (1, 0, 0)  # raw-frame cache format floor
@@ -105,8 +106,8 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
         if not self.cache_root.exists():
             raise FileNotFoundError(
                 f"Cache directory not found: {self.cache_root}. The zarr cache "
-                "is an external input — generate it with the Neckflix "
-                "preprocessor (ghcr.io/coenarrow/neckflix) first."
+                "is an external input — generate it with the dataset's "
+                "preprocessor first (Neckflix: ghcr.io/coenarrow/neckflix)."
             )
 
         cache_dict: dict = {}
@@ -122,7 +123,7 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
             if attrs.get("complete") is not True:
                 warnings.warn(
                     f"Skipping {store_path.name}: no 'complete: true' root attr "
-                    "(partial run or pre-Neckflix store); regenerate it."
+                    "(partial or pre-contract preprocessor run); regenerate it."
                 )
                 continue
             version = str(attrs.get("tool_version", "0"))
@@ -153,7 +154,7 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
             raise RuntimeError(
                 f"No usable zarr stores under {self.cache_root} — every store "
                 "was missing, incomplete, or pre-1.0.0. Regenerate the cache "
-                "with the Neckflix preprocessor (ghcr.io/coenarrow/neckflix)."
+                "with the dataset's preprocessor."
             )
         return cache_dict
 
@@ -204,15 +205,14 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
     def _filter_by_attribute(self, filters=None) -> None:
         """Filter ``self.samples`` in place by attribute include/exclude.
 
-        ``filters`` is ``{attribute: {"include": [...], "exclude": [...]}}``:
-        a value in ``exclude`` drops the sample; a non-empty ``include``
-        whitelists. The pseudo-attribute ``"perspective"`` compares
-        ``str()``-coerced values against the sample's perspective key
-        (deviation 3). A sample whose store lacks a root attr fails any
-        non-empty include and passes an exclude-only filter; one UserWarning
-        per affected attribute is emitted after the pass (deviation 2 —
-        CardioHydra raises KeyError instead). Overlap validation already
-        happened upfront in ``__init__`` (deviation 6).
+        ``filters`` is ``{attribute: {"include": [...], "exclude": [...]}}``,
+        keyed by whatever root attrs the stores carry: a value in ``exclude``
+        drops the sample; a non-empty ``include`` whitelists. The
+        pseudo-attribute ``"perspective"`` compares ``str()``-coerced values
+        against the sample's perspective key. A sample whose store lacks a
+        root attr fails any non-empty include and passes an exclude-only
+        filter; one UserWarning per affected attribute is emitted after the
+        pass. Overlap validation already happened upfront in ``__init__``.
         """
         filters = filters or {}
         missing: dict[str, set[str]] = {}
@@ -251,7 +251,7 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
 
     def attribute_values(self, attribute: str) -> list[str]:
         """Sorted unique values of a root attr (or 'perspective') over the
-        current samples — the LOSO fold-enumeration primitive (deviation 5).
+        current samples — the LOSO fold-enumeration primitive.
 
         Values are ``str()``-coerced before sorting; samples whose store lacks
         the attribute are silently skipped.
@@ -290,7 +290,7 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
                 raise RuntimeError(
                     f"{store_path.name}/{perspective}/{stream_name}: missing "
                     "video group or 'num_frames' attr; regenerate this store "
-                    "with the Neckflix preprocessor."
+                    "with the dataset's preprocessor."
                 ) from err
             length = n if length is None else min(length, n)
         assert length is not None, f"no streams for {recording_name}/{perspective}"
@@ -357,11 +357,11 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
         self._stream_hw_complete = True
 
     def _window_trace(self, stream, trace_key: str, start: int, end: int) -> np.ndarray:
-        """Slice one trace copy, NaN-right-padded to the window (deviation 7).
+        """Slice one trace copy, NaN-right-padded to the window.
 
         Per-stream trailing-NaN trimming can leave a trace shorter than its
         stream's ``num_frames``; a window overlapping that tail yields a short
-        slice, padded here so copies always align. CardioHydra crashes on this.
+        slice, padded here so copies always align.
         """
         data = stream[trace_key]["data"]
         stop = min(end, int(data.shape[0]))
@@ -376,7 +376,8 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
         """Position-wise mean over finite values across trace copies.
 
         Positions where every copy is non-finite stay NaN (absorbed by the
-        deviation-4 guard downstream). Warning-free equivalent of np.nanmean.
+        post-norm NaN zeroing downstream). Warning-free equivalent of
+        np.nanmean.
         """
         stacked = np.stack(arrays)                       # (n_copies, T)
         finite = np.isfinite(stacked)
@@ -389,7 +390,7 @@ class BaseZarrDataset(ABC, torch.utils.data.Dataset):
 
         frames: {channel: (1, T, H, W) float32} raw pixels, zeros where the
         stream is absent; labels: {label: (T,) float32} normalised per
-        ``label_norm`` with finite-only stats (deviation 4); label_stats:
+        ``label_norm`` with finite-only stats; label_stats:
         physical-unit stats that normalised each window; channel_mask /
         label_mask: scalar bools; metadata: recording_id / camera_id /
         start_frame.

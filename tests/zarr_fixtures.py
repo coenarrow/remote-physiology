@@ -1,8 +1,8 @@
 """Synthetic Neckflix zarr-v3 stores for loader tests.
 
 Mirrors the store schema written by the Neckflix preprocessor
-(ghcr.io/coenarrow/neckflix >= 1.0.0); see the design spec at
-docs/superpowers/specs/2026-08-30-neckflix-zarr-loader-design.md.
+(ghcr.io/coenarrow/neckflix >= 1.0.0); the cache contract is documented in
+docs/architecture.md.
 """
 
 import numpy as np

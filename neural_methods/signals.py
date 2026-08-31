@@ -1,8 +1,8 @@
 """Canonical physiological signal and camera-channel registries.
 
 Single source of truth for the multi-signal pipeline (see
-docs/superpowers/specs/2026-08-25-multisignal-pipeline-design.md).
-Signal names cover exactly what this repo's dataloaders provide.
+docs/architecture.md). Signal names cover exactly what this repo's
+dataloaders provide.
 """
 import numpy as np
 

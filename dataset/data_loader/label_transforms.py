@@ -1,7 +1,6 @@
 """Per-window label normalisation and the statistics that generate it.
 
-Ported from CardioHydra src/transforms/labels.py (see the design spec at
-docs/superpowers/specs/2026-08-30-neckflix-zarr-loader-design.md). The dataset
+The dataset
 normalises each label window at load time and stamps the generating statistics
 into the batch, so the model learns waveform shape and absolute scale as
 separate problems. Both normalisations share one signature and return the same

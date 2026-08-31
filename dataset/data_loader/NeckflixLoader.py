@@ -1,8 +1,8 @@
 """Neckflix dataset over the preprocessor zarr cache.
 
 Provides only the Neckflix channel map; all loading logic lives in
-``BaseZarrDataset``. Replaces the retired HDF5-cache loader — see the design
-spec at docs/superpowers/specs/2026-08-30-neckflix-zarr-loader-design.md.
+``BaseZarrDataset``. The cache is written by ghcr.io/coenarrow/neckflix
+(>= 1.0.0); the store contract is documented in docs/architecture.md.
 """
 
 from dataset.data_loader.zarr_dataset import BaseZarrDataset

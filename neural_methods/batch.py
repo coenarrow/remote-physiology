@@ -1,7 +1,7 @@
 """The Neckflix batch dict: key names and the einops moves in and out of it.
 
 The zarr loader emits nested dicts keyed by canonical channel and signal names
-(see ``docs/superpowers/specs/2026-08-30-neckflix-zarr-loader-design.md``), and
+(the contract is documented in ``docs/architecture.md``), and
 those dicts travel unchanged through models, losses and evaluation. This module
 is the single place that knows the key names and the exactly two shape moves the
 contract needs: packing ``frames`` into a backbone tensor, and splitting a
