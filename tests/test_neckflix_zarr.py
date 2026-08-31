@@ -73,3 +73,35 @@ def test_dataloader_end_to_end_smoke(tmp_path):
         assert batch["label_mask"][sig].all()
     assert batch["metadata"]["recording_id"][0] == "P030_S01_R1_0_D"
     assert batch["metadata"]["start_frame"].dtype == torch.int64
+
+
+def test_dataset_keys_are_exactly_the_declared_contract(tmp_path):
+    """The dataset and neural_methods.batch must not drift apart."""
+    from neural_methods.batch import (
+        CAMERA_ID, LOADER_KEYS, METADATA, RECORDING_ID, START_FRAME,
+    )
+
+    make_store(tmp_path, "P030_S01_R1_0_D", num_frames=12)
+    item = NeckflixDataset(base_cfg(tmp_path, window_size=4))[0]
+    assert set(item) == set(LOADER_KEYS)
+    assert set(item[METADATA]) == {RECORDING_ID, CAMERA_ID, START_FRAME}
+
+
+def test_model_consumes_the_dataset_output_unchanged(tmp_path):
+    """Loader -> collate -> model, with no adapter in between."""
+    from torch.utils.data import DataLoader
+
+    from neural_methods.batch import PREDICTIONS
+    from neural_methods.frame_transforms import FrameTransform
+    from neural_methods.model.PhysMamba import PhysMamba
+
+    make_store(tmp_path, "P030_S01_R1_0_D", num_frames=64, hw=(32, 32))
+    dataset = NeckflixDataset(base_cfg(tmp_path, window_size=16, channels=["R", "G", "B"]))
+    batch = next(iter(DataLoader(dataset, batch_size=2, shuffle=False)))
+
+    model = PhysMamba(channels=("R", "G", "B"), traces=("ABP", "CVP"),
+                      frame_transform=FrameTransform(("DiffNormalized",), size=(32, 32)))
+    out = model(batch)
+    assert set(out) == set(batch) | {PREDICTIONS}
+    assert out[PREDICTIONS]["ABP"].shape == (2, 16)
+    assert torch.isfinite(out[PREDICTIONS]["CVP"]).all()
