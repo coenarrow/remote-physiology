@@ -67,8 +67,9 @@ URLs, and every doc written in Phases 2–8 then carries the right name.
   single-signal `.pth` weights can't load into multi-signal variants and
   upstream still hosts them.
 - `model_outputs/PURE_PURE_UBFC_deepphys_outputs.pickle` — untrack, ignore dir.
-- `figures/` — mostly upstream README art; prune in Phase 8 when the README
-  rewrite decides which images survive.
+- `figures/` — deleted entirely (decision 9): the interim README carries no
+  images, so nothing references it; Phase 8 pulls images back from history if
+  the final README wants any.
 
 **`.gitignore` fixes**:
 
@@ -222,9 +223,11 @@ contract.
 ## Phase 8 — Docs finalization
 
 - README rewritten for `remote-physiology`: mission, cache contract,
-  batch-dict contract, model table, clinical-metrics summary; prune
-  `figures/` to what it uses; upstream rPPG-Toolbox credited as the fork
-  origin.
+  batch-dict contract, model table, clinical-metrics summary; any images it
+  wants come back from git history (`figures/` was deleted in Phase 1);
+  upstream rPPG-Toolbox credited as the fork origin. An interim
+  accuracy-pass README/CLAUDE.md landed during Phase 1 — this phase is the
+  final polish, not the first correction.
 - CLAUDE.md refreshed to remove legacy-pipeline instructions.
 - `docs/architecture.md`, `docs/changelog.md`, `docs/project_status.md`
   updated; `updating_plan.md` retired into `docs/plans/`.
@@ -245,5 +248,9 @@ contract.
 8. Dependency refresh happens between Phases 3 and 4 (Phase 3.5), preceded by
    a hard pause to check system requirements on all three platforms; the
    torch/mamba-ssm/triton cluster is its own commit and may be deferred.
+9. `figures/` deleted entirely in Phase 1 (not pruned in Phase 8): the
+   interim README carries no images. Executed superpowers plans/specs and the
+   2026-02 UBFC validation plan also deleted — process artifacts, retrievable
+   from git history; `docs/architecture.md` is the living contract reference.
 
 Last updated: 2026-08-31

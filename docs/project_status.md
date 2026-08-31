@@ -8,8 +8,8 @@
   construction, participant/posture/perspective filters, per-window label
   normalisation)
 - Batch-dict contract end to end: loader dicts survive models, losses and
-  evaluation, keyed by canonical channel/signal name
-  (`docs/superpowers/specs/2026-08-31-neckflix-dict-contract-design.md`)
+  evaluation, keyed by canonical channel/signal name (see
+  `docs/architecture.md`; the original design spec lives in git history)
 - All seven unsupervised methods running on Neckflix, scored per trace
   (POS/ICA/PBV also repaired after NumPy 2 removed the APIs they used)
 - PhysMamba running on Neckflix, predicting ABP + CVP + ECG together, verified
