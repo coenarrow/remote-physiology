@@ -30,10 +30,13 @@ key at any point; `neural_methods/batch.py` owns the key names.
 
 Models are `DictModel`s implementing `forward_video(video) -> (B, S, T)`; a
 single `MultiSignalTrainer` serves all of them, so adding a model is a builder
-function and a registry line, not a new trainer. See
-[docs/architecture.md](docs/architecture.md) for the batch-dict and zarr cache
-contracts and [CLAUDE.md](CLAUDE.md) for working conventions; per-dataset
-cache specs live alongside the loaders in
+function and a registry line, not a new trainer. How a model is migrated or
+added — config sources, multi-signal heads, per-signal losses, the prediction
+contract — is specified in
+[the migration contract](docs/plans/2026-08-31-model-migration-contract.md).
+See [docs/architecture.md](docs/architecture.md) for the batch-dict and zarr
+cache contracts and [CLAUDE.md](CLAUDE.md) for working conventions;
+per-dataset cache specs live alongside the loaders in
 [dataset/data_loader/](dataset/data_loader/).
 
 ```bash
@@ -82,9 +85,11 @@ one.
 unsupervised methods (GREEN, ICA, CHROM, LGI, PBV, POS, OMIT), each scored
 against every trace a recording carries.
 
-**Inherited from upstream, awaiting migration** (see the roadmap): DeepPhys,
-TS-CAN, EfficientPhys, PhysNet, iBVPNet, FactorizePhys, PhysFormer,
-RhythmFormer, BigSmall — and PhysHydra, this fork's own architecture. The
+**Inherited from upstream, awaiting migration** (per
+[the migration contract](docs/plans/2026-08-31-model-migration-contract.md)
+and the roadmap): DeepPhys, TS-CAN, EfficientPhys, PhysNet, iBVPNet,
+FactorizePhys, PhysFormer, RhythmFormer, BigSmall — and PhysHydra, this
+fork's own architecture. The
 original papers are linked from the
 [upstream README](https://github.com/ubicomplab/rPPG-Toolbox#notebook-algorithms).
 

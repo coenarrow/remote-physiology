@@ -47,9 +47,13 @@
 
 ## To Do
 
-- Move the remaining architectures onto the dict contract (PhysNet, PhysFormer,
-  RhythmFormer, iBVPNet, FactorizePhys, EfficientPhys, TS-CAN, BigSmall,
-  PhysHydra); each is a `forward_video` signature change plus a registry line
+- Model migrations per
+  [the migration contract](plans/2026-08-31-model-migration-contract.md):
+  first the **DeepPhys pilot** (lands the shared infrastructure — raw-unit
+  pressure losses, physical-time windowing, checkpoint-authority channel
+  alignment, standard plots), then one agent per model for TS-CAN,
+  EfficientPhys, PhysNet, iBVPNet, FactorizePhys, PhysFormer, RhythmFormer,
+  BigSmall; PhysHydra follows its own path
 - Pressure-specific metrics: systolic/diastolic detection, clinical agreement
   bands, morphology — the current report is waveform correlation plus the
   inherited HR metrics

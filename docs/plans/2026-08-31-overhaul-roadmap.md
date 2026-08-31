@@ -154,6 +154,11 @@ Each migration: `DictModel` with `forward_video(video) -> (B, S, T)`, a
 `MODEL_REGISTRY` builder line, a config, a smoke test — and **delete the
 legacy trainer** as each model moves onto `MultiSignalTrainer`.
 
+The full instruction set for every migration (config sources, head styles,
+per-signal losses and absolute scale, physical-time windowing, the
+prediction contract, plots, the per-model recipe) is
+[the migration contract](2026-08-31-model-migration-contract.md).
+
 Wave 1 = the 2-D per-frame backbones (near-mechanical via
 `SignalDictWrapper(input_mode='frames2d')`):
 
@@ -275,5 +280,22 @@ contract.
     the `dev` group (`uv sync --no-dev` on the HPC), orphans dropped
     (pyqt5, opencv, thop, tensorboardX, scikit-image, neurokit2, pdf/crypto
     tools).
+12. Phase 4 redesigned around
+    [the migration contract](2026-08-31-model-migration-contract.md), which
+    supersedes the bare recipe above. Wave 1 rescoped to a **DeepPhys
+    pilot** that lands the shared infrastructure (physical-time windowing —
+    `WINDOW_SECONDS` + mandatory `FPS`, tolerance-snapped exact T,
+    decimating loader, upsampling refused; per-signal label norm with `raw`
+    physical units for ABP/CVP; the per-signal composite loss — CCC + L1
+    mean/soft-peaks in mmHg for absolute-class signals, negpearson for
+    shape-class — inside the masked per-sample structure; `stack_frames`
+    checkpoint-authority zero-fill; standard plots), after which each
+    remaining model is one sub-agent following the contract. Decided
+    against: global/dataset normalisation constants (models predict
+    physical units off an activation-free head; per-signal scale factors
+    live in loss weights), a separate stats head (stats derive from the
+    predicted waveform), and per-window norm for pressure signals (needs
+    test-time ground truth — circular). TS-CAN/EfficientPhys follow the
+    pilot rather than accompanying it.
 
 Last updated: 2026-08-31

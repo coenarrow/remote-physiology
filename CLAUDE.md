@@ -203,6 +203,12 @@ predictions to `TEST.OUTPUT_SAVE_DIR`; SLURM logs to `logs/`.
 
 ## Adding a Model
 
+**Read [the migration contract](docs/plans/2026-08-31-model-migration-contract.md)
+first** — the authoritative instructions for migrating or adding any model:
+where config values come from, head styles, per-signal losses and absolute
+scale, physical-time windowing (`WINDOW_SECONDS` + `FPS`), the prediction
+contract, plots, and the per-model recipe. The short version:
+
 No new trainer. `MultiSignalTrainer` serves every dict-contract model.
 
 1. Make the architecture a `DictModel` implementing
