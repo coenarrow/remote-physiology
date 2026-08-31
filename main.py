@@ -1,12 +1,10 @@
-"""Entry point for the Neckflix zarr pipeline.
+"""Entry point for the zarr pipeline (formerly ``neckflix_main.py``).
 
 Everything downstream of the loader speaks the nested batch dict (see
 :mod:`neural_methods.batch`), so this script is short: translate the YAML into
 the loader's plain-dict config, build the splits, and hand them to either the
-dict-contract trainer or the unsupervised predictor.
-
-``main.py`` remains the entry point for the upstream tuple-contract datasets
-(PURE, UBFC-rPPG, ...); the two do not share a loader contract.
+dict-contract trainer or the unsupervised predictor. The legacy tuple-contract
+entry point this file replaces lives at the ``pre-overhaul`` tag.
 
 Splits are participant-based (LOSO): the test split *includes* the named
 participants and the train split *excludes* them. There is no percentage
@@ -14,14 +12,14 @@ slicing — the zarr cache has no notion of it.
 
 Usage:
     Single process:
-        uv run python neckflix_main.py --config_file <config> --test_participants P015
+        uv run python main.py --config_file <config> --test_participants P015
 
     Single-node multi-GPU:
         uv run python -m torch.distributed.run --nproc_per_node=4 \
-            neckflix_main.py --config_file <config> --test_participants P015
+            main.py --config_file <config> --test_participants P015
 
     Unsupervised methods over the whole cache (no participant argument needed):
-        uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
+        uv run python main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
 """
 
 import argparse

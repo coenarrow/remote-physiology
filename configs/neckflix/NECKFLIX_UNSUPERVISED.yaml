@@ -3,7 +3,7 @@
 # The cache carries no PPG; ABP, CVP and ECG each carry the cardiac rhythm, so
 # every window is scored separately against whichever of them that recording
 # actually has (label_mask decides). Run with:
-#   uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
+#   uv run python main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
 BASE: ['']
 TOOLBOX_MODE: "unsupervised_method"
 DEVICE: cpu

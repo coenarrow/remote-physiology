@@ -4,7 +4,7 @@
 # training and are the whole test set. Recordings that lack one of the traces
 # still train the others (ALLOW_MISSING + label_mask).
 #
-#   uv run python neckflix_main.py \
+#   uv run python main.py \
 #       --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml \
 #       --test_participants P015
 BASE: ['']

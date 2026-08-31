@@ -40,11 +40,11 @@ Test runs use **2 GPUs** — if it works on 2, assume it works on 3 and 4.
 
 Scripts live in [.slurm_scripts/](../../../.slurm_scripts/) as `<Dataset>_<Model>_<Options>.slurm`.
 Copy an existing script rather than writing from scratch —
-`.slurm_scripts/UBFC-rPPG_DeepPhys_2GPU.slurm` is the canonical template.
+`.slurm_scripts/Neckflix_PhysMamba_4GPU.slurm` is the canonical template.
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=DeepPhys_UBFC_2GPU
+#SBATCH --job-name=Neckflix_PhysMamba_2GPU
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -52,15 +52,16 @@ Copy an existing script rather than writing from scratch —
 #SBATCH --mem=32G                  # size to the job; NEVER --mem=0
 #SBATCH --gres=gpu:v100:2
 #SBATCH --time=2:00:00
-#SBATCH --output=logs/%j_DeepPhys_UBFC_2GPU.out
-#SBATCH --error=logs/%j_DeepPhys_UBFC_2GPU.err
+#SBATCH --output=logs/%j_Neckflix_PhysMamba_2GPU.out
+#SBATCH --error=logs/%j_Neckflix_PhysMamba_2GPU.err
 
 mkdir -p logs
 cd "/group/pgh004/carrow/repo/rPPG-Toolbox"
 module load cuda
 
 uv run python -m torch.distributed.run --nproc_per_node=2 \
-    main.py --config_file .configs/UBFC-rPPG_UBFC-rPPG_UBFC-rPPG_DEEPPHYS.yaml
+    main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml \
+    --test_participants P015
 ```
 
 Required in every script:
@@ -69,7 +70,7 @@ Required in every script:
 - **`module load cuda`** — GPU jobs fail without it
 - **`uv run`** for all Python; never bare `python`
 - **`--nproc_per_node` must equal the `--gres` GPU count**
-- **`--mem`** set to the minimum the job needs (the 2-GPU UBFC-rPPG DeepPhys run uses 32G)
+- **`--mem`** set to the minimum the job needs (a 2-GPU dev run fits in 32G)
 
 ## Job Arrays: LOSO Cross-Validation
 
@@ -82,7 +83,7 @@ PORT=$((29500 + (SLURM_JOB_ID % 1000) + SLURM_ARRAY_TASK_ID))
 PARTICIPANT=$(printf "P%03d" "${SLURM_ARRAY_TASK_ID}")
 
 uv run python -m torch.distributed.run --nproc_per_node=4 --master_port="${PORT}" \
-    neckflix_main.py --config_file <config> --test_participants "${PARTICIPANT}"
+    main.py --config_file <config> --test_participants "${PARTICIPANT}"
 ```
 
 Always derive the port from the job ID. Fixed ports collide across concurrent jobs.
@@ -98,7 +99,8 @@ salloc --job-name=Interactive_Session --partition=pophealth \
 
 module load cuda
 cd /mmfs1/data/group/pgh004/carrow/repo/rPPG-Toolbox
-uv run python neckflix_main.py --config_file physhydra_configs/physHydra_RGB_CVP.yaml
+uv run python main.py --limit_windows 8 --test_participants P015 \
+    --config_file configs/neckflix/NECKFLIX_PHYSMAMBA_SMOKE.yaml
 exit    # release the allocation when done
 ```
 

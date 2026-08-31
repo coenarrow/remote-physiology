@@ -35,7 +35,7 @@ fi
 echo "Job ${SLURM_ARRAY_JOB_ID} task ${SLURM_ARRAY_TASK_ID}: holding out ${PARTICIPANT}"
 echo "Node: ${SLURMD_NODENAME}"
 
-uv run python neckflix_main.py \
+uv run python main.py \
     --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml \
     --test_participants "${PARTICIPANT}" \
     --num_workers ${SLURM_CPUS_PER_TASK}

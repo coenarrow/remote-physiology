@@ -20,6 +20,6 @@ cd "/group/pgh004/carrow/repo/rPPG-Toolbox"
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURMD_NODENAME}"
 
-uv run python neckflix_main.py \
+uv run python main.py \
     --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml \
     --num_workers ${SLURM_CPUS_PER_TASK}

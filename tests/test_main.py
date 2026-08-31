@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 import pytest
 
-import neckflix_main
+import main
 from config import get_config
 from tests.zarr_fixtures import make_store
 
@@ -46,7 +46,7 @@ def _args(**overrides):
 # --- splits --------------------------------------------------------------
 def test_loso_splits_are_disjoint_by_participant(cache):
     config = _config(PHYSMAMBA_CONFIG, cache, USE_LAST_EPOCH=True)
-    loaders = neckflix_main.build_data_loaders(
+    loaders = main.build_data_loaders(
         config, _args(test_participants=["P003"]), rank=0, world_size=1, is_main=True)
 
     def participants(loader):
@@ -60,7 +60,7 @@ def test_loso_splits_are_disjoint_by_participant(cache):
 
 def test_valid_participants_are_held_out_of_training(cache):
     config = _config(PHYSMAMBA_CONFIG, cache, USE_LAST_EPOCH=False)
-    loaders = neckflix_main.build_data_loaders(
+    loaders = main.build_data_loaders(
         config, _args(test_participants=["P003"], valid_participants=["P002"]),
         rank=0, world_size=1, is_main=True)
     train = {rec.split("_")[0] for rec, _ in loaders["train"].dataset.samples}
@@ -73,22 +73,22 @@ def test_model_selection_without_a_valid_split_is_refused(cache):
     """USE_LAST_EPOCH False with no valid split would silently test epoch 0."""
     config = _config(PHYSMAMBA_CONFIG, cache, USE_LAST_EPOCH=False)
     with pytest.raises(ValueError, match="no --valid_participants were given"):
-        neckflix_main.build_data_loaders(config, _args(test_participants=["P003"]),
+        main.build_data_loaders(config, _args(test_participants=["P003"]),
                                          rank=0, world_size=1, is_main=True)
 
 
 def test_empty_split_names_what_to_check(cache):
     config = _config(PHYSMAMBA_CONFIG, cache, USE_LAST_EPOCH=True)
     with pytest.raises(ValueError, match="dataset is empty"):
-        neckflix_main.build_data_loaders(config, _args(test_participants=["P999"]),
+        main.build_data_loaders(config, _args(test_participants=["P999"]),
                                          rank=0, world_size=1, is_main=True)
 
 
 def test_limit_windows_subsamples_evenly(cache):
     config = _config(PHYSMAMBA_CONFIG, cache, USE_LAST_EPOCH=True)
-    full = neckflix_main.build_data_loaders(
+    full = main.build_data_loaders(
         config, _args(test_participants=["P003"]), rank=0, world_size=1, is_main=True)
-    limited = neckflix_main.build_data_loaders(
+    limited = main.build_data_loaders(
         config, _args(test_participants=["P003"], limit_windows=2),
         rank=0, world_size=1, is_main=True)
     assert len(limited["test"].dataset) == 2 < len(full["test"].dataset)
@@ -98,7 +98,7 @@ def test_limit_windows_subsamples_evenly(cache):
 
 def test_unsupervised_mode_builds_only_its_own_loader(cache):
     config = _config(UNSUPERVISED_CONFIG, cache)
-    loaders = neckflix_main.build_data_loaders(
+    loaders = main.build_data_loaders(
         config, _args(config_file=UNSUPERVISED_CONFIG), rank=0, world_size=1,
         is_main=True)
     assert set(loaders) == {"unsupervised"}
@@ -108,7 +108,7 @@ def test_unsupervised_mode_builds_only_its_own_loader(cache):
 # --- naming ---------------------------------------------------------------
 def test_experiment_name_records_what_varies(cache):
     config = _config(PHYSMAMBA_CONFIG, cache, USE_LAST_EPOCH=True)
-    named = neckflix_main.apply_experiment_naming(
+    named = main.apply_experiment_naming(
         config, _args(test_participants=["P015"]))
     name = named.TRAIN.DATA.EXP_DATA_NAME
     assert "TRACES-ABP-CVP" in name
@@ -119,7 +119,7 @@ def test_experiment_name_records_what_varies(cache):
 
 def test_unsupervised_naming_uses_the_unsupervised_block(cache):
     config = _config(UNSUPERVISED_CONFIG, cache)
-    named = neckflix_main.apply_experiment_naming(
+    named = main.apply_experiment_naming(
         config, _args(config_file=UNSUPERVISED_CONFIG))
     assert "CHANNELS-RGB_" in named.UNSUPERVISED.DATA.EXP_DATA_NAME
     assert named.UNSUPERVISED.OUTPUT_SAVE_DIR.endswith("saved_outputs")
@@ -131,7 +131,7 @@ def test_train_test_channel_mismatch_is_rejected(cache):
     config.TEST.DATA.PREPROCESS.CHANNELS = ["R", "G"]
     config.freeze()
     with pytest.raises(ValueError, match="Train and test channels"):
-        neckflix_main.apply_experiment_naming(config, _args())
+        main.apply_experiment_naming(config, _args())
 
 
 # --- unsupervised dispatch -------------------------------------------------
@@ -141,10 +141,10 @@ def test_unknown_unsupervised_method_is_rejected(cache):
     config.UNSUPERVISED.METHOD = ["POS", "MAGIC"]
     config.freeze()
     with pytest.raises(ValueError, match="Not supported unsupervised method"):
-        neckflix_main.run_unsupervised(config, {"unsupervised": []})
+        main.run_unsupervised(config, {"unsupervised": []})
 
 
 def test_unsupervised_is_a_no_op_off_rank_zero(cache):
     config = _config(UNSUPERVISED_CONFIG, cache)
-    assert neckflix_main.run_unsupervised(config, {"unsupervised": []},
+    assert main.run_unsupervised(config, {"unsupervised": []},
                                           is_main=False) is None

@@ -25,7 +25,7 @@ echo "Job ID: ${SLURM_JOB_ID}, holding out ${PARTICIPANT}"
 echo "Node: ${SLURMD_NODENAME}"
 
 uv run python -m torch.distributed.run --nproc_per_node=4 \
-    neckflix_main.py \
+    main.py \
     --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml \
     --test_participants "${PARTICIPANT}" \
     --num_workers 4
