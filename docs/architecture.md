@@ -153,7 +153,7 @@ All experiments are controlled via YAML configuration files. The `config.py` mod
 - `CHANNELS` / `TRACES`: Camera channels to load and signals to predict
 - `CHUNK_LENGTH` / `CHUNK_STRIDE`: Window size and stride in frames
 - `RESIZE`: Target frame dimensions (`H`, `W`) -- need not match the cache resolution
-- `NECKFLIX.*`: `LABEL_NORM`, `ALLOW_MISSING`, `MIN_CHANNELS`, `MIN_LABELS`, and the attribute filters (`POSTURES`, `PERSPECTIVES`, `LIGHT`, `SESSIONS`, `PARTICIPANTS`)
+- `NECKFLIX.*`: `LABEL_NORM`, `ALLOW_MISSING`, `MIN_CHANNELS`, `MIN_LABELS`, `PARTICIPANTS` (normalised ids; LOSO uses `--test_participants`), and `FILTERS` — generic attribute include filters keyed by the store's own root attrs plus the `perspective` pseudo-attr, e.g. `FILTERS: {posture: ['0','45'], light: ['D']}`
 
 `config.py` still carries the legacy yacs bulk (`DO_PREPROCESS`, `BEGIN`/`END`, face detection, per-dataset blocks); those keys do nothing in the zarr pipeline and die with the Phase 5 config consolidation.
 

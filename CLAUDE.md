@@ -159,8 +159,13 @@ Keys the zarr loader reads (all four data blocks carry them):
 - `NECKFLIX.LABEL_NORM` — `zscore` or `minmax`, per window
 - `NECKFLIX.ALLOW_MISSING` / `MIN_CHANNELS` / `MIN_LABELS` — keep recordings
   that lack some traces
-- `NECKFLIX.POSTURES` / `PERSPECTIVES` / `LIGHT` / `SESSIONS` / `PARTICIPANTS`
-  — attribute include filters; `[]` means no filter
+- `NECKFLIX.FILTERS` — attribute include filters, keyed by the store's own
+  root attrs (plus the `perspective` pseudo-attr), e.g.
+  `FILTERS: {posture: ['0','45'], light: ['D']}`; any attr a cache carries
+  works, `[]` means no filter
+- `NECKFLIX.PARTICIPANTS` — participant include list (LOSO uses
+  `--test_participants`); separate from `FILTERS` because ids are normalised
+  (`P015` → the store's `015`)
 - `TRAIN.LOSS` — `negpearson` or `mse`, the base of the masked multi-signal
   loss
 

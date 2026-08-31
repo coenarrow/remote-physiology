@@ -252,5 +252,14 @@ contract.
    interim README carries no images. Executed superpowers plans/specs and the
    2026-02 UBFC validation plan also deleted — process artifacts, retrievable
    from git history; `docs/architecture.md` is the living contract reference.
+10. Phase 3 filter design: one generic `NECKFLIX.FILTERS` yacs node
+    (`new_allowed`, so YAML can name any attr) keyed by store root attrs plus
+    the `perspective` pseudo-attr; the fixed
+    `POSTURES`/`PERSPECTIVES`/`LIGHT`/`SESSIONS` keys are deleted, not
+    aliased. Participants remain a separate surface (`PARTICIPANTS` /
+    `--test_participants`) because their ids are normalised (`P015` → `015`);
+    a `participant` key inside `FILTERS` is refused rather than allowed to
+    bypass that normalisation. Experiment names derive their filter segment
+    generically from `FILTERS`.
 
 Last updated: 2026-08-31

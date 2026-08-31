@@ -6,6 +6,30 @@ This file tracks development milestones. As of 2026-08-25 all branches (HPC, Mac
 
 ---
 
+## 2026-08-31 — Branch: `main` — Overhaul Phases 1–3
+
+Executed per `docs/plans/2026-08-31-overhaul-roadmap.md`:
+
+- **Phase 1**: repo renamed **remote-physiology**; root scratch, upstream
+  weights (`final_model_release/`), `figures/` and stale docs deleted;
+  `.slurm_scripts/` tracked as reference material; last legacy state tagged
+  `pre-overhaul`.
+- **Phase 2**: zarr cache contract documented dataset-agnostically in
+  `docs/architecture.md`; the twelve legacy per-dataset loaders distilled into
+  markdown cache specs (`dataset/data_loader/<NAME>.md`) and deleted along
+  with `BaseLoader`, face detection and the `.npy`-cache tools (~39K lines);
+  `neckflix_main.py` promoted to the single entry point `main.py`; the
+  unsupervised predictor's legacy tuple path removed.
+- **Phase 3**: attribute filtering generalized — the hardcoded
+  `NECKFLIX.{POSTURES,PERSPECTIVES,LIGHT,SESSIONS}` keys replaced by one
+  `NECKFLIX.FILTERS` node keyed by whatever root attrs a store carries
+  (`FILTERS: {posture: ['0','45'], light: ['D']}`); `PARTICIPANTS`/CLI stay
+  the separate, id-normalising LOSO surface. `BaseZarrDataset` was already
+  attribute-generic; a new dataset is now a `channel_map` subclass plus a
+  markdown cache spec, with no filter plumbing.
+
+---
+
 ## 2026-08-31 — Branch: `main`
 
 Carried the Neckflix loader's dicts through the whole pipeline; got all seven
