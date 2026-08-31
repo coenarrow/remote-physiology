@@ -14,56 +14,21 @@ Our extension adds support for **cardiovascular pressure waveform estimation** (
 
 ## Data Flow
 
-The pipeline follows a linear flow from raw data to evaluation outputs:
+The cache is an *external input*: zarr stores written by a dataset's
+preprocessor (for Neckflix, the `ghcr.io/coenarrow/neckflix` container),
+which this repo reads and never writes. There is no in-repo preprocessing
+step, no `.npy` cache, and no file-list CSVs; the legacy pipeline that did
+all of that lives at the `pre-overhaul` tag.
 
 ```
-Raw Data (video files or HDF5)
-    |
-    v
-Preprocessing
-    - Face detection (Haar Cascade or YOLO5Face)
-    - Chunking (splitting videos into fixed-length segments)
-    - Normalization (DiffNormalized, Standardized, etc.)
-    - Resizing (e.g., 72x72)
-    |
-    v
-Cached .npy Files (in CACHED_PATH)
-    - Preprocessed video chunks
-    - Corresponding label chunks (BVP, ABP, CVP, etc.)
-    - File lists in CACHED_PATH/DataFileLists/ (CSV train/val/test splits)
-    |
-    v
-DataLoader (dataset-specific loader following BaseLoader interface)
-    |
-    v
-Model (neural network forward pass)
-    |
-    v
-Evaluation
-    - Metrics: MAE, RMSE, MAPE, Pearson correlation, SNR
-    - Bland-Altman analysis and plots
-    - Post-processing: FFT or peak detection for heart rate derivation
-    |
-    v
-Saved Outputs (runs/exp/)
-    - Model checkpoints (best epoch selected via validation)
-    - Loss plots (if PLOT_LOSSES_AND_LR: True)
-    - Predictions and metrics in logs
-```
-
-Preprocessing runs once and caches results. Subsequent runs load directly from the cache, controlled by the `DO_PREPROCESS` flag in the YAML config. Each unique combination of `DATA_TYPE`, `CHUNK_LENGTH`, `RESIZE`, and split range generates its own cache.
-
-**Neckflix takes a different route.** Its cache is an *external input*: zarr stores written by the Neckflix preprocessor container, which this repo reads and never writes. There is no `.npy` cache, no file-list CSVs, and no `DO_PREPROCESS` step:
-
-```
-Neckflix preprocessor (ghcr.io/coenarrow/neckflix, external)
+External preprocessor (per dataset; Neckflix: ghcr.io/coenarrow/neckflix)
     |
     v
 Zarr cache: one *.zarr store per recording (raw frames + traces)
     |
     v
-NeckflixDataset -- metadata-only construction, lazy per-window reads
-    - participant/posture/light/perspective filters (the LOSO mechanism)
+BaseZarrDataset subclass -- metadata-only construction, lazy per-window reads
+    - root-attr include/exclude filters (the LOSO mechanism)
     - strided or random windows over frames
     |
     v
@@ -76,28 +41,26 @@ DictModel  -- frame transform (resize + DATA_TYPE) then the architecture
 MaskedMultiSignalLoss / per-signal evaluation
 ```
 
-See "The Neckflix Batch-Dict Contract" below.
+See "The Zarr Cache Contract" and "The Batch-Dict Contract" below.
 
 
 ## Directory Layout
 
 ```
-rPPG-Toolbox/
-|-- config.py                  Central configuration management
-|-- main.py                    Original toolbox entry point
-|-- neckflix_main.py           Neckflix-specific entry point
+remote-physiology/
+|-- config.py                  Central configuration management (yacs; Phase 5
+|                              replaces it with the typed pattern)
+|-- main.py                    The entry point (zarr pipeline)
 |
 |-- dataset/
+|   |-- BP4D_BigSmall_Subject_Splits/  BigSmall 3-fold membership CSVs
 |   |-- data_loader/
-|       |-- BaseLoader.py      Abstract base class for all data loaders
-|       |-- UBFCrPPGLoader.py  UBFC-rPPG dataset loader
-|       |-- PURELoader.py      PURE dataset loader
-|       |-- zarr_dataset.py   BaseZarrDataset: lazy loader over zarr caches
+|       |-- zarr_dataset.py    BaseZarrDataset: lazy loader over zarr caches
 |       |-- NeckflixLoader.py  NeckflixDataset (channel map only)
 |       |-- neckflix_config.py yacs config -> zarr loader plain-dict config
 |       |-- label_transforms.py Per-window label normalisation + inverses
-|       |-- ...                Other dataset loaders (SCAMPS, BP4D+, MMPD, etc.)
-|       |-- face_detector/     Face detection backends (Haar Cascade, YOLO5Face)
+|       |-- <Dataset>.md       Cache specs: how to build each legacy
+|                              dataset's zarr stores (PURE, MMPD, BP4D+, ...)
 |
 |-- neural_methods/
 |   |-- batch.py               The Neckflix batch-dict contract (keys + einops moves)
@@ -156,18 +119,16 @@ rPPG-Toolbox/
 |   |-- utils.py
 |
 |-- configs/
-|   |-- train_configs/         YAML configs for training experiments
-|   |-- infer_configs/         YAML configs for inference/testing
+|   |-- neckflix/              Current-format experiment configs
+|   |-- train_configs/         Legacy configs (die in Phase 5)
+|   |-- infer_configs/         Legacy configs (die in Phase 5)
+|-- physhydra_configs/         Legacy PhysHydra configs (die in Phase 5)
 |
-|-- .configs/                  Active experiment configs (UBFC-rPPG validation set)
-|-- physhydra_configs/         PhysHydra-specific configs for pressure estimation
-|
-|-- .slurm_scripts/            SLURM batch scripts for HPC job submission
-|-- z_slurm_scripts/           Additional SLURM scripts (LOSO, sweeps)
-|-- logs/                      SLURM job stdout/stderr files
-|-- runs/                      Training run outputs, checkpoints, loss plots
-|-- model_outputs/             Saved model predictions
-|-- tools/                     Utility scripts
+|-- .slurm_scripts/            SLURM reference templates (copy and adapt)
+|-- logs/                      SLURM job stdout/stderr files (gitignored)
+|-- runs/                      Training run outputs, checkpoints, plots (gitignored)
+|-- tools/                     LOSO fold listing, output summarising, mamba vendoring
+|-- vendor/mamba-ssm           Patched mamba-ssm for the Windows build
 ```
 
 
@@ -182,21 +143,19 @@ All experiments are controlled via YAML configuration files. The `config.py` mod
 - `DEVICE`: Target device (e.g., `cuda:0`)
 - `NUM_OF_GPU_TRAIN`: Legacy DataParallel setting; DDP trainers derive GPU count from `--nproc_per_node`
 
-**Data sections (TRAIN / VALID / TEST):**
-- `DATA_PATH`: Path to raw dataset files
-- `CACHED_PATH`: Path for preprocessed .npy output (and DataFileLists/)
-- `DATASET`: Dataset identifier (e.g., `UBFC-rPPG`, `PURE`, `Neckflix`)
-- `BEGIN` / `END`: Fractional range for data splitting (e.g., 0.0--0.8 for 80% train)
-- `DO_PREPROCESS`: Whether to run preprocessing (skipped if cache exists)
-- `DATA_FORMAT`: Tensor layout (e.g., `NDCHW`)
-- `FS`: Sampling frequency in Hz
+**Data sections (TRAIN / VALID / TEST / UNSUPERVISED):**
+- `CACHED_PATH`: Path to the zarr cache (one `*.zarr` store per recording)
+- `DATASET`: Dataset identifier (`Neckflix`)
+- `FS`: Sampling frequency in Hz (the evaluation rate; the store's `fps` attr is informational)
 
-**Preprocessing (nested under PREPROCESS):**
+**Preprocessing (nested under PREPROCESS)** -- consumer-side, applied by the model's frame transform:
 - `DATA_TYPE`: Normalization methods (e.g., `['DiffNormalized', 'Standardized']`)
-- `LABEL_TYPE`: Label normalization (e.g., `DiffNormalized`)
-- `DO_CHUNK` / `CHUNK_LENGTH`: Whether to split into fixed-length chunks and their size in frames
-- `CROP_FACE`: Face detection settings -- `DO_CROP_FACE`, `BACKEND` (`HC` or `Y5F`), bounding box coefficients, dynamic detection options
-- `RESIZE`: Target frame dimensions (`H`, `W`)
+- `CHANNELS` / `TRACES`: Camera channels to load and signals to predict
+- `CHUNK_LENGTH` / `CHUNK_STRIDE`: Window size and stride in frames
+- `RESIZE`: Target frame dimensions (`H`, `W`) -- need not match the cache resolution
+- `NECKFLIX.*`: `LABEL_NORM`, `ALLOW_MISSING`, `MIN_CHANNELS`, `MIN_LABELS`, and the attribute filters (`POSTURES`, `PERSPECTIVES`, `LIGHT`, `SESSIONS`, `PARTICIPANTS`)
+
+`config.py` still carries the legacy yacs bulk (`DO_PREPROCESS`, `BEGIN`/`END`, face detection, per-dataset blocks); those keys do nothing in the zarr pipeline and die with the Phase 5 config consolidation.
 
 **Model:**
 - `NAME`: Model architecture identifier (e.g., `DeepPhys`, `PhysMamba`, `PhysFormer`)
@@ -217,82 +176,41 @@ All experiments are controlled via YAML configuration files. The `config.py` mod
 - `LOG.PATH`: Output directory for runs (default: `runs/exp`)
 
 
-## Model / Trainer / Loader Patterns
-
-The codebase follows a consistent one-to-one-to-one pattern between models, trainers, and data loaders.
+## Model / Trainer Patterns
 
 ### Models (`neural_methods/model/`)
 
-Each model is a standalone Python file containing a `torch.nn.Module` subclass with a `forward()` method. Models are purely architectural -- they define the network structure and forward pass but contain no training logic.
+Each model is a standalone Python file containing a `torch.nn.Module` subclass. Models are purely architectural -- they define the network structure and forward pass but contain no training logic.
 
-Current models: DeepPhys, EfficientPhys, TS_CAN, PhysNet, PhysMamba, PhysFormer, RhythmFormer, BigSmall, iBVPNet, FactorizePhys, PhysHydra.
+Current models: DeepPhys, EfficientPhys, TS_CAN, PhysNet, PhysMamba, PhysFormer, RhythmFormer, BigSmall, iBVPNet, FactorizePhys, PhysHydra. PhysMamba is a `DictModel`; the rest await migration (roadmap Phases 4 and 6).
 
 ### Trainers (`neural_methods/trainer/`)
 
-Each model has a corresponding trainer file (e.g., `PhysMambaTrainer.py`) that handles the training loop, validation, testing, and model saving. Trainers inherit from `BaseTrainer`, which provides:
-
-- DDP (Distributed Data Parallel) setup: `self.rank`, `self.world_size`, `self.is_main`
-- Model unwrapping utility: `self._unwrap_model()` for accessing the underlying model within a DDP wrapper
-- Common initialization logic
-
-Required trainer methods:
-- `__init__(self, config, data_loader)` -- Setup model, optimizer, loss, scheduler
-- `train(self, data_loader)` -- One epoch of training
-- `valid(self, data_loader)` -- Validation pass (all ranks participate for `all_reduce`)
-- `test(self, data_loader)` -- Final evaluation
-- `save_model(index)` -- Checkpoint saving
-
-Only rank 0 performs printing, model saving, testing, and plot generation in multi-GPU runs.
-
-### Data Loaders (`dataset/data_loader/`)
-
-Each dataset has a loader following the `BaseLoader` interface with these key methods:
-
-- `preprocess_dataset(config_preprocess)` -- Convert raw data to preprocessed .npy format
-- `read_video(video_file)` -- Load video frames from disk
-- `read_wave(bvp_file)` -- Load physiological signal traces
-
-The BaseLoader handles chunking, caching, file list management, and the `__getitem__` / `__len__` interface for PyTorch DataLoaders.
-
-### Registration
-
-Models are registered in `main.py`'s `train_and_test()` and `test()` functions, where the model name from the YAML config is mapped to the appropriate trainer class.
+`MultiSignalTrainer` is the one trainer for every dict-contract model (see "Training on the contract" below). The per-model `<Model>Trainer.py` files and `BaseTrainer` are legacy: with `main.py`'s old dispatcher gone they are unreachable from the entry point, and each is kept only as migration reference until its model moves onto `MultiSignalTrainer`, then deleted (`BaseTrainer` goes with the last one). `tests/test_legacy_contract.py` drives `PhysMambaTrainer` directly to pin the tuple-contract behavior the unmigrated models still rely on.
 
 
-## Entry Points
+## Entry Point
 
 ### `main.py`
 
-The original rPPG-Toolbox entry point. Supports all standard rPPG datasets (UBFC-rPPG, PURE, SCAMPS, BP4D+, UBFC-Phys, MMPD, iBVP, PhysDrive, etc.) and both supervised neural methods and unsupervised signal processing methods.
-
-### `neckflix_main.py`
-
-The Neckflix entry point. Reads the zarr cache through `NeckflixDataset`, splits by participant (LOSO), and dispatches to either `MultiSignalTrainer` or the unsupervised predictor. DDP is optional: it is used when launched under `torch.distributed.run` and skipped otherwise, so the same script runs on a laptop and on a multi-GPU node.
-
-The two entry points do not share a dataset contract: `main.py` serves the upstream tuple-contract loaders, `neckflix_main.py` serves the batch-dict contract described below.
+Reads a zarr cache through a `BaseZarrDataset` subclass (currently `NeckflixDataset`), splits by participant (LOSO), and dispatches to either `MultiSignalTrainer` or the unsupervised predictor. DDP is optional: it is used when launched under `torch.distributed.run` and skipped otherwise, so the same script runs on a laptop and on a multi-GPU node. (Formerly `neckflix_main.py`; the upstream tuple-contract entry point it replaces is at the `pre-overhaul` tag.)
 
 ### Usage
 
 ```bash
-# Upstream datasets, single GPU
-uv run python main.py --config_file configs/train_configs/<config>.yaml
+# All seven unsupervised methods (CPU), scored per trace
+uv run python main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
 
-# Upstream datasets, multi-GPU
-uv run python -m torch.distributed.run --nproc_per_node=N main.py --config_file configs/train_configs/<config>.yaml
+# PhysMamba, one LOSO fold
+uv run python main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
 
-# Neckflix: all seven unsupervised methods (CPU), scored per trace
-uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
+# Same fold across 4 GPUs
+uv run python -m torch.distributed.run --nproc_per_node=4 main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
 
-# Neckflix: PhysMamba, one LOSO fold
-uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
-
-# Neckflix: same fold across 4 GPUs
-uv run python -m torch.distributed.run --nproc_per_node=4 neckflix_main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
-
-# Neckflix: enumerate LOSO folds (metadata-only; safe on a login node)
+# Enumerate LOSO folds (metadata-only; safe on a login node)
 uv run python tools/list_neckflix_folds.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --prefix P
 
-# Neckflix: summarise a finished run offline (per-signal, physical units)
+# Summarise a finished run offline (per-signal, physical units)
 uv run python tools/summarise_neckflix_outputs.py runs/neckflix_physmamba --by signal participant
 ```
 
@@ -307,32 +225,27 @@ inverse back to physical units, without touching the zarr cache.
 | Category | Convention | Examples |
 |----------|-----------|----------|
 | Models | PascalCase filenames | `PhysMamba.py`, `PhysFormer.py`, `DeepPhys.py` |
-| Trainers | `<Model>Trainer.py` | `PhysMambaTrainer.py`, `DeepPhysTrainer.py` |
-| Data loaders | `<Dataset>Loader.py` | `UBFCrPPGLoader.py`, `NeckflixLoader.py` |
-| YAML configs | `<DATASET>_<TASK>_<MODEL>.yaml` | `UBFC-rPPG_UBFC-rPPG_UBFC-rPPG_DEEPPHYS.yaml` |
-| SLURM scripts | `<Dataset>_<Model>_<GPUs>.slurm` | `UBFC-rPPG_DeepPhys_2GPU.slurm` |
-| Loss functions | Descriptive names | `NegPearsonLoss.py`, `PhysHydraLoss.py` |
+| Datasets | `<Dataset>Loader.py` (class) + `<Dataset>.md` (cache spec) | `NeckflixLoader.py`, `PURE.md` |
+| YAML configs | `configs/neckflix/NECKFLIX_<MODEL>[_<VARIANT>].yaml` | `NECKFLIX_PHYSMAMBA_SMOKE.yaml` |
+| SLURM scripts | `<Dataset>_<Model>_<Options>.slurm` | `Neckflix_PhysMamba_4GPU.slurm` |
+| Loss functions | Descriptive names | `NegPearsonLoss.py`, `MaskedMultiSignalLoss.py` |
 
 
 ## Extending the Toolbox
 
 ### Adding a New Dataset
 
-1. Create a loader in `dataset/data_loader/` following the `BaseLoader` interface
-2. Implement `preprocess_dataset()`, `read_video()`, and `read_wave()`
-3. Update `config.py` with any new dataset-specific parameters or paths
-4. Create YAML configs defining preprocessing and training parameters
+The zarr cache is mandatory. A new dataset needs no loader machinery -- only:
+
+1. An external preprocessor writing stores that satisfy the cache contract
+   (for a known legacy dataset, its markdown cache spec in
+   `dataset/data_loader/` says exactly what to write).
+2. A `BaseZarrDataset` subclass declaring the `channel_map`.
+3. A YAML config pointing `CACHED_PATH` at the cache.
 
 ### Adding a New Model
 
-For the upstream tuple-contract datasets:
-
-1. Define the architecture in `neural_methods/model/<ModelName>.py` as a `torch.nn.Module`
-2. Create `neural_methods/trainer/<ModelName>Trainer.py` inheriting from `BaseTrainer`
-3. Register the model in `main.py`'s `TRAINER_REGISTRY`
-4. Create a YAML config with model-specific hyperparameters
-
-For Neckflix, no new trainer is needed -- `MultiSignalTrainer` serves every dict-contract model:
+No new trainer -- `MultiSignalTrainer` serves every dict-contract model:
 
 1. Make the architecture a `DictModel` subclass implementing `forward_video(video) -> (B, S, T)`, taking its input width from `self.in_channels` and its output width from `self.out_signals`. A 2-D per-frame backbone needs no change at all -- wrap it in `SignalDictWrapper(backbone, channels, traces, input_mode='frames2d')`.
 2. Add a builder to `MODEL_REGISTRY` in `neural_methods/trainer/MultiSignalTrainer.py`.
@@ -449,7 +362,7 @@ Stores are admitted only if `complete is true` and `tool_version >= 1.0.0`; anyt
 Construction is metadata-only: no pixel data is read until `__getitem__`, so instantiating a dataset to enumerate LOSO folds is cheap enough for a login node (`tools/list_neckflix_folds.py`).
 
 
-## The Neckflix Batch-Dict Contract
+## The Batch-Dict Contract
 
 Everything downstream of the Neckflix loader passes nested dicts keyed by canonical channel and signal names, so any tensor in the pipeline is identifiable by its key. `neural_methods/batch.py` is the single owner of those key names.
 
@@ -550,7 +463,7 @@ The project uses **uv** as its Python package manager. The virtual environment (
 - `einops` for every shape move in the Neckflix pipeline
 - `mamba-ssm` (Linux/CUDA) or `mamba-ssm-macos`; where neither has a wheel,
   `neural_methods/model/mamba_compat.py` falls back to a pure-PyTorch Mamba block
-- `h5py` / `hdf5plugin` for the other datasets' loaders
+- `h5py` only for the legacy `PhysHydraTrainer` (leaves with it in Phase 6)
 - Standard scientific Python stack (numpy, scipy, matplotlib)
 
 All scripts are invoked via `uv run python` to ensure the correct environment is used. Full dependency specifications are in `pyproject.toml`, with the lockfile at `uv.lock`.

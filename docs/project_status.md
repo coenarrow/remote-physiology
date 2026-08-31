@@ -1,7 +1,16 @@
-# Project Roadmap: Pressure Estimation Extension
+# Project Status: remote-physiology
 
 ## Completed
 
+- Overhaul Phases 0–2 (see
+  [the roadmap](plans/2026-08-31-overhaul-roadmap.md)): repo renamed to
+  **remote-physiology** with root scratch, upstream weights and stale docs
+  cleaned out; the zarr cache contract documented dataset-agnostically in
+  `docs/architecture.md`; the twelve legacy per-dataset loaders distilled
+  into markdown cache specs (`dataset/data_loader/*.md`) and deleted along
+  with `BaseLoader`, face detection and the `.npy`-cache tools; the zarr
+  entry point promoted to `main.py` (single entry point, batch-dict
+  contract only)
 - Base toolbox setup with `uv` package management
 - Multi-GPU distributed training setup
 - Neckflix loader rebuilt on the external zarr cache (lazy, metadata-only
@@ -44,6 +53,8 @@
 - IR/depth channels: the contract and loader already support them; no cache has
   been generated with them yet
 - Full LOSO sweeps on HPC (`.slurm_scripts/Neckflix_PhysMamba_LOSO.slurm`)
+- Roadmap Phases 3–8: filter generalization, dependency refresh, model
+  migrations, config consolidation, clinical metrics, docs finalization
 
 ---
 

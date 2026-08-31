@@ -11,10 +11,12 @@ and others as they appear.
 > [docs/plans/2026-08-31-overhaul-roadmap.md](docs/plans/2026-08-31-overhaul-roadmap.md),
 > the goals in [updating_plan.md](updating_plan.md), and current status in
 > [docs/project_status.md](docs/project_status.md). The legacy single-signal
-> pipeline (`main.py`, the per-dataset loaders, `configs/train_configs/`)
-> still exists but is scheduled for deletion — don't build on it. The last
-> fully intact legacy state is tagged **`pre-overhaul`**; the upstream README
-> describing that pipeline is preserved there and at the upstream repo.
+> pipeline is gone: its per-dataset loaders are now markdown cache specs in
+> [dataset/data_loader/](dataset/data_loader/), and `main.py` is the zarr
+> entry point. What remains legacy (the per-model trainers and the old
+> config piles) dies as models migrate — don't build on it. The last fully
+> intact legacy state is tagged **`pre-overhaul`**; the upstream README
+> describing it is preserved there and at the upstream repo.
 
 ## The pipeline
 
@@ -36,10 +38,10 @@ cache specs live alongside the loaders in
 
 ```bash
 # All seven traditional methods over Neckflix, scored against every trace
-uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
+uv run python main.py --config_file configs/neckflix/NECKFLIX_UNSUPERVISED.yaml
 
 # PhysMamba, one leave-one-subject-out fold
-uv run python neckflix_main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
+uv run python main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml --test_participants P015
 
 # Summarise a finished run (per-signal, physical units)
 uv run python tools/summarise_neckflix_outputs.py runs/neckflix_physmamba --by signal participant
