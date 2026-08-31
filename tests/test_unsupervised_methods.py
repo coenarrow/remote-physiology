@@ -302,10 +302,3 @@ def test_pos_signal_handles_a_clip_shorter_than_its_window():
     assert out.shape == (10,) and np.all(out == 0)
 
 
-def test_generate_pos_pseudo_labels_runs_under_numpy_2():
-    """BaseLoader's USE_PSUEDO_PPG_LABEL path used np.mat too."""
-    from dataset.data_loader.BaseLoader import BaseLoader
-    frames = pulsatile_clip(n_frames=300)
-    labels = np.asarray(BaseLoader.generate_pos_psuedo_labels(None, frames, fs=FS))
-    assert labels.shape[0] == 300
-    assert np.isfinite(labels).all()

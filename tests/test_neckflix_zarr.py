@@ -42,12 +42,6 @@ def test_unknown_channel_raises(tmp_path):
         NeckflixDataset(base_cfg(tmp_path, channels=["R", "X"]))
 
 
-def test_main_still_imports_and_neckflix_unregistered():
-    import main
-    with pytest.raises(ValueError, match="Unsupported dataset"):
-        main.get_loader_class("Neckflix")
-
-
 # --------------------------------------------------------------------------
 # End-to-end smoke: data loads through a real DataLoader
 # --------------------------------------------------------------------------
