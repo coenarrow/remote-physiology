@@ -2,7 +2,7 @@
 
 ## Completed
 
-- Overhaul Phases 0–3 (see
+- Overhaul Phases 0–3.5 (see
   [the roadmap](plans/2026-08-31-overhaul-roadmap.md)): repo renamed to
   **remote-physiology** with root scratch, upstream weights and stale docs
   cleaned out; the zarr cache contract documented dataset-agnostically in
@@ -12,7 +12,10 @@
   entry point promoted to `main.py` (single entry point, batch-dict
   contract only); attribute filtering generalized to `NECKFLIX.FILTERS`
   (any store root attr, no hardcoded key list), so a new dataset is a
-  `channel_map` subclass plus a markdown cache spec
+  `channel_map` subclass plus a markdown cache spec; dependencies refreshed
+  from the three platform reports — torch 2.12.1+cu126 fleet-wide,
+  pyproject audited to a minimal floor-pinned set (verified on Windows GPU;
+  HPC V100 smoke pending)
 - Base toolbox setup with `uv` package management
 - Multi-GPU distributed training setup
 - Neckflix loader rebuilt on the external zarr cache (lazy, metadata-only
@@ -55,8 +58,11 @@
 - IR/depth channels: the contract and loader already support them; no cache has
   been generated with them yet
 - Full LOSO sweeps on HPC (`.slurm_scripts/Neckflix_PhysMamba_LOSO.slurm`)
-- Roadmap Phases 3.5–8: dependency refresh (hard pause first: check all
-  three platforms), model migrations, config consolidation, clinical
+- HPC verification of the Phase 3.5 stack: fresh clone, `module load cuda`
+  (12.6.3), `uv sync --no-dev`, then a PhysMamba smoke via SLURM on a
+  **V100** node — the one open question is whether triton 3.8 still JITs
+  for sm_70 (A100/H100 are safe regardless)
+- Roadmap Phases 4–8: model migrations, config consolidation, clinical
   metrics, docs finalization
 
 ---
