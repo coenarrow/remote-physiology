@@ -1,6 +1,6 @@
 # Platform report: windows (DEP51484)
 
-Generated 2026-08-31 05:44 UTC at commit `21220ea` by `tools/platform_report.py`.
+Generated 2026-08-31 05:54 UTC at commit `d95611c` by `tools/platform_report.py`.
 
 ## System
 
@@ -13,7 +13,7 @@ Generated 2026-08-31 05:44 UTC at commit `21220ea` by `tools/platform_report.py`
 
 ## Python and uv
 
-script interpreter: `c:\Users\20759193\source\repos\remote-physiology\.venv\Scripts\python.exe`
+script interpreter: `C:\Users\20759193\source\repos\remote-physiology\.uv_cache\environments-v2\platform-report-fbc2d3c079d4c649\Scripts\python.exe`
 
 ```text
 3.13.7 (main, Aug 18 2025, 19:16:27) [MSC v.1944 64 bit (AMD64)]
@@ -31,7 +31,7 @@ uv 0.8.12 (36151df0e 2025-08-18)
 **`nvidia-smi`** — driver + max supported CUDA
 
 ```text
-Mon Aug 31 13:44:03 2026       
+Mon Aug 31 13:54:05 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 596.36                 Driver Version: 596.36         CUDA Version: 13.2     |
 +-----------------------------------------+------------------------+----------------------+
@@ -40,7 +40,7 @@ Mon Aug 31 13:44:03 2026
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
 |   0  Quadro RTX 5000              WDDM  |   00000000:01:00.0 Off |                  Off |
-| 34%   29C    P8             14W /  230W |     302MiB /  16384MiB |      8%      Default |
+| 34%   29C    P8             14W /  230W |     303MiB /  16384MiB |      8%      Default |
 |                                         |                        |                  N/A |
 +-----------------------------------------+------------------------+----------------------+
 

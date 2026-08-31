@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """Collect the platform facts that gate the Phase 3.5 dependency refresh.
 
 Run this on every machine the project targets (Windows dev box, Linux HPC,
@@ -7,12 +11,15 @@ and gcc versions, HPC module availability, torch wheel arch lists — from
 which the upgrade targets are chosen (see the roadmap, Phase 3.5).
 
 Deliberately **stdlib-only** and safe for an HPC login node: it reads
-metadata and runs version commands, nothing computational. Run it with the
-system interpreter, NOT ``uv run`` (which would trigger a full sync on a
-fresh clone):
+metadata and runs version commands, nothing computational. The same command
+works on every machine:
 
-    python3 tools/platform_report.py            # Linux / macOS
-    python tools\\platform_report.py            # Windows
+    uv run tools/platform_report.py
+
+The inline script metadata above makes ``uv run`` treat this as a
+self-contained script — it does NOT sync the project environment, so on a
+fresh clone (HPC login node) nothing heavy is installed, and uv supplies a
+Python even where none is on PATH.
 
 If a project ``.venv`` exists it is additionally introspected (torch build,
 GPU visibility, every installed distribution) via its own interpreter; where
