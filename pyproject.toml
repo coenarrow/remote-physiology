@@ -1,7 +1,7 @@
 [project]
-name = "rppg-toolbox"
+name = "remote-physiology"
 version = "0.1.0"
-description = "Add your description here"
+description = "Multi-signal remote physiology toolkit (BVP, ABP, CVP, RR, ...) — fork of rPPG-Toolbox"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
