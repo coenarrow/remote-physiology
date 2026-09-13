@@ -61,37 +61,38 @@ mkdir -p logs
 cd "/group/pgh004/carrow/repo/remote-physiology"
 module load cuda
 
-uv run python -m torch.distributed.run --nproc_per_node=2 \
-    main.py --config_file configs/neckflix/NECKFLIX_PHYSMAMBA.yaml \
-    --test_participants P015
+uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc --test-participant-id 15 \
+    --model physmamba --interface configs/interfaces/interface_neckflix.yaml \
+    --training configs/training/physmamba_training.yaml --parallel 2 --nproc-per-node 1
 ```
+
+The command is the dev-box command plus two numbers: `--parallel` folds at a time and
+`--nproc-per-node` GPUs per fold (torchrun inside `main.py`; ports derived from the job id
+automatically). Leave the participants off to hold out every one in turn.
 
 Required in every script:
 
 - **Log naming**: `logs/%j_<Model>_<Dataset>_<Options>.{out,err}`, plus `mkdir -p logs`
 - **`module load cuda`** — GPU jobs fail without it
 - **`uv run`** for all Python; never bare `python`
-- **`--nproc_per_node` must equal the `--gres` GPU count**
+- **`--gres` equals `--parallel` times `--nproc-per-node`** — `main.py` refuses otherwise
+- **`--cpus-per-task`** at least `--parallel` times `--nproc-per-node` times the recipe's `NUM_WORKERS`
 - **`--mem`** set to the minimum the job needs (a 2-GPU dev run fits in 32G)
+- **A `<name>_hpc.yaml` dataset config** — the committed dataset files point at the dev-box
+  cache, so the cluster loads `BASE: <name>.yaml` plus its own `CACHED_PATH`, as
+  `configs/datasets/pure_hpc.yaml` does; run directories then read `runs/<name>_hpc_<model>/`
 
-## Job Arrays: LOSO Cross-Validation
+## LOSO Sweeps
 
-```bash
-#SBATCH --partition=medical
-#SBATCH --gres=gpu:h100:4
-#SBATCH --array=1-57%1        # one job per participant, serialised
+`main.py` is the sweep: one job holds out every participant in turn, `--parallel` folds at
+a time, each in its own subprocess with its own `log.txt` under `runs/<dataset>_<model>/`.
+Four small folds at once on a 4-GPU node is `--parallel 4 --nproc-per-node 1`; one
+high-resolution fold across the node is `--parallel 1 --nproc-per-node 4`. No job array,
+no fold list, no hand-derived port. `docs/hpc_pure_physmamba.md` walks the PURE sweep
+through end to end, cache build included.
 
-PORT=$((29500 + (SLURM_JOB_ID % 1000) + SLURM_ARRAY_TASK_ID))
-PARTICIPANT=$(printf "P%03d" "${SLURM_ARRAY_TASK_ID}")
-
-uv run python -m torch.distributed.run --nproc_per_node=4 --master_port="${PORT}" \
-    main.py --config_file <config> --test_participants "${PARTICIPANT}"
-```
-
-Always derive the port from the job ID. Fixed ports collide across concurrent jobs.
-
-For hyperparameter sweeps, use job arrays over config variations (or Hydra/W&B), on `gpu` for
-quick iteration.
+For hyperparameter sweeps, use job arrays over config variations, on `gpu` for quick
+iteration.
 
 ## Interactive Sessions
 
@@ -101,8 +102,9 @@ salloc --job-name=Interactive_Session --partition=pophealth \
 
 module load cuda
 cd /mmfs1/data/group/pgh004/carrow/repo/remote-physiology
-uv run python main.py --limit_windows 8 --test_participants P015 \
-    --config_file configs/neckflix/NECKFLIX_PHYSMAMBA_SMOKE.yaml
+uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc --test-participant-id 15 \
+    --model physmamba --interface configs/interfaces/interface_neckflix.yaml \
+    --training configs/training/physmamba_3ep.yaml --limit-windows 8
 exit    # release the allocation when done
 ```
 
@@ -124,8 +126,9 @@ nvidia-smi                   # GPU status (compute session only)
 |---------|-------|-----|
 | Job stuck pending | Partition busy | Follow the escalation ladder above |
 | `CUDA not available` | Missing module | `module load cuda` in the script/session |
-| Address already in use | Fixed master port | Derive `PORT` from `SLURM_JOB_ID` |
-| Hangs at distributed init | `--nproc_per_node` ≠ `--gres` count | Make them match |
+| Address already in use | A hand-run torchrun with a fixed port | `main.py` derives ports from `SLURM_JOB_ID` plus the fold's slot; do the same by hand |
+| `needs N GPUs and M are visible` | `--gres` ≠ `--parallel` × `--nproc-per-node` | Make them match |
+| `no admitted store` | Dataset config points at the dev-box cache | Use the `<name>_hpc.yaml` config |
 | OOM in `logs/*.err` | Batch/resolution too large | Lower batch size, image size, or chunk length in the YAML |
 
 Different GPU types need different config tuning — image size, chunk length, and batch size in the
@@ -166,10 +169,12 @@ uv run --project dataset/cachers/neckflix neckflix-preprocess \
 uv run python tools/validate_cache.py <cache dir>
 ```
 
-Model it on `.slurm_scripts/Neckflix_Unsupervised.slurm`, the other CPU-only
-template. The submodule resolves from its own `uv.lock` and its own Python
-3.12, so the first run in a fresh checkout syncs a second environment — do
-that inside the job, not on the login node.
+Model it on `.slurm_scripts/PURE_Cache.slurm`, the ready-made cache job for PURE
+(whose cacher lives in the tree at `dataset/cachers/pure`, no submodule), or on
+`.slurm_scripts/Neckflix_Unsupervised.slurm`, the other CPU-only template. A
+cacher resolves from its own `uv.lock` and its own Python 3.12, so the first run
+in a fresh checkout syncs a second environment — do that inside the job, not on
+the login node.
 
 ## Red Flags — Stop
 
@@ -177,6 +182,6 @@ that inside the job, not on the login node.
 - "I'll just run this small thing on the login node"
 - Writing a `.slurm` script from scratch instead of copying the template
 - `--mem=0`, or a hardcoded `--master_port`
-- `--nproc_per_node` that doesn't match the requested GPU count
+- `--parallel` times `--nproc-per-node` that doesn't match the requested GPU count
 
 **All of these mean: stop, and go through SLURM properly.**

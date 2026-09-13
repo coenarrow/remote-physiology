@@ -1,11 +1,11 @@
 """Heart rate from every cardiac trace, and from all of them fused.
 
-Per reading, for every trace the registry marks cardiac (PPG, ECG, ABP, CVP)
-that the reading labels, the estimate the upstream toolbox made: detrend,
+Per recording, for every trace the registry marks cardiac (PPG, ECG, ABP,
+CVP) that the recording labels, the estimate the upstream toolbox made: detrend,
 bandpass to the heart-rate band, periodogram, the largest in-band bin, in
 beats per minute. Run on the label and on the prediction, so every trace
 reports its own reference and predicted rate and is compared with itself.
-Two more *sources* join the per-trace ones whenever a reading carries at
+Two more *sources* join the per-trace ones whenever a recording carries at
 least two cardiac traces:
 
 ``FUSED``
@@ -174,14 +174,14 @@ def snr(freqs, power, hr_bpm: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# One reading to its rows
+# One recording to its rows
 # ---------------------------------------------------------------------------
-def reading_rates(traces: dict, fs: float) -> list:
-    """``[{source, ref_hr, pred_hr, err_hr, snr, macc}, ...]`` for one reading,
-    given ``{signal: (label, prediction)}`` over the cardiac traces it
-    carries, both finite: one row per trace, then ``FUSED`` and ``MEDIAN``
-    when there are two or more to combine. Empty for a reading too short
-    to filter."""
+def recording_rates(traces: dict, fs: float) -> list:
+    """``[{source, ref_hr, pred_hr, err_hr, snr, macc}, ...]`` for one
+    recording, given ``{signal: (label, prediction)}`` over the cardiac
+    traces it carries, both finite: one row per trace, then ``FUSED`` and
+    ``MEDIAN`` when there are two or more to combine. Empty for a stretch
+    too short to filter."""
     rows, ref_powers, pred_powers = [], [], []
     freqs = None
     for sig, (ref, pred) in traces.items():

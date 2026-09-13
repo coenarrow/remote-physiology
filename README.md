@@ -74,82 +74,118 @@ does not produce yet; their paper interfaces do.
 Each one trains on the PURE dataset holding out its first participant, on
 the model's own paper interface and paper training recipe (the rPPG-Toolbox
 definition of that model; see `configs/interfaces/` and `configs/training/`).
-A fold is three commands run back to back, train, infer, evaluate, each
-reading the run directory the one before it wrote:
+A fold is one command. It fits the model and, after every epoch, runs that
+epoch's model over the held-out participant and scores the records:
 
 ```bash
-# 1. fit the model; writes runs/PHYSNET_PURE.01_<YYYYMMDDHHMM>/ (config.yaml, model.pt, losses.csv)
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physnet --interface configs/interfaces/physnet_interface.yaml --training configs/training/physnet_training.yaml
-
-# 2. run the checkpoint over the held-out participant; writes test_records/ beside it
-uv run python scripts/infer.py runs/PHYSNET_PURE.01_<YYYYMMDDHHMM>
-
-# 3. score the records; writes beats.csv, readings.csv and rates.csv beside each recording's trace tables
-uv run python scripts/eval.py runs/PHYSNET_PURE.01_<YYYYMMDDHHMM>
+# fits the model; writes runs/PHYSNET_PURE.01_<YYYYMMDDHHMM>/ (config.yaml, losses.csv, model.pt = the latest epoch)
+# after every epoch: runs it over the held-out participant and scores the records; writes epoch_NN/model.pt and
+#   epoch_NN/test_records/ with <TRACE>_beats.csv, signals.csv, rates.csv and <TRACE>.png beside each recording's trace tables
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physnet --interface configs/interfaces/physnet_interface.yaml --training configs/training/physnet_training.yaml
 ```
 
-`scripts/infer.py` rebuilds the run from `model.pt` alone (the checkpoint
-carries every config the run executed on), so it also runs the model on
-another participant (`--test-participant-dataset pure
---test-participant-id 02 --out DIR`) or from another cache (`--datasets`).
-`scripts/train.py` with no held-out participant trains on every admitted
-store, as `runs/<MODEL>_<DATASET>.all-..._<YYYYMMDDHHMM>/`, for a final model
-to infer with later. Add `--limit-windows 8` to steps 1 and 2 for a wiring
-check.
+With no held-out participant it trains on every admitted store, as
+`runs/<MODEL>_<DATASET>.all-..._<YYYYMMDDHHMM>/`, and stops there. Add
+`--limit-windows 8` for a wiring check.
 
-The training command per model; steps 2 and 3 follow with the run directory
-it prints:
+The command per model:
 
 ```bash
 # BigSmall
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model bigsmall --interface configs/interfaces/bigsmall_interface.yaml --training configs/training/bigsmall_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model bigsmall --interface configs/interfaces/bigsmall_interface.yaml --training configs/training/bigsmall_training.yaml
 
 # DeepPhys
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model deepphys --interface configs/interfaces/deepphys_interface.yaml --training configs/training/deepphys_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model deepphys --interface configs/interfaces/deepphys_interface.yaml --training configs/training/deepphys_training.yaml
 
 # EfficientPhys
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model efficientphys --interface configs/interfaces/efficientphys_interface.yaml --training configs/training/efficientphys_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model efficientphys --interface configs/interfaces/efficientphys_interface.yaml --training configs/training/efficientphys_training.yaml
 
 # FactorizePhys
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model factorizephys --interface configs/interfaces/factorizephys_interface.yaml --training configs/training/factorizephys_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model factorizephys --interface configs/interfaces/factorizephys_interface.yaml --training configs/training/factorizephys_training.yaml
 
 # PhysFormer
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physformer --interface configs/interfaces/physformer_interface.yaml --training configs/training/physformer_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physformer --interface configs/interfaces/physformer_interface.yaml --training configs/training/physformer_training.yaml
 
 # PhysMamba
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physmamba --interface configs/interfaces/physmamba_interface.yaml --training configs/training/physmamba_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physmamba --interface configs/interfaces/physmamba_interface.yaml --training configs/training/physmamba_training.yaml
 
 # PhysNet
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physnet --interface configs/interfaces/physnet_interface.yaml --training configs/training/physnet_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physnet --interface configs/interfaces/physnet_interface.yaml --training configs/training/physnet_training.yaml
 
 # RhythmFormer
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model rhythmformer --interface configs/interfaces/rhythmformer_interface.yaml --training configs/training/rhythmformer_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model rhythmformer --interface configs/interfaces/rhythmformer_interface.yaml --training configs/training/rhythmformer_training.yaml
 
 # TS-CAN
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model tscan --interface configs/interfaces/tscan_interface.yaml --training configs/training/tscan_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model tscan --interface configs/interfaces/tscan_interface.yaml --training configs/training/tscan_training.yaml
 
 # iBVPNet
-uv run python scripts/train.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model ibvpnet --interface configs/interfaces/ibvpnet_interface.yaml --training configs/training/ibvpnet_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model ibvpnet --interface configs/interfaces/ibvpnet_interface.yaml --training configs/training/ibvpnet_training.yaml
 ```
 
 Outputs land in `runs/<MODEL>_PURE.01_<YYYYMMDDHHMM>/` (the model, each
 dataset with the participant it held out or `all`, and the minute the run
-started; `scripts/train.py` prints it), starting with a `config.yaml` that
+started; `scripts/run.py` prints it), starting with a `config.yaml` that
 compiles every config the run executed on (command, git commit, datasets,
-split, interface, model, training recipe, resolved device) into one file.
-Inference adds `test_records/`: `windows.csv` (where each window sits and
+split, interface, model, training recipe, resolved device) into one file,
+then `losses.csv` and `model.pt`, the latest epoch's weights. After every
+epoch `epoch_NN/` holds that epoch's `model.pt` and the held-out
+participant's records in its `test_records/`: `windows.csv` (where each window sits and
 which channels and traces it carried), `meta.json`, and per recording and
 camera one `<TRACE>.csv` holding the time axis, the label, the mean and
 standard deviation of the overlapping window predictions, and one column
 per window, all in physical units and readable in a spreadsheet.
-The evaluation (`scripts/eval.py`) cuts each recording's combined trace
-into readings (30 s by default), detects the beats of every cardiac trace
-on both the label and the prediction, and scores per reading each
-absolute signal's levels (systolic / MAP / diastolic for ABP), the
-per-sample waveform agreement, and a heart rate from every cardiac trace,
-their fused spectrum and their median. The three tables land beside the
-recording's trace tables as `readings.csv`, `beats.csv` and `rates.csv`.
+The evaluation then scores each recording's combined trace over the whole
+stretch the windows covered: it detects the beats of every cardiac trace
+on both the label and the prediction, and scores each absolute signal's
+levels (systolic / MAP / diastolic for ABP), the per-sample waveform
+agreement, and a heart rate from every cardiac trace, their fused spectrum
+and their median. The tables land beside the recording's trace tables as
+one `<TRACE>_beats.csv` per cardiac trace, `signals.csv` (one row per
+signal) and `rates.csv`, with one `<TRACE>.png` per trace showing
+the label, the prediction with its spread across windows, and the beats.
 [docs/evaluation.md](docs/evaluation.md) lists every column.
+
+## Experiments
+
+One model on a set of datasets, holding out one participant after another:
+`main.py` runs the folds, each one exactly the `scripts/run.py` command
+above with one participant held out, as its own subprocess with its own run
+directory and `log.txt` under `runs/<dataset>_<model>/` (`runs/pure_physmamba/`;
+`--experiment NAME` picks another name). Each fold's `config.yaml` records
+the command that reproduces it alone. Nothing is written at the experiment
+level.
+
+```bash
+# every participant of PURE in turn, one fold at a time
+uv run python main.py --datasets pure --test-participant-dataset pure --model physmamba --interface configs/interfaces/physmamba_interface.yaml --training configs/training/physmamba_training.yaml
+
+# three Neckflix participants, two folds at a time on one GPU each
+uv run python main.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 32 33 34 --parallel 2 --model physmamba --interface configs/interfaces/interface_neckflix.yaml --training configs/training/physmamba_training.yaml
+
+# one fold across 4 GPUs under torch.distributed.run
+uv run python main.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 32 --nproc-per-node 4 --model physmamba --interface configs/interfaces/interface_neckflix.yaml --training configs/training/physmamba_training.yaml
+```
+
+`--test-participant-id` names the folds, in that order; without it every
+participant the dataset admits is held out in turn, and every id is checked
+against the cache before the first fold starts. `--parallel K` runs K folds
+at a time and `--nproc-per-node N` gives each fold N processes, one per GPU,
+under `torch.distributed.run` on a port derived from the job id. The visible
+GPUs are dealt to the running folds through `CUDA_VISIBLE_DEVICES`: one each,
+shared, when N is 1 (`tools/memory_report.py` says how many folds fit on a
+card), disjoint groups of N otherwise. Both default to 1, so the plain
+command is the same on the dev box and on the cluster, where the SLURM file
+adds only the allocation and the two numbers. On Windows N stays 1, because
+that torch build has no libuv and the launcher's rendezvous store cannot
+start without it. On a terminal each running fold shows a progress bar over
+its epochs with the latest training loss; in a log file the bars are silent.
+A fold that fails stops new folds from starting; the running ones finish,
+and the exit names the failures. `--limit-windows` passes through to every
+fold. On the cluster,
+[`.slurm_scripts/PURE_PhysMamba_3ep.slurm`](.slurm_scripts/PURE_PhysMamba_3ep.slurm)
+and [`.slurm_scripts/Neckflix_PhysMamba_4GPU.slurm`](.slurm_scripts/Neckflix_PhysMamba_4GPU.slurm)
+are the templates, and [docs/hpc_pure_physmamba.md](docs/hpc_pure_physmamba.md)
+walks a run through end to end.
 
 To put another architecture on the contract, new or migrated from upstream,
 follow [docs/adding_a_model.md](docs/adding_a_model.md): one backbone module,

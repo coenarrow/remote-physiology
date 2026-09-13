@@ -1,20 +1,21 @@
-"""What the three scripts share: a run's arguments, its compiled config, and
-rebuilding a run from that config.
+"""What ``scripts/run.py`` is made of beyond the trainer: a run's arguments,
+its compiled config, and rebuilding a run from that config.
 
-``scripts/train.py`` fits a model and writes a run directory;
-``scripts/infer.py`` runs its checkpoint over one participant and records
-every window; ``scripts/eval.py`` scores the records. This module is written
-once for all of them:
+``scripts/run.py`` fits a model, writes a run directory, runs the fitted
+model over the held-out participant and scores the records;
+``tools/memory_report.py`` takes the same setup without running it. This
+module is written once for both:
 
 * the argparse groups they have in common — the four config files a run is
   made of, and the held-out participant;
-* ``compile_config``, the one mapping of everything a run ran on, which
-  ``train`` writes as ``config.yaml`` and carries inside ``model.pt``;
-* ``rebuild``, the typed reading of that mapping, which ``infer`` gets the
-  interface, model, recipe and datasets from — through the same parsers the
-  files go through, so a rebuilt run is checked exactly as a loaded one is;
+* ``compile_config``, the one mapping of everything a run ran on, which the
+  run writes as ``config.yaml`` and carries inside ``model.pt``;
+* ``rebuild``, the typed reading of that mapping back into the interface,
+  model, recipe and datasets — through the same parsers the files go
+  through, so a run rebuilt from its checkpoint is checked exactly as a
+  loaded one is;
 * the windowed datasets each side of the split becomes, and the progress
-  lines every script prints on the way.
+  lines the script prints on the way.
 """
 
 import argparse
@@ -226,7 +227,7 @@ def rebuild(config: dict, where: str = CONFIG_NAME) -> Setup:
     for key in ("interface", "model", "training", "datasets"):
         if key not in config:
             raise ConfigError(f"{where} has no {key} section; was it written by "
-                              f"scripts/train.py?")
+                              f"scripts/run.py?")
     interface = parse_interface(config["interface"], f"{where}: interface")
     model = parse_model_config(config["model"], interface, f"{where}: model")
     training = parse_training(config["training"], f"{where}: training")
@@ -242,7 +243,7 @@ def load_checkpoint(run_dir: Path) -> dict:
     path = Path(run_dir) / CHECKPOINT_NAME
     if not path.is_file():
         raise ConfigError(f"{run_dir} has no {CHECKPOINT_NAME}; is it a run "
-                          f"directory written by scripts/train.py?")
+                          f"directory written by scripts/run.py?")
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     if not checkpoint.get("config"):
         raise ConfigError(f"{path} carries no compiled config; nothing to rebuild "

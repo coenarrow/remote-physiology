@@ -76,10 +76,10 @@ multi-signal contract.
   paper files are where a migration is checked against the paper.
 - **A finished migration ends with a command in `README.md`.** When a model
   migrated from rPPG-Toolbox is done, add under "Algorithms" the exact
-  `scripts/train.py` command that trains it on the PURE dataset
+  `scripts/run.py` command that trains it on the PURE dataset
   (`--datasets pure`) with only the first participant held out
   (`--test-participant-dataset pure --test-participant-id 01`), on its paper
-  interface and paper training recipe (inference and evaluation are the
-  same two commands for every model, on the run directory it prints).
+  interface and paper training recipe (the one command also runs the
+  model over that participant and scores the records).
   That command is the migration's proof of life; a model without one is
   not finished.

@@ -1,0 +1,6 @@
+# PURE on the HPC: pure.yaml with the cache where it lives on group storage.
+# Keys and grammar: pure.yaml. Only the path differs; edit it to wherever the
+# cache landed (docs/hpc_pure_physmamba.md). Loaded as `--datasets pure_hpc`,
+# so run directories read PHYSMAMBA_PURE_HPC.<participant>_<stamp>.
+BASE: pure.yaml
+CACHED_PATH: "/group/pgh004/carrow/caches/pure_zarr"

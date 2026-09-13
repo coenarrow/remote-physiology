@@ -156,6 +156,19 @@ class Split:
     test: dict[str, dict[Path, dict]]
 
 
+def participants(stores: dict[str, dict[Path, dict]], dataset: str) -> list[str]:
+    """The participant ids the named dataset's admitted stores carry, sorted
+    as ids (``'2'`` before ``'10'``). Naming a dataset that was not loaded
+    is an error listing what is."""
+    if dataset not in stores:
+        raise ValueError(
+            f"--test-participant-dataset {dataset!r} is not one of the loaded "
+            f"datasets {sorted(stores)}")
+    ids = {str(_lookup(a, "participant")) for a in stores[dataset].values()
+           if _lookup(a, "participant") is not None}
+    return sorted(ids, key=lambda s: (len(s), s))
+
+
 def hold_out_participant(stores: dict[str, dict[Path, dict]],
                          dataset: str, participant: str) -> Split:
     """Drop one participant from one dataset; that participant is the test set.
@@ -165,18 +178,13 @@ def hold_out_participant(stores: dict[str, dict[Path, dict]],
     only. Every other dataset trains whole. Naming a dataset that was not
     loaded, or a participant it does not carry, is an error listing what is.
     """
-    if dataset not in stores:
-        raise ValueError(
-            f"--test-participant-dataset {dataset!r} is not one of the loaded "
-            f"datasets {sorted(stores)}")
+    present = participants(stores, dataset)
     participant = str(participant)
     pool = stores[dataset]
     test = {p: a for p, a in pool.items()
             if _lookup(a, "participant") is not None
             and str(_lookup(a, "participant")) == participant}
     if not test:
-        present = sorted({str(_lookup(a, "participant")) for a in pool.values()},
-                         key=lambda s: (len(s), s))
         raise ValueError(
             f"--test-participant-id {participant!r} matches no admitted store in "
             f"{dataset!r}; its participants are {present}")

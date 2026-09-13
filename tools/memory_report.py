@@ -1,6 +1,6 @@
 """What one training run of a setup costs in memory, without running it.
 
-Takes the same four config files as ``scripts/train.py`` (datasets,
+Takes the same four config files as ``scripts/run.py`` (datasets,
 interface, model, training), builds the model and optimiser exactly as the
 trainer does, draws one real batch of windows from the loaded stores, takes
 exactly one training step on it, and reports:

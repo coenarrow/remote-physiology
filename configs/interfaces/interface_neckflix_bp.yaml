@@ -17,12 +17,12 @@
 FS: 30.0                       # frame rate the model sees; faster stores are
                                # decimated to it
 UPSAMPLING: refuse             # slower stores: refuse | interpolate
-WINDOW_SECONDS: 6.0            # T = WINDOW_SECONDS x FS = 180 frames
+WINDOW_SECONDS: 10.0            # T = WINDOW_SECONDS x FS
 WINDOW_STRIDE: 1.0             # seconds the test set steps between windows;
                                # training draws random windows and ignores it
-CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
+CHANNELS: [R, G, B, I, D]            # ordered camera channels, subset of R,G,B,I,D
 TRACES: [ABP, CVP]             # the two pressure waveforms; ECG dropped
-RESIZE: {H: 36, W: 36}         # what the model sees; {H: 0, W: 0} = no resize
+RESIZE: {H: 72, W: 72}         # what the model sees; {H: 0, W: 0} = no resize
 INPUT_PREPROCESSING: [DiffNormalized]   # Raw | Standardized | DiffNormalized
 LABEL_PREPROCESSING:           # one entry per trace: raw | zscore
   ABP: raw

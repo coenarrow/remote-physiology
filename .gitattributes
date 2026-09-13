@@ -1,0 +1,4 @@
+# Scripts that bash runs must stay LF on every checkout, including a Windows
+# one with core.autocrlf=true; CRLF gives bash "$'\r': command not found".
+*.sh text eol=lf
+*.slurm text eol=lf

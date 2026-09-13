@@ -9,20 +9,20 @@ write to. Everything it does is stated by the three configs it is handed:
 * the **training recipe** says how the train set is optimised;
 * the **model** says nothing — it is a function from frames to predictions.
 
-There is no validation split: LOSO scores on the held-out participant, and
-the last epoch is the model. The test pass returns *records* — one dict per
+There is no validation split: LOSO scores on the held-out participant after
+every epoch (``fit``'s ``after_epoch`` hook), and the last epoch is the
+model. The test pass returns *records* — one dict per
 strided window with predictions, labels, stats, masks and metadata, in
 physical units — and writes nothing: ``src.outputs`` turns them into files,
 and scoring them is the evaluation package's job, not this one's.
 
 The trainer is also handed the run's compiled ``config`` — one plain mapping
 of every config the run executed on, assembled by
-``src.experiment.compile_config`` for ``scripts/train.py`` — and writes it to
+``src.experiment.compile_config`` for ``scripts/run.py`` — and writes it to
 the run directory as ``config.yaml`` the moment that directory exists, then
 carries it inside every checkpoint. What a run ran on is never in doubt, even
 when the files it was launched from have since changed, and
-``scripts/infer.py`` rebuilds the run from the checkpoint alone. Handed no
-config (inference), it writes nothing but the records.
+``src.experiment.rebuild`` reads the run back from the checkpoint alone.
 
 Distributed runs (``src.distributed.Runtime`` with ``world_size > 1``): the
 model is wrapped in ``DistributedDataParallel``, the train set is sharded by a
@@ -265,7 +265,7 @@ class Trainer:
         return tqdm(iterable, desc=desc, leave=False, disable=not self.runtime.is_main)
 
     def checkpoint(self) -> dict:
-        """The model plus the compiled run config, so ``scripts/infer.py`` can
+        """The model plus the compiled run config, so ``src.experiment.rebuild`` can
         rebuild the run from this file alone."""
         return {"model_state": self.model.state_dict(), "config": self.config}
 
@@ -297,8 +297,14 @@ class Trainer:
         self.scaler.update()
         return float(total.detach()), weighted
 
-    def fit(self, train_dataset: Dataset) -> list:
-        """Train for the recipe's epochs; returns the per-epoch loss log."""
+    def fit(self, train_dataset: Dataset, after_epoch=None) -> list:
+        """Train for the recipe's epochs; returns the per-epoch loss log.
+
+        ``after_epoch(epoch)`` is called on every rank once the epoch's loss
+        log and checkpoint are written, with the 1-based epoch number: the
+        script's chance to run and score the held-out participant on that
+        epoch's weights.
+        """
         cfg, runtime = self.training, self.runtime
         sampler = DistributedSampler(train_dataset, num_replicas=runtime.world_size,
                                      rank=runtime.rank, shuffle=True) \
@@ -327,19 +333,21 @@ class Trainer:
                 progress.set_postfix(loss=f"{sums['total'] / sums['batches']:.4g}")
             sums = all_reduce_sum(sums, runtime)      # global means, not rank 0's
             n = max(sums.pop("batches"), 1.0)
-            row = {"epoch": epoch, **{k: v / n for k, v in sums.items()},
+            row = {"epoch": epoch + 1, **{k: v / n for k, v in sums.items()},
                    "seconds": time.time() - started}
             log.append(row)
             if runtime.is_main:
                 self._print_epoch(row)
                 self._write_loss_log(log)
                 torch.save(self.checkpoint(), self.run_dir / CHECKPOINT_NAME)
+            if after_epoch is not None:
+                after_epoch(epoch + 1)
         return log
 
     def _print_epoch(self, row: dict) -> None:
         per_trace = ", ".join(f"{t}={row.get(f'{t}/total', 0.0):.4g}"
                               for t in self.model.traces)
-        print(f"epoch {row['epoch'] + 1}/{self.training.EPOCHS}: "
+        print(f"epoch {row['epoch']}/{self.training.EPOCHS}: "
               f"loss {row['total']:.4g} ({per_trace}) in {row['seconds']:.0f}s")
 
     def _write_loss_log(self, log: list) -> None:

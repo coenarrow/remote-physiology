@@ -7,7 +7,7 @@ models on the contract today (BigSmall, DeepPhys, EfficientPhys,
 FactorizePhys, PhysFormer, PhysMamba, PhysNet, RhythmFormer, TS-CAN,
 iBVPNet), and every file it touches is the file yours will touch.
 
-The authority on *how* a model is run is [`scripts/train.py`](../scripts/train.py)
+The authority on *how* a model is run is [`scripts/run.py`](../scripts/run.py)
 and the modules it imports from [`src/`](../src/). `main.py` and the
 `neural_methods/trainer/` package are legacy and are not what this guide
 describes.
@@ -395,17 +395,13 @@ refusal will surface first.
 
 ## Running it
 
-A fold is three commands, each reading the run directory the one before it
-wrote (`scripts/train.py` prints it):
+A fold is one command, which trains and, after every epoch, runs that
+epoch's model over the held-out participant and scores the records,
+printing the run directory it writes:
 
 ```bash
-uv run python scripts/train.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 1 --model mynet --interface configs/interfaces/mynet_interface.yaml --training configs/training/mynet_training.yaml --limit-windows 8
-uv run python scripts/infer.py runs/MYNET_NECKFLIX.1_<YYYYMMDDHHMM> --limit-windows 8
-uv run python scripts/eval.py runs/MYNET_NECKFLIX.1_<YYYYMMDDHHMM> --reading-seconds 0.5
+uv run python scripts/run.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 1 --model mynet --interface configs/interfaces/mynet_interface.yaml --training configs/training/mynet_training.yaml --limit-windows 8
 ```
-
-With `--limit-windows 8` the covered trace is a few seconds long, so shrink
-the reading for the wiring check; drop both flags for a real fold.
 
 `--limit-windows N` keeps N evenly spaced windows per split for a wiring
 check; drop it for a real fold. Pass `--interface` and `--training`
@@ -416,33 +412,37 @@ the standard interface every model is compared on.
 
 What happens, in order:
 
-1. `scripts/train.py`: `load_interface` reads the interface;
-   `load_model_config` reads your YAML and validates it against that
-   interface; `build_model(model_config, interface)` calls your builder;
+1. Training: `load_interface` reads the interface; `load_model_config`
+   reads your YAML and validates it against that interface;
+   `build_model(model_config, interface)` calls your builder;
    `Trainer(...)` checks the window against `temporal_divisor` /
    `temporal_length`, seeds the readout biases, exempts the readouts from
    weight decay, wraps in DDP if distributed, then `fit` writes the run
-   directory. What the scripts share (the arguments, the compiled config,
-   the windowed datasets) is `src/experiment.py`.
-2. `scripts/infer.py`: rebuilds the interface, model config and recipe from
-   the checkpoint's compiled config through the same parsers the files went
-   through, builds the model, loads the weights, and `test` records the
-   held-out participant's windows.
-3. `scripts/eval.py`: reads `test_records/` alone and writes `beats.csv`,
-   `readings.csv` and `rates.csv` beside each recording's trace tables
-   (`docs/evaluation.md`).
+   directory. What the script is made of beyond the trainer (the
+   arguments, the compiled config, the windowed datasets) is
+   `src/experiment.py`.
+2. Inference, after every epoch: `test` on the same trainer records the
+   held-out participant's strided windows with that epoch's weights, and
+   `src/outputs.py` writes them as `epoch_NN/test_records/` beside a copy
+   of the weights.
+3. Evaluation, straight after: `src/evaluation/recording.py` reads that
+   `test_records/` alone
+   and writes one `<TRACE>_beats.csv` per cardiac trace, `signals.csv`,
+   `rates.csv` and one `<TRACE>.png` per trace beside each recording's
+   trace tables (`docs/evaluation.md`).
 
 Outputs land in `runs/<MODEL>_<DATASET>.<participant or all>-..._<YYYYMMDDHHMM>/`
 (one `<DATASET>.<...>` per `--datasets` entry, the held-out participant on the
 dataset it came from and `all` on the rest):
 
-| File | Written by | Contents |
+| File | When | Contents |
 | ------ | ----------- | ---------- |
-| `config.yaml` | train, before anything else | everything the run ran on in one mapping: the command, git commit, every dataset / interface / model / training config as loaded, the files they came from, the stores on each side of the hold-out, and the resolved device and precision |
-| `model.pt` | train, every epoch | state dict plus the same compiled config, which is what `infer` rebuilds the run from |
-| `losses.csv` | train, every epoch | per-epoch loss, per trace and component |
-| `test_records/` | infer | `meta.json`, `windows.csv` (one row per window with its position and presence flags), and per recording and camera one `<TRACE>.csv`: frame, time, label, mean / std / n over the overlapping windows, then one column per window, all in physical units |
-| `test_records/<recording>/<camera>/{beats,readings,rates}.csv` | eval | per reference beat its matched predicted beat and both beats' levels; per reading the beat counts, the level means / SDs / errors and the waveform agreement; per reading a heart rate per source |
+| `config.yaml` | before the first epoch | everything the run ran on in one mapping: the command, git commit, every dataset / interface / model / training config as loaded, the files they came from, the stores on each side of the hold-out, and the resolved device and precision |
+| `model.pt` | every epoch, overwritten | the latest epoch's state dict plus the same compiled config (`src.experiment.rebuild` reads a run back from it) |
+| `losses.csv` | every epoch | per-epoch loss, per trace and component; `epoch` is 1-based like the directories below |
+| `epoch_NN/model.pt` | after epoch NN | that epoch's state dict, in the same form |
+| `epoch_NN/test_records/` | after epoch NN | `meta.json` (with the epoch), `windows.csv` (one row per window with its position and presence flags), and per recording and camera one `<TRACE>.csv`: frame, time, label, mean / std / n over the overlapping windows, then one column per window, all in physical units |
+| `epoch_NN/test_records/<recording>/<camera>/<TRACE>_beats.csv`, `signals.csv`, `rates.csv`, `<TRACE>.png` | after the records | per reference beat its peak and trough times, its matched predicted beat's and both beats' levels; per signal, over the whole covered stretch, the beat counts, the level means / SDs / errors and the waveform agreement; a heart rate per source; per trace the figure of label, prediction with its spread, and beats |
 
 ## Migrating an upstream rPPG-Toolbox model
 

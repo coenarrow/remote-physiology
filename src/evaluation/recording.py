@@ -1,48 +1,45 @@
-"""The evaluation of one recording and camera: its beats, readings and
-heart rates, written beside the trace tables it read.
+"""The evaluation of one recording and camera: its beats, per-signal
+metrics and heart rates, written beside the trace tables it read as one
+``<TRACE>_beats.csv`` per cardiac trace, ``signals.csv`` and ``rates.csv``,
+plus one ``<TRACE>.png`` per trace showing the label, the combined
+prediction with its spread across windows, and the detected beats.
 
-A reading is one blood-pressure determination: a non-overlapping stretch of
-the combined trace, ``reading_seconds`` long, cut from the first covered
-frame to the last, a trailing remainder shorter than half a reading
-dropped. The length is the caller's (``scripts/eval.py --reading-seconds``):
+The whole covered stretch of the combined trace, from the first covered
+frame to the last, is scored once. Per signal the row carries the beat
+counts on both sides and how many matched; for absolute-class signals the
+mean and SD over the beats of each level (max / mean / min: systolic / MAP
+/ diastolic for ABP), the error of the means (prediction minus reference,
+the sign every standard uses) and the ISO 81060-2 clause 6.2.5, p. 22,
+dead-band error (zero inside the reference mean ± SD, else the distance to
+the nearer limit); and the per-sample agreement of the combined prediction
+with the label over the stretch, the IEEE 1708 waveform metrics (equations
+(3) and (4), p. 28). The prediction is the trace table's ``mean`` column:
+the average of every strided window covering the frame.
 
-* ISO 81060-2:2018 clause 6.2.4 b), p. 21 — the invasive reference reading
-  averages the beat-by-beat values over at least 30 s (the default);
-* ISO 81060-3:2022 clause 5.1.3 a) 1), p. 14 — the segment matches the
-  device's minimum output period, typically 5 s to 10 s (A.2, p. 27);
-* IEEE 1708-2025 clause 4.4.2, p. 24 — three 60 s recordings per test.
-
-Per reading and signal the row carries the beat counts on both sides and
-how many matched; for absolute-class signals the mean and SD over the
-beats of each level (max / mean / min: systolic / MAP / diastolic for ABP),
-the error of the means (prediction minus reference, the sign every
-standard uses) and the ISO 81060-2 clause 6.2.5, p. 22, dead-band error
-(zero inside the reference mean ± SD, else the distance to the nearer
-limit); and the per-sample agreement of the combined prediction with the
-label over the reading, the IEEE 1708 waveform metrics (equations (3) and
-(4), p. 28). The prediction is the trace table's ``mean`` column: the
-average of every strided window covering the frame.
-
-The three files carry no dataset / participant / recording / perspective
+These files carry no dataset / participant / recording / perspective
 columns: the folder's place in the records directory says where it sits,
 so this module never needs to know.
 """
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.evaluation.beats import BEAT_COLUMNS, LEVELS, analyse, beat_rows
-from src.evaluation.rate import MIN_FRAMES, RATE_METRICS, reading_rates
+from src.evaluation.beat_metrics import BEAT_COLUMNS, LEVELS, analyse, beat_rows
+from src.evaluation.plots import recording_figure
+from src.evaluation.rate import MIN_FRAMES, RATE_METRICS, recording_rates
 from src.outputs import FLOAT_FORMAT
 from src.signal_transforms import is_absolute, is_cardiac
 
-BEATS_NAME, READINGS_NAME, RATES_NAME = "beats.csv", "readings.csv", "rates.csv"
-FILES = (BEATS_NAME, READINGS_NAME, RATES_NAME)
+SIGNALS_NAME, RATES_NAME = "signals.csv", "rates.csv"
+FIGURE_DPI = 150
+#: The beat times the figure marks, as ``Beats`` attributes.
+MARKS = ("ref_peaks", "ref_troughs", "pred_peaks", "pred_troughs")
 WAVEFORM_METRICS = ("mad", "rmse", "r", "ccc")
-READING_COLUMNS = (
-    "signal", "reading", "t_start", "t_end", "reading_seconds",
+SIGNAL_COLUMNS = (
+    "signal", "t_start", "t_end",
     "n_ref_beats", "n_pred_beats", "n_matched",
     *(f"{side}_{s}_{stat}" for s in LEVELS for side in ("ref", "pred")
       for stat in ("mean", "sd")),
@@ -50,7 +47,7 @@ READING_COLUMNS = (
     *(f"err_{s}_deadband" for s in LEVELS),
     *(f"waveform_{m}" for m in WAVEFORM_METRICS),
 )
-RATE_COLUMNS = ("reading", "source", *RATE_METRICS)
+RATE_COLUMNS = ("source", *RATE_METRICS)
 TRACE_COLUMNS = ["frame", "t", "label", "mean", "std", "n"]
 _NAN = float("nan")
 
@@ -84,28 +81,26 @@ def _waveform(ref: np.ndarray, pred: np.ndarray) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The trace tables and the readings they are cut into
+# The trace tables and the stretch they cover
 # ---------------------------------------------------------------------------
 def read_trace(folder: Path, sig: str) -> pd.DataFrame:
     """The fixed columns of one trace table (``src/outputs.py``)."""
     return pd.read_csv(Path(folder) / f"{sig}.csv", usecols=TRACE_COLUMNS)[TRACE_COLUMNS]
 
 
-def reading_bounds(covered: np.ndarray, fs: float, reading_seconds: float) -> list:
-    """``[(start, end), ...]`` sample slices of consecutive readings from the
-    first covered frame to the last; a trailing remainder shorter than half
-    a reading is dropped."""
+def beats_name(sig: str) -> str:
+    """``<TRACE>_beats.csv``: one beats table per cardiac trace."""
+    return f"{sig}_beats.csv"
+
+
+def covered_span(covered: np.ndarray) -> tuple | None:
+    """``(start, end)`` sample slice from the first covered frame to the
+    last, the one stretch every metric is scored over; ``None`` when no
+    window covered anything."""
     frames = np.flatnonzero(covered)
     if frames.size == 0:
-        return []
-    first, last = int(frames[0]), int(frames[-1]) + 1
-    length = max(1, int(round(reading_seconds * fs)))
-    bounds = []
-    for start in range(first, last, length):
-        end = min(start + length, last)
-        if end - start >= length / 2:
-            bounds.append((start, end))
-    return bounds
+        return None
+    return int(frames[0]), int(frames[-1]) + 1
 
 
 def _filled(x: np.ndarray) -> np.ndarray:
@@ -153,31 +148,34 @@ def _sample_level_columns(ref: np.ndarray, pred: np.ndarray) -> dict:
 # ---------------------------------------------------------------------------
 # One folder to its three files
 # ---------------------------------------------------------------------------
-def score_recording(folder, meta: dict, reading_seconds: float) -> dict:
-    """Score every trace of one recording-and-camera folder; write and return
-    ``{"beats", "readings", "rates"}``."""
+def score_recording(folder, meta: dict) -> dict:
+    """Score every trace of one recording-and-camera folder over the whole
+    covered stretch; write and return ``{"beats": {trace: table},
+    "signals", "rates"}``."""
     folder = Path(folder)
     fs, traces = float(meta["fs"]), [str(sig) for sig in meta["traces"]]
     tables = {sig: read_trace(folder, sig) for sig in traces}
     # The tables' own time axis, not the row index: under --limit-windows the
     # first covered frame need not be frame 0, so index / fs and the table's
     # "t" column disagree by the covered window's start offset. t_start,
-    # t_end and t_ref are on the "t" axis so they line up with the trace
-    # tables they sit beside.
+    # t_end and the beat times are on the "t" axis so they line up with the
+    # trace tables they sit beside.
     times = tables[traces[0]]["t"].to_numpy(dtype=np.float64)
     covered = np.zeros(len(tables[traces[0]]), dtype=bool)
     for table in tables.values():
         covered |= table["n"].to_numpy() > 0
-    readings, beats, rates = [], [], []
-    first_beat = {sig: 0 for sig in traces}
-    for index, (start, end) in enumerate(reading_bounds(covered, fs, reading_seconds)):
-        t0, cardiac = float(times[start]), {}
-        t_end = float(times[end - 1]) + 1 / fs
+    signals, rates, cardiac = [], [], {}
+    beats = {sig: pd.DataFrame(columns=list(BEAT_COLUMNS))
+             for sig in traces if is_cardiac(sig)}
+    marks = {sig: {key: [] for key in MARKS} for sig in beats}
+    span = covered_span(covered)
+    if span is not None:
+        start, end = span
+        t0, t_end = float(times[start]), float(times[end - 1]) + 1 / fs
         for sig, table in tables.items():
             label = table["label"].to_numpy(dtype=np.float64)[start:end]
             pred = table["mean"].to_numpy(dtype=np.float64)[start:end]
-            row = {"signal": sig, "reading": index, "t_start": t0, "t_end": t_end,
-                   "reading_seconds": reading_seconds}
+            row = {"signal": sig, "t_start": t0, "t_end": t_end}
             ok = np.isfinite(label) & np.isfinite(pred)
             if ok.sum() >= MIN_FRAMES:
                 row.update(_waveform(label[ok], pred[ok]))
@@ -188,20 +186,27 @@ def score_recording(folder, meta: dict, reading_seconds: float) -> dict:
                     row.update({"n_ref_beats": found.ref_peaks.size,
                                 "n_pred_beats": found.pred_peaks.size,
                                 "n_matched": found.n_matched})
-                    beats.append(beat_rows(found, fs, t0, sig, first_beat[sig]))
-                    first_beat[sig] += found.ref_peaks.size
+                    beats[sig] = beat_rows(found, fs, t0, sig)
+                    for key in MARKS:
+                        marks[sig][key].extend((t0 + getattr(found, key) / fs).tolist())
                     if is_absolute(sig):
                         row.update(_beat_level_columns(found.ref_levels, found.pred_levels))
                 elif is_absolute(sig):
                     row.update(_sample_level_columns(label[ok], pred[ok]))
-            readings.append(row)
-        rates.extend({"reading": index, **r} for r in reading_rates(cardiac, fs))
+            signals.append(row)
+        rates = recording_rates(cardiac, fs)
     frames = {
-        "beats": (pd.concat(beats, ignore_index=True) if beats
-                  else pd.DataFrame(columns=list(BEAT_COLUMNS))),
-        "readings": pd.DataFrame(readings, columns=list(READING_COLUMNS)),
+        "beats": beats,
+        "signals": pd.DataFrame(signals, columns=list(SIGNAL_COLUMNS)),
         "rates": pd.DataFrame(rates, columns=list(RATE_COLUMNS)),
     }
-    for name, key in ((BEATS_NAME, "beats"), (READINGS_NAME, "readings"), (RATES_NAME, "rates")):
+    for sig, table in frames["beats"].items():
+        table.to_csv(folder / beats_name(sig), index=False, float_format=FLOAT_FORMAT)
+    for name, key in ((SIGNALS_NAME, "signals"), (RATES_NAME, "rates")):
         frames[key].to_csv(folder / name, index=False, float_format=FLOAT_FORMAT)
+    where = f"{folder.parent.name} camera {folder.name}"
+    for sig, table in tables.items():
+        figure = recording_figure(table, marks.get(sig), sig, f"{sig} {where}")
+        figure.savefig(folder / f"{sig}.png", dpi=FIGURE_DPI)
+        plt.close(figure)
     return frames

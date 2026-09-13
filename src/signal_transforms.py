@@ -55,7 +55,7 @@ ABSOLUTE, SHAPE = "absolute", "shape"
 #: absolute-class readout's bias starts at, whether the trace beats with the
 #: heart so a heart rate can be read off it (``src/evaluation/rate.py``), and
 #: for absolute signals how a report names the per-window max / mean / min.
-#: ``beat`` is how the detector reads the trace (``src/evaluation/beats.py``).
+#: ``beat`` is how the detector reads the trace (``src/evaluation/beat_metrics.py``).
 SIGNALS = {
     "PPG":  {"class": SHAPE,    "unit": "a.u.", "prior": 0.0,  "cardiac": True,
              "beat": {"polarity": 1, "prominence": 0.3}},
@@ -67,7 +67,7 @@ SIGNALS = {
     # CVP has no systole: its waveform is a/c/v waves, and the quantity that
     # matters clinically is the mean. Same machinery as ABP, other words.
     # Its beats are detected with the same detector and a lower prominence;
-    # readings.csv's n_ref_beats / n_pred_beats / n_matched say whether
+    # signals.csv's n_ref_beats / n_pred_beats / n_matched say whether
     # that works.
     "CVP":  {"class": ABSOLUTE, "unit": "mmHg", "prior": 8.0,  "cardiac": True,
              "beat": {"polarity": 1, "prominence": 0.2},
