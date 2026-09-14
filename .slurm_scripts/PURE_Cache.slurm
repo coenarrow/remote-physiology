@@ -23,7 +23,7 @@
 # together. PURE_RAW is the directory holding the SS-TT recording
 # directories, each with its PNG frames and its JSON sidecar.
 
-PURE_RAW="/group/pgh004/carrow/data/PURE"
+PURE_RAW="/group/pgh004/carrow/data/PURE/PURE"
 PURE_CACHE="/group/pgh004/carrow/caches/pure_zarr"
 
 mkdir -p logs
