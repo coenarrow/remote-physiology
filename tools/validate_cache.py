@@ -16,7 +16,9 @@ from typing import NamedTuple
 import numpy as np
 import zarr
 
-from src.signal_transforms import MODALITY_CHANNELS, TRACE_KEYS
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.signal_transforms import MODALITY_CHANNELS, TRACE_KEYS  # noqa: E402
 
 #: Modalities whose frame representation the contract has not pinned yet. Their
 #: channel count goes unchecked; the CLI says so rather than passing silently.
