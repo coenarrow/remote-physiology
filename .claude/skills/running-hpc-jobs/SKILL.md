@@ -21,11 +21,16 @@ production, `salloc` for interactive debugging. No exceptions:
 
 ## GPU Resources
 
-| Partition | Max GPUs | Resource flag | Use for |
-|-----------|----------|---------------|---------|
-| `gpu` | 2x V100 | `--gres=gpu:v100:N` | Development/testing (preferred) |
-| `pophealth` | 4x A100 | `--gres=gpu:a100:N` | Dev fallback, production runs |
-| `medical` | 4x H100 | `--gres=gpu:h100:N` | Dev last resort, primary for production |
+| Partition | Max GPUs | Memory per card | Resource flag | Use for |
+|-----------|----------|-----------------|---------------|---------|
+| `gpu` | 2x V100 | not yet measured | `--gres=gpu:v100:N` | Development/testing (preferred) |
+| `pophealth` | 4x A100 | 39.5 GB (A100-SXM4-40GB) | `--gres=gpu:a100:N` | Dev fallback, production runs |
+| `medical` | 4x H100 | 93.1 GB (H100 NVL) | `--gres=gpu:h100:N` | Dev last resort, primary for production |
+
+The memory figures are what the trainer's `gpu:` line reported on the
+card (`NVIDIA H100 NVL, 91.8 GB free of 93.1 GB`; `NVIDIA A100-SXM4-40GB,
+39.1 GB free of 39.5 GB`). A run that fits an A100 has more than twice
+the room on an H100.
 
 ### Choosing a partition for dev/test runs (<10 min expected)
 
