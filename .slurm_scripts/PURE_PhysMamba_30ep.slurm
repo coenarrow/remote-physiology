@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --gres=gpu:a100:2
+#SBATCH --mem=96G
+#SBATCH --gres=gpu:a100:4
 #SBATCH --time=2:00:00
 #SBATCH --output=logs/%j_PURE_PhysMamba_30ep.out
 #SBATCH --error=logs/%j_PURE_PhysMamba_30ep.err
@@ -38,4 +38,4 @@ fi
 
 uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" \
     --config configs/experiment_configs/physmamba_FS30_W10S1_RGB_PPG_H256W256.yaml \
-    --epochs 30 --batch-size 2 --num-workers 4 --parallel 1 --nproc-per-node 2
+    --epochs 30 --batch-size 4 --num-workers 8 --parallel 2 --nproc-per-node 2
