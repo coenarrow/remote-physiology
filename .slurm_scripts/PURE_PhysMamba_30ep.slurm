@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=PURE_PhysMamba_3ep
-#SBATCH --partition=gpu
+#SBATCH --partition=pophealth
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --gres=gpu:v100:2
+#SBATCH --gres=gpu:a100:2
 #SBATCH --time=2:00:00
 #SBATCH --output=logs/%j_PURE_PhysMamba_3ep.out
 #SBATCH --error=logs/%j_PURE_PhysMamba_3ep.err
@@ -36,4 +36,4 @@ if [ "$#" -gt 0 ]; then
     FOLDS=(--test-participant-id "$@")
 fi
 
-uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" --config configs/original_model_config/physmamba_FS30_W4.27S4.27_RGB_PPG_H128W128.yaml --epochs 3 --batch-size 4 --num-workers 4 --parallel 2 --nproc-per-node 1
+uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" --config configs/experiment_configs/physmamba_FS30_W10S1_RGB_PPG_H128W128.yaml --epochs 30 --batch-size 4 --num-workers 4 --parallel 2 --nproc-per-node 1

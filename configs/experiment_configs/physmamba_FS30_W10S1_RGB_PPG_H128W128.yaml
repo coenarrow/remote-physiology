@@ -5,11 +5,11 @@ MODEL:
 INTERFACE:
   FS: 30.0                       # frame rate the model sees
   UPSAMPLING: refuse             # slower stores: refuse | interpolate
-  WINDOW_SECONDS: 4.27       # 128 frames (128 / 30), the upstream CHUNK_LENGTH
-  WINDOW_STRIDE: 4.27        # seconds the test set steps between windows
+  WINDOW_SECONDS: 10.0       # 128 frames (128 / 30), the upstream CHUNK_LENGTH
+  WINDOW_STRIDE: 1.0        # seconds the test set steps between windows
   CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
   TRACES: [PPG]                  # the paper predicts BVP and nothing else
-  RESIZE: {H: 128, W: 128}       # upstream PhysMamba frame size
+  RESIZE: {H: 256, W: 256}       # upstream PhysMamba frame size
   LOSS:                          # upstream trains PhysMamba with negative Pearson
     PPG: {NEGPEARSON: 1.0}
 
