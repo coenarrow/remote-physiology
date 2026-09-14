@@ -7,8 +7,8 @@
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=2:00:00
-#SBATCH --output=logs/%j_PURE_PhysMamba_3ep.out
-#SBATCH --error=logs/%j_PURE_PhysMamba_3ep.err
+#SBATCH --output=logs/%j_PURE_PhysMamba_30ep.out
+#SBATCH --error=logs/%j_PURE_PhysMamba_30ep.err
 
 # PhysMamba on PURE, three epochs, every participant held out in turn: the
 # HPC twin of the dev-box test run. Two folds at a time, one GPU each, so
@@ -36,4 +36,6 @@ if [ "$#" -gt 0 ]; then
     FOLDS=(--test-participant-id "$@")
 fi
 
-uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" --config configs/experiment_configs/physmamba_FS30_W10S1_RGB_PPG_H128W128.yaml --epochs 30 --batch-size 4 --num-workers 4 --parallel 2 --nproc-per-node 1
+uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" \
+    --config configs/experiment_configs/physmamba_FS30_W10S1_RGB_PPG_H256W256.yaml \
+    --epochs 30 --batch-size 2 --num-workers 4 --parallel 1 --nproc-per-node 2

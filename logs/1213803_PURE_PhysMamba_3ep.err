@@ -1,0 +1,2 @@
+1 fold(s) failed (01); 0 finished, 9 never started (02, 03, 04, 05, 06, 07, 08, 09, 10)
+slurmstepd: error: Detected 4 oom_kill events in StepId=1213803.batch. Some of the step tasks have been OOM Killed.
