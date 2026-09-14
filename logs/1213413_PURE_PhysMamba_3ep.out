@@ -1,0 +1,6 @@
+Job ID: 1213413, node k177, holding out every participant
+experiment: physmamba on ['pure_hpc'], 10 fold(s) holding out pure_hpc ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'], 2 at a time, 1 process(es) each, GPUs 0,1, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba
+fold 1/10: holding out pure_hpc 01 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.01_202609141657
+fold 2/10: holding out pure_hpc 02 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.02_202609141657
+fold 1/10: failed with exit status -9 after 76s; see /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.01_202609141657/log.txt
+fold 2/10: failed with exit status -9 after 76s; see /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.02_202609141657/log.txt

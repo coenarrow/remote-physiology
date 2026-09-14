@@ -1,0 +1,157 @@
+Job ID: 1210528, node k171
+raw: /group/pgh004/carrow/data/PURE/PURE -> cache: /group/pgh004/carrow/caches/pure_zarr
+Found 59 recordings; scanning metadata...
+Processing 59 recordings with 4 workers...
+cached 01-01 (1 modalities, 2025 frames)
+WARNING [01-01]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 01-02 (1 modalities, 2022 frames)
+WARNING [01-02]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 01-03 (1 modalities, 2480 frames)
+cached 01-04 (1 modalities, 2491 frames)
+WARNING [01-04]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 01-05 (1 modalities, 2022 frames)
+WARNING [01-05]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 01-06 (1 modalities, 2040 frames)
+cached 02-01 (1 modalities, 2038 frames)
+WARNING [02-01]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 02-02 (1 modalities, 1972 frames)
+cached 02-03 (1 modalities, 2185 frames)
+cached 02-04 (1 modalities, 2224 frames)
+cached 02-05 (1 modalities, 1919 frames)
+cached 02-06 (1 modalities, 1942 frames)
+WARNING [02-06]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 03-01 (1 modalities, 1974 frames)
+cached 03-02 (1 modalities, 2019 frames)
+WARNING [03-02]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 03-03 (1 modalities, 2200 frames)
+cached 03-06 (1 modalities, 1950 frames)
+WARNING [03-06]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 03-05 (1 modalities, 1935 frames)
+cached 03-04 (1 modalities, 2244 frames)
+cached 04-01 (1 modalities, 1961 frames)
+WARNING [04-01]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 04-02 (1 modalities, 2026 frames)
+WARNING [04-02]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 04-04 (1 modalities, 2281 frames)
+WARNING [04-04]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 04-05 (1 modalities, 1950 frames)
+cached 04-03 (1 modalities, 2268 frames)
+WARNING [04-03]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 04-06 (1 modalities, 1962 frames)
+WARNING [04-06]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 05-01 (1 modalities, 1983 frames)
+WARNING [05-01]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 05-02 (1 modalities, 2006 frames)
+WARNING [05-02]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 05-04 (1 modalities, 2311 frames)
+WARNING [05-04]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 05-03 (1 modalities, 2279 frames)
+WARNING [05-03]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 05-05 (1 modalities, 1962 frames)
+cached 05-06 (1 modalities, 1960 frames)
+WARNING [05-06]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 06-01 (1 modalities, 1971 frames)
+WARNING [06-01]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 06-03 (1 modalities, 2269 frames)
+WARNING [06-03]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 06-04 (1 modalities, 2277 frames)
+WARNING [06-04]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 06-05 (1 modalities, 1958 frames)
+WARNING [06-05]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 06-06 (1 modalities, 1969 frames)
+cached 07-01 (1 modalities, 1953 frames)
+WARNING [07-01]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 07-02 (1 modalities, 2108 frames)
+WARNING [07-02]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 07-03 (1 modalities, 2256 frames)
+cached 07-04 (1 modalities, 2270 frames)
+cached 07-05 (1 modalities, 1942 frames)
+cached 07-06 (1 modalities, 1959 frames)
+cached 08-01 (1 modalities, 1963 frames)
+cached 08-02 (1 modalities, 1978 frames)
+cached 08-03 (1 modalities, 2258 frames)
+cached 08-05 (1 modalities, 1950 frames)
+WARNING [08-05]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 08-04 (1 modalities, 2297 frames)
+cached 08-06 (1 modalities, 1964 frames)
+WARNING [08-06]: 1/rgb: 2 interior NaN sample(s) in ppg; kept as-is
+cached 09-01 (1 modalities, 1964 frames)
+cached 09-02 (1 modalities, 2017 frames)
+WARNING [09-02]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 09-03 (1 modalities, 2285 frames)
+cached 09-04 (1 modalities, 2579 frames)
+WARNING [09-04]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 09-05 (1 modalities, 1962 frames)
+WARNING [09-05]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 09-06 (1 modalities, 1983 frames)
+WARNING [09-06]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 10-01 (1 modalities, 1952 frames)
+cached 10-02 (1 modalities, 1993 frames)
+cached 10-03 (1 modalities, 2299 frames)
+cached 10-05 (1 modalities, 1959 frames)
+WARNING [10-05]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+cached 10-04 (1 modalities, 2336 frames)
+cached 10-06 (1 modalities, 1950 frames)
+WARNING [10-06]: 1/rgb: 1 interior NaN sample(s) in ppg; kept as-is
+59 cached, 0 skipped, 0 failed
+stores written: 59
+PASS 01-01.zarr
+PASS 01-02.zarr
+PASS 01-03.zarr
+PASS 01-04.zarr
+PASS 01-05.zarr
+PASS 01-06.zarr
+PASS 02-01.zarr
+PASS 02-02.zarr
+PASS 02-03.zarr
+PASS 02-04.zarr
+PASS 02-05.zarr
+PASS 02-06.zarr
+PASS 03-01.zarr
+PASS 03-02.zarr
+PASS 03-03.zarr
+PASS 03-04.zarr
+PASS 03-05.zarr
+PASS 03-06.zarr
+PASS 04-01.zarr
+PASS 04-02.zarr
+PASS 04-03.zarr
+PASS 04-04.zarr
+PASS 04-05.zarr
+PASS 04-06.zarr
+PASS 05-01.zarr
+PASS 05-02.zarr
+PASS 05-03.zarr
+PASS 05-04.zarr
+PASS 05-05.zarr
+PASS 05-06.zarr
+PASS 06-01.zarr
+PASS 06-03.zarr
+PASS 06-04.zarr
+PASS 06-05.zarr
+PASS 06-06.zarr
+PASS 07-01.zarr
+PASS 07-02.zarr
+PASS 07-03.zarr
+PASS 07-04.zarr
+PASS 07-05.zarr
+PASS 07-06.zarr
+PASS 08-01.zarr
+PASS 08-02.zarr
+PASS 08-03.zarr
+PASS 08-04.zarr
+PASS 08-05.zarr
+PASS 08-06.zarr
+PASS 09-01.zarr
+PASS 09-02.zarr
+PASS 09-03.zarr
+PASS 09-04.zarr
+PASS 09-05.zarr
+PASS 09-06.zarr
+PASS 10-01.zarr
+PASS 10-02.zarr
+PASS 10-03.zarr
+PASS 10-04.zarr
+PASS 10-05.zarr
+PASS 10-06.zarr
+59/59 stores pass

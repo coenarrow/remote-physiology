@@ -1,0 +1,23 @@
+Job ID: 1212810, node k177, holding out every participant
+experiment: physmamba on ['pure_hpc'], 10 fold(s) holding out pure_hpc ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'], 2 at a time, 1 process(es) each, GPUs 0,1, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba
+fold 1/10: holding out pure_hpc 01 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.01_202609141623
+fold 2/10: holding out pure_hpc 02 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.02_202609141623
+fold 1/10: done in 138s, final loss 1.039
+fold 2/10: done in 138s, final loss 0.9951
+fold 3/10: holding out pure_hpc 03 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.03_202609141626
+fold 4/10: holding out pure_hpc 04 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.04_202609141626
+fold 4/10: done in 134s, final loss 0.9854
+fold 5/10: holding out pure_hpc 05 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.05_202609141628
+fold 3/10: done in 136s, final loss 1.027
+fold 6/10: holding out pure_hpc 06 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.06_202609141628
+fold 6/10: done in 128s, final loss 0.9729
+fold 7/10: holding out pure_hpc 07 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.07_202609141630
+fold 5/10: done in 134s, final loss 0.9876
+fold 8/10: holding out pure_hpc 08 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.08_202609141630
+fold 7/10: done in 138s, final loss 0.8009
+fold 8/10: done in 134s, final loss 0.9521
+fold 9/10: holding out pure_hpc 09 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.09_202609141632
+fold 10/10: holding out pure_hpc 10 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/pure_hpc_physmamba/PHYSMAMBA_PURE_HPC.10_202609141632
+fold 9/10: done in 142s, final loss 0.9648
+fold 10/10: done in 142s, final loss 1.015
+experiment: 10 fold(s) done
