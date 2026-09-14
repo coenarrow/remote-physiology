@@ -14,7 +14,6 @@ temp
 *.out
 .venv
 .uv_cache
-logs/
 model_outputs/
 
 # VSCode Settings
