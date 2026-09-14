@@ -2,10 +2,10 @@
 
 How to put a new architecture on the multi-signal contract, whether you are
 writing it from scratch or migrating one of the upstream rPPG-Toolbox models.
-DeepPhys is the worked example throughout: it is the simplest of the ten
-models on the contract today (BigSmall, DeepPhys, EfficientPhys,
-FactorizePhys, PhysFormer, PhysMamba, PhysNet, RhythmFormer, TS-CAN,
-iBVPNet), and every file it touches is the file yours will touch.
+DeepPhys is the worked example throughout: it is the simplest of the nine
+models on the contract today (DeepPhys, EfficientPhys, FactorizePhys,
+PhysFormer, PhysMamba, PhysNet, RhythmFormer, TS-CAN, iBVPNet), and every
+file it touches is the file yours will touch.
 
 The authority on *how* a model is run is [`scripts/run.py`](../scripts/run.py)
 and the modules it imports from [`src/`](../src/). `main.py` and the
@@ -22,27 +22,30 @@ speaking the batch dict: frames in, predictions out, nothing else.
   first layer takes the interface's channel count, and there is one copy of
   the network per entry of `TRACES`. Layer sizes are defined once, in the
   architecture's module, at their published values.
+- **The input is raw and the model normalises it.** The dataset resizes and
+  nothing else; whatever the paper fed its network (standardised frames,
+  frame differences) is the backbone's own first stage, taken from
+  [`neural_methods/model/modules/`](../neural_methods/model/modules/). There
+  is no input-preprocessing switch anywhere in config.
 - **The loss is the trainer's, not the model's.** The interface's `LOSS` block
   states it per trace; a model that computes its own loss is wrong.
 - **The trainer reaches into the model in exactly one place**: the readouts
   returned by `output_layers()`. It seeds each readout's bias with the trace's
   physiological prior and exempts the readouts from weight decay.
 
-Because the wrapper owns channel order, trace order, the dict, and the
-per-frame/clip folding, an architecture never sees a dict at all. It sees a
-tensor and returns a tensor.
+Because the wrapper owns channel order, trace order and the dict, an
+architecture never sees a dict at all. It sees a tensor and returns a tensor.
 
-## The seven things you touch
+## The six things you touch
 
 | # | What | Where | Exists for DeepPhys as |
 | --- | ------ | ------- | ------------------------ |
 | 1 | The backbone, a plain `nn.Module` | `neural_methods/model/<Name>.py` | [`neural_methods/model/DeepPhys.py`](../neural_methods/model/DeepPhys.py) |
-| 2 | Config class + builder + two registry lines | `src/models.py` | `DeepPhysConfig`, `_build_deepphys`, the `"DeepPhys"` entries |
-| 3 | The model config | `configs/models/<name>.yaml` | [`configs/models/deepphys.yaml`](../configs/models/deepphys.yaml) |
-| 4 | The paper interface | `configs/interfaces/<name>_interface.yaml` | [`configs/interfaces/deepphys_interface.yaml`](../configs/interfaces/deepphys_interface.yaml) |
-| 5 | The paper training recipe | `configs/training/<name>_training.yaml` | [`configs/training/deepphys_training.yaml`](../configs/training/deepphys_training.yaml) |
-| 6 | One smoke test | `tests/test_<name>.py` | (not yet written; see step 5) |
-| 7 | The PURE command that proves it runs | `README.md`, "Algorithms" | the `--model deepphys` line |
+| 2 | One registry line (+ a config class only if the model has a switch) | `src/model_config.py` | the `"DeepPhys"` entry of `MODEL_CONFIGS`, mapped to the shared `ModelConfig` |
+| 3 | Builder + one registry line | `src/models.py` | `_build_deepphys`, the `"DeepPhys"` entry of `MODEL_BUILDERS` |
+| 4 | The paper config: `MODEL`, `INTERFACE` and `TRAIN` in one file | `configs/original_model_config/<name>_<interface>.yaml` | [`deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml`](../configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml) |
+| 5 | One smoke test | `tests/test_<name>.py` | (not yet written; see step 4) |
+| 6 | The PURE command that proves it runs | `README.md`, "Algorithms" | the DeepPhys line |
 
 Nothing else. No new trainer, loader, loss, dataset or plot. If your model
 needs something the shared pieces almost do, extend the shared piece for
@@ -52,11 +55,12 @@ Copyable starting points:
 
 - [`neural_methods/model/_template.py`](../neural_methods/model/_template.py)
   for the backbone (step 1);
-- [`configs/models/_model_template.yaml`](../configs/models/_model_template.yaml)
-  for the model config (step 3);
-- [`configs/interfaces/_interface_template.yaml`](../configs/interfaces/_interface_template.yaml)
-  for the paper interface (step 4);
-- the code blocks in steps 2 and 5 below for the registration and the test.
+- [`configs/_model_config_template.yaml`](../configs/_model_config_template.yaml)
+  for the paper config (step 3): every key with its type and the values
+  the parser accepts; DeepPhys's
+  [config file](../configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml)
+  is the filled-in example;
+- the code blocks in steps 2 and 4 below for the registration and the test.
 
 ## Step 1: the backbone
 
@@ -73,12 +77,10 @@ def __init__(self, in_channels: int = 3, ...published sizes as defaults...):
 ```
 
 - `in_channels` is **required** and is the only width the wrapper always
-  passes. It is `len(interface.CHANNELS) * len(input_blocks)`: the interface's
-  channels stacked in order, once per named preprocessing block, blocks
-  concatenated in the order the builder lists them (step 2). DeepPhys is
-  handed `in_channels=len(CHANNELS)` and reads two blocks of that width,
-  motion first and appearance second, slicing them off the channel axis
-  itself.
+  passes. It is `len(interface.CHANNELS)`: the interface's channels stacked
+  in order, raw. A two-branch network (DeepPhys, TS-CAN) does not receive two
+  blocks; it takes the one raw clip and derives its motion and appearance
+  inputs itself.
 - Any other width the interface determines (`img_size` for DeepPhys, whose
   dense layer is sized from the frame) is a constructor argument too, passed
   by the builder.
@@ -88,34 +90,44 @@ def __init__(self, in_channels: int = 3, ...published sizes as defaults...):
 
 ### `forward`
 
-Exactly one of two shapes, declared by the builder's `per_frame` flag:
+One shape: `(B, C_in, T, H, W)`, a whole raw clip, in; `(B, 1, T)` out.
 
-| `per_frame` | Input | Output | Who |
-| ------------- | ------- | -------- | ----- |
-| `True` | `(N, C_in, H, W)`, one frame per row; `T` is folded into `N` by the wrapper | `(N, 1)` | DeepPhys |
-| `False` | `(B, C_in, T, H, W)`, a whole clip | `(B, 1, T)` | BigSmall, EfficientPhys, FactorizePhys, PhysFormer, PhysMamba, PhysNet, RhythmFormer, TS-CAN, iBVPNet |
-
-TS-CAN, EfficientPhys and BigSmall take clips rather than per-frame rows even
-though they are built around a temporal shift: that shift has to know where
-each clip starts and ends to be adaptive within it, and a batch the wrapper
-has already folded to `(N, C, H, W)` cannot tell it that, so all three fold
-`(b t)` back inside the module instead. The shift itself is the shared `TSM`
-in [`neural_methods/model/shared.py`](../neural_methods/model/shared.py),
-imported by TS-CAN and EfficientPhys directly and by BigSmall with
-`wrap=True` for its wrap-around variant. That module is where every piece
-more than one backbone needs lives — `nearest_multiple`, `sum_spatial`,
-`dense_width`, `min_frame_message`, `require_min_frame`, `Attention_mask`,
-`TSM` — and it is where a new shared piece belongs. DeepPhys is the only
-backbone that stays `per_frame`.
+A published network that ran on single frames (DeepPhys) still takes the
+clip, because its frame difference needs the time axis; it normalises the
+clip, folds `(b t)` into the batch axis for its 2D layers and unfolds the
+prediction back. The temporal-shift models (TS-CAN, EfficientPhys) need the
+clip for the same reason and also so the shift knows where each clip starts
+and ends. The shift itself is the shared `TSM` in
+[`neural_methods/model/shared.py`](../neural_methods/model/shared.py). That
+module is where every piece more than one backbone needs lives —
+`nearest_multiple`, `sum_spatial`, `dense_width`, `min_frame_message`,
+`require_min_frame`, `Attention_mask`, `TSM` — and it is where a new shared
+piece belongs.
 
 The output is one trace, width one. Never widen the readout to several
 signals and never add per-signal heads on a shared trunk: the wrapper makes
-the copies. A clip backbone must return three dimensions, `(B, 1, T)`, not
-`(B, T)`; the wrapper concatenates copies on axis 1.
+the copies. Return three dimensions, `(B, 1, T)`, not `(B, T)`; the wrapper
+concatenates copies on axis 1.
 
-The input is preprocessed already. The dataset resizes to `RESIZE` and
-applies every `INPUT_PREPROCESSING` block before the model sees anything, so
-the backbone does no normalisation of its own.
+### Input normalisation
+
+The input is raw. The dataset resizes to `RESIZE` and hands over pixel
+values; the backbone applies the paper's `DATA_TYPE` itself as its first
+stage, one `nn.Module` from
+[`neural_methods/model/modules/`](../neural_methods/model/modules/):
+
+| Paper `DATA_TYPE` | First stage | Who |
+| ------------------- | ------------- | ----- |
+| `DiffNormalized` | `DiffNormalize()` | PhysFormer, PhysMamba, PhysNet |
+| `Standardized` | `Standardize()` | EfficientPhys, RhythmFormer |
+| `DiffNormalized` + `Standardized` | both, one per branch | DeepPhys, TS-CAN |
+| `Raw` | nothing (the network differences internally) | FactorizePhys, iBVPNet |
+
+Both modules take `(B, C, T, H, W)` and normalise each (sample, channel)
+block with its own statistics over the clip, the upstream toolbox's
+`diff_normalize_data` and `standardized_data` formulas. Store the stage as
+an attribute (`self.input_norm`, or `self.motion_norm` / `self.appearance_norm`
+for two branches) and apply it as the first line of `forward`.
 
 ### `output_layers()`
 
@@ -161,7 +173,6 @@ pooling backbone states its own floor as a module-level `MIN_FRAME`:
 | Model | `MIN_FRAME` | Why |
 | ------- | ------------- | ----- |
 | PhysFormer | 8 | three 2x spatial pools in the stem |
-| BigSmall | 16 | the big branch pools 2x, 2x then 4x |
 | PhysMamba | 16 | the stem's two spatial pools before the streams |
 | PhysNet | 16 | four 2x spatial pools before the bottleneck |
 | RhythmFormer | 16 | a 4x stem and a 4x patch embedding |
@@ -186,7 +197,7 @@ temporal_length = 128    # the window length must be exactly this
 ```
 
 These are an interim stop for a migration in progress, not a destination, and
-none of the ten migrated models declares either any more — every one reached
+none of the nine migrated models declares either any more — every one reached
 the adaptive stage described above. `src/trainer.py` still honours them: it
 reads them off the first copy and refuses a mismatched `WINDOW_SECONDS`
 rather than truncating.
@@ -199,67 +210,73 @@ rather than truncating.
 - Nothing about traces or channels by name. A backbone cannot tell ABP from
   CVP and must not try.
 
-## Step 2: registration in `src/models.py`
+## Step 2: registration in `src/model_config.py` and `src/models.py`
 
-Three additions, all in [`src/models.py`](../src/models.py), each beside its
-DeepPhys counterpart.
+Two additions, sometimes three, each beside its DeepPhys counterpart: a
+registry line (and, only if the model has a switch, a config class) in
+[`src/model_config.py`](../src/model_config.py), the schema of the config
+file; and a builder with its registry line in
+[`src/models.py`](../src/models.py), which turns a parsed config into a
+network.
 
-### The config class
+### The config class (only if the model has a switch)
+
+Most models have none: their `MODEL` section is `NAME` alone and they map to
+the shared `ModelConfig`. Write a class only when the paper leaves something
+free:
 
 ```python
 @dataclass
-class MyNetConfig:
-    NAME: str = ""
-    INPUT: str = ""          # which INPUT_PREPROCESSING block the net reads
+class MyNetConfig(ModelConfig):
+    FSAM: bool = True        # a flag the paper ablates
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
+        ...                  # raise ConfigError for anything the interface cannot satisfy
 ```
 
 - **Fields are the YAML keys.** Every field is required in the file, unknown
-  keys are refused, so the dataclass *is* the schema of `configs/models/<name>.yaml`.
-- Fields are **experiment switches**, not sizes: which preprocessing block a
-  branch reads, a head variant, a flag the paper ablates. If you find yourself
-  adding `HIDDEN_DIM`, stop; it belongs in the module's defaults.
+  keys are refused, so the dataclass *is* the schema of the `MODEL` section.
+- Fields are **experiment switches**, not sizes: a head variant, a flag the
+  paper ablates, the temporal-shift segment length. If you find yourself
+  adding `HIDDEN_DIM`, stop; it belongs in the module's defaults. Input
+  preprocessing is never a switch; it is the backbone's first stage.
 - `validate(interface, where)` is called at load, after the interface is
-  loaded, and raises `ConfigError` for anything the interface cannot satisfy.
-  `_require_input_block` checks a named block is both a known preprocessing
-  and one the interface actually produces. A model with no switches still
-  has `NAME` and an empty `validate`.
+  loaded. `TemporalShiftConfig` (EfficientPhys, TS-CAN) and
+  `FactorizePhysConfig` are the two that exist.
 
 ### The builder
 
 ```python
-def _build_mynet(cfg: MyNetConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_mynet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: MyNet(in_channels=width),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(lambda: MyNet(in_channels=width), interface)
 ```
 
 Inputs: the loaded config and the loaded interface. Output: a
 `MultiTraceModel`. The builder is where every width is derived and where any
 interface requirement beyond the config's is enforced (DeepPhys refuses an
 interface with no `RESIZE` here, because its dense layer is sized from the
-frame). `MultiTraceModel` takes:
+frame; the pooling backbones refuse a frame below `MIN_FRAME`).
+`_multi_trace` fills in the wrapper's arguments:
 
 | Argument | Meaning |
 | ---------- | --------- |
 | `make_copy` | zero-argument callable returning one fresh backbone; called once per trace |
-| `channels` | `interface.CHANNELS`, the order the channel axis is stacked in |
+| `channels` | `interface.CHANNELS`, the order the channel axis is stacked in; `C_in = len(channels)` |
 | `traces` | `interface.TRACES`, the order copies are made and predictions keyed in |
-| `input_blocks` | the preprocessing block names, in the order the backbone expects them on its channel axis; `C_in = len(channels) * len(input_blocks)` |
-| `per_frame` | `True` for `(N, C, H, W) -> (N, 1)` backbones, `False` for `(B, C, T, H, W) -> (B, 1, T)` |
 
 ### The two registry lines
 
+One in each file, the same key in both:
+
 ```python
+# src/model_config.py
 MODEL_CONFIGS = {
-    "DeepPhys": DeepPhysConfig,
-    "MyNet": MyNetConfig,
+    "DeepPhys": ModelConfig,
+    "MyNet": ModelConfig,        # or MyNetConfig if it has a switch
 }
 
+# src/models.py
 MODEL_BUILDERS = {
     "DeepPhys": _build_deepphys,
     "MyNet": _build_mynet,
@@ -269,87 +286,97 @@ MODEL_BUILDERS = {
 The key is what `NAME:` must say in the YAML. Use the architecture's proper
 name, matching the module's class.
 
-Also add the import at the top of the file beside `DeepPhys`'s:
+Also add the import at the top of `src/models.py` beside `DeepPhys`'s:
 
 ```python
 from neural_methods.model.MyNet import MyNet
 ```
 
-## Step 3: the model config
+## Step 3: the paper config file
 
-**File:** `configs/models/<name>.yaml`. The stem is what `--model <name>`
-resolves; keep it lowercase (`deepphys.yaml`, `mynet.yaml`). Copy
-[`configs/models/_model_template.yaml`](../configs/models/_model_template.yaml).
+**File:** `configs/original_model_config/<name>_<interface>.yaml`, named
+after the architecture and the interface it encodes, as DeepPhys's
+`deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml` is. When migrating a model, this
+file **is** the paper's configuration of it: the rPPG-Toolbox definition of
+the model in the `INTERFACE` section and its training recipe in `TRAIN`.
+Nothing in code declares the paper setup. Copy
+[`configs/_model_config_template.yaml`](../configs/_model_config_template.yaml),
+which lists every key of the three sections with its type and the values
+the parser accepts, and fill it in with DeepPhys's file beside it as the
+worked example. `src/model_config.py` is the schema, in the same order,
+and every key is required.
+
+### `MODEL`
 
 ```yaml
-NAME: MyNet          # a key of MODEL_CONFIGS in src/models.py
-INPUT: DiffNormalized   # every other key is a field of the config class
+MODEL:
+  NAME: MyNet        # a key of MODEL_CONFIGS in src/model_config.py; every other
+                     # key is a field of the config class, and most have none
 ```
 
-Inputs: read by `load_model_config(name, interface)` in `src/models.py`,
-typed by `NAME`, every field required, unknown keys refused, then
-`validate`d against the interface. Output: the config dataclass instance,
-which `build_model` hands to your builder and which the run writes into its
+Parsed by `NAME` into the config class, every field required, unknown keys
+refused, then `validate`d against the interface. The instance is what
+`build_model` hands to your builder and what the run writes into its
 `config.yaml` (and the checkpoint) alongside every other config it ran on.
+Several experiments on one architecture are several files with the same
+`NAME` and different switches.
 
-Several experiments on one architecture are several files in
-`configs/models/` with the same `NAME` and different switches.
+### `INTERFACE`
 
-## Step 4: the paper interface
-
-**File:** `configs/interfaces/<name>_interface.yaml`, where `<name>` is the
-architecture's `NAME` lowercased (`PhysFormer` reads
-`physformer_interface.yaml`). This is what the `configs/interfaces/`
-directory is for: when migrating a model, this file **is** the paper's
-configuration of it. Nothing in code declares the paper setup. Copy
-[`configs/interfaces/_interface_template.yaml`](../configs/interfaces/_interface_template.yaml)
-and set every key to the rPPG-Toolbox definition of the model:
+Set every key to the rPPG-Toolbox definition of the model:
 
 | Key | Upstream source |
 | ----- | ----------------- |
 | `FS` | the rate the published config trains at (30 for the UBFC recipes) |
 | `WINDOW_SECONDS` | `CHUNK_LENGTH / FS`, written to six decimals so it snaps to a whole frame |
 | `RESIZE` | the published `RESIZE.H` / `RESIZE.W` |
-| `INPUT_PREPROCESSING` | the published `DATA_TYPE` list, in order |
 | `TRACES` | `[PPG]`: the upstream models predict BVP and nothing else |
-| `LABEL_PREPROCESSING` | the published `LABEL_TYPE`, as the nearest of `raw` / `zscore` |
 | `LOSS` | the published criterion (`MSE` for DeepPhys, `NEGPEARSON` for PhysMamba and PhysFormer) |
 
-Nothing Neckflix-specific goes in this file. The pressure traces, their
-label preprocessing and their loss belong to the standard interface every
-model is compared on. Where the loss module lacks a published term (the
+Neither published preprocessing key survives as an interface key. The
+`DATA_TYPE` is the backbone's first stage (step 1, "Input normalisation").
+The `LABEL_TYPE` is fixed by the signal: PPG, ECG and respiration labels are
+z-scored over the window and every other trace is left raw, in physical
+units (`label_mode` in `src/signal_transforms.py`, read off the signal's
+class in the `SIGNALS` table). Every upstream PPG recipe z-scores or
+difference-normalises its label, so z-score is what a migrated model gets.
+Nothing Neckflix-specific goes in this file. The pressure traces and their
+loss belong to the standard interface every model is compared on. Where the loss module lacks a published term (the
 DLDL frequency loss of PhysFormer, say), note it in the file rather than
 substituting something.
 
-**Its twin:** `configs/training/<name>_training.yaml`, the paper's training
-recipe. Copy
-[`configs/training/_training_template.yaml`](../configs/training/_training_template.yaml)
-and fill it from two upstream sources, because the YAML alone does not say
-how the model was optimised:
+### `TRAIN`
+
+The paper's training recipe, filled from two upstream sources, because the
+upstream YAML alone does not say how the model was optimised:
 
 | Key | Upstream source |
 | ----- | ----------------- |
-| `EPOCHS`, `BATCH_SIZE`, `LR` | `TRAIN` block of the `train_configs/` file |
+| `LR` | `TRAIN` block of the `train_configs/` file |
 | `OPTIMIZER`, `WEIGHT_DECAY` | the `optim.*` call in `neural_methods/trainer/<Name>Trainer.py` at the `pre-overhaul` git tag (the legacy per-model trainers are deleted from the working tree; `git show pre-overhaul:neural_methods/trainer/<Name>Trainer.py` is where they still live) |
-| `SCHEDULER` | the `lr_scheduler.*` call in the same trainer; a `StepLR` that never fires inside `EPOCHS` is `Constant` |
+| `SCHEDULER` | the `lr_scheduler.*` call in the same trainer; a `StepLR` that never fires inside the paper's epochs is `Constant` |
 | `PRECISION` | `float32` unless the trainer autocasts |
 
-`DEVICE` and `NUM_WORKERS` are machine keys, not the paper's. If the
+The paper's epochs and batch size are not in the file: they are the
+launcher's `--epochs` and `--batch-size` flags (with `--num-workers` and
+`--no-gpu`, the machine's), so note them in a comment and pass them in the
+README command. If the
 trainer needs an optimiser or schedule the shared `src/trainer.py` lacks,
 add it there for every model (one line in its `OPTIMIZERS` or `SCHEDULERS`
-and one name in `src/training.py`), never a per-model training loop. Note
-in the file any trainer-side difference that remains, such as the readout
-being exempt from weight decay here when upstream decayed everything.
+and one name in `src/model_config.py`), never a per-model training loop.
+Note in the file any trainer-side difference that remains, such as the
+readout being exempt from weight decay here when upstream decayed
+everything.
 
-Nothing in code checks a run against this file; passing it as
-`--interface` is what makes a run the paper's configuration. Model
-comparisons then run every model on one standard interface instead, which
-is why step 1 insists the model accepts any size. The ten paper interfaces
-today:
+Nothing in code checks a run against this file; passing it as `--config`
+is what makes a run the paper's configuration. Model comparisons then run
+every model on one standard interface instead (the files under
+`configs/combined_model_config/`), which is why step 1 insists the model
+accepts any size. The nine paper interfaces today (the "Input" column is
+the backbone's own first stage, not an interface key):
 
 | Model | Frames | Window | Input | Loss | Recipe |
 | ------- | -------- | -------- | ------- | ------ | -------- |
-| BigSmall | 144x144 | 180 frames | Standardized + DiffNormalized | MSE | AdamW 1e-3, OneCycle, 5 epochs |
 | DeepPhys | 72x72 | 180 frames | DiffNormalized + Standardized | MSE | AdamW 9e-3, OneCycle, 30 epochs |
 | EfficientPhys | 72x72 | 180 frames | Standardized | MSE | AdamW 9e-3, OneCycle, 30 epochs |
 | FactorizePhys | 72x72 | 160 frames | Raw | negative Pearson | Adam 1e-3, OneCycle, 10 epochs |
@@ -360,29 +387,27 @@ today:
 | TS-CAN | 72x72 | 180 frames | DiffNormalized + Standardized | MSE | AdamW 9e-3, OneCycle, 30 epochs |
 | iBVPNet | 72x72 | 160 frames | Raw | negative Pearson | Adam 1e-3, OneCycle, 30 epochs |
 
-## Step 5: one smoke test
+## Step 4: one smoke test
 
 **File:** `tests/test_<name>.py`. One test, and only one: build the model
-from its paper interface and push one synthetic batch through. This is
+from its paper config and push one synthetic batch through. This is
 the ceiling for a migration; do not add tests opportunistically.
 
 ```python
 import torch
 
-from src.interface import load_interface
-from src.models import build_model, load_model_config
+from src.model_config import load_config
+from src.models import build_model
 
-INTERFACE = "configs/interfaces/mynet_interface.yaml"
+CONFIG = "configs/original_model_config/mynet_<interface>.yaml"
 
 
 def test_mynet_forward_matches_the_contract():
-    interface = load_interface(INTERFACE)
-    model = build_model(load_model_config("mynet", interface), interface)
+    interface, model_config, _ = load_config(CONFIG)
+    model = build_model(model_config, interface)
     B, T = 2, interface.window_frames
     H, W = interface.RESIZE.H, interface.RESIZE.W
-    batch = {"frames": {ch: {prep: torch.zeros(B, T, H, W)
-                             for prep in interface.INPUT_PREPROCESSING}
-                        for ch in interface.CHANNELS}}
+    batch = {"frames": {ch: torch.rand(B, T, H, W) for ch in interface.CHANNELS}}
     out = model(batch)
     assert set(out["predictions"]) == set(interface.TRACES)
     assert all(p.shape == (B, T) for p in out["predictions"].values())
@@ -400,20 +425,22 @@ epoch's model over the held-out participant and scores the records,
 printing the run directory it writes:
 
 ```bash
-uv run python scripts/run.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 1 --model mynet --interface configs/interfaces/mynet_interface.yaml --training configs/training/mynet_training.yaml --limit-windows 8
+uv run python scripts/run.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 1 --config configs/original_model_config/mynet_<interface>.yaml --limit-windows 8
 ```
 
+`--config` is one file holding the model config, the interface and the
+training recipe described above as its `MODEL`, `INTERFACE` and `TRAIN`
+sections (see
+[`deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml`](../configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml)).
 `--limit-windows N` keeps N evenly spaced windows per split for a wiring
-check; drop it for a real fold. Pass `--interface` and `--training`
-explicitly: the defaults point at `configs/interface.yaml` and
-`configs/training.yaml`, which are not the files in this repository. Run
-the paper interface first to check the migration against the paper, then
-the standard interface every model is compared on.
+check; drop it for a real fold. Run the paper config first to check the
+migration against the paper, then the standard interface every model is
+compared on.
 
 What happens, in order:
 
-1. Training: `load_interface` reads the interface; `load_model_config`
-   reads your YAML and validates it against that interface;
+1. Training: `load_config` (`src/model_config.py`) reads the file's three
+   sections, validating the model section against the interface;
    `build_model(model_config, interface)` calls your builder;
    `Trainer(...)` checks the window against `temporal_divisor` /
    `temporal_length`, seeds the readout biases, exempts the readouts from
@@ -446,7 +473,7 @@ dataset it came from and `all` on the rest):
 
 ## Migrating an upstream rPPG-Toolbox model
 
-Ten upstream rPPG-Toolbox models are migrated and registered in
+Nine upstream rPPG-Toolbox models are migrated and registered in
 `MODEL_CONFIGS` today (see the intro). One upstream model in
 `neural_methods/model/` remains unmigrated —
 [`PhysHydra.py`](../neural_methods/model/PhysHydra.py) — and it stays there
@@ -462,10 +489,13 @@ new one beside it, and the diff is almost always these items:
    multi-signal head, `ParallelSignals` or `DictModel` wrapper from the
    legacy attempt; the wrapper in `src/models.py` replaces all of them.
 3. **Fix the output shape.** Clip models often emit `(B, T)`; return
-   `(B, 1, T)` (`rearrange(x, "b t -> b 1 t")`). Per-frame models emit `(N, 1)`.
-4. **Drop the preprocessing and the loss.** Upstream models sometimes
-   normalise inputs or own a `FrameTransform`; the dataset does that now.
-   Any loss lives in the interface's `LOSS` block.
+   `(B, 1, T)` (`rearrange(x, "b t -> b 1 t")`). A per-frame network folds
+   `(b t)` inside and unfolds its `(N, 1)` back to `(B, 1, T)`.
+4. **Own the input preprocessing, drop the loss.** The upstream `DATA_TYPE`
+   becomes the network's first stage: `DiffNormalize()` and/or
+   `Standardize()` from `neural_methods/model/modules/`, applied to the raw
+   clip on the first line of `forward` (step 1, "Input normalisation"). Any
+   loss lives in the interface's `LOSS` block.
 5. **Drop `params`, `get_config`, and dead imports** (`pdb`, `math` for
    nothing). Delete rather than keep for compatibility.
 6. **einops for every reshape.** `x.view(B, -1)` becomes
@@ -474,31 +504,30 @@ new one beside it, and the diff is almost always these items:
    and wrap what it cannot in an adaptive stage that is the identity at the
    paper's shape (step 1, "Any frame size, any window length"). Only as an
    interim, declare `temporal_divisor` or `temporal_length` instead.
-8. **Decide `per_frame`.** Does the paper feed single frames, with `T` hidden
-   in the batch axis, or clips? A temporal shift that must stay adaptive
-   within a clip (TS-CAN, EfficientPhys, BigSmall) needs the clip, so it
-   folds `(b t)` inside the module instead and takes `per_frame=False`. That
-   answer is the builder's `per_frame` flag; the module itself does not need
-   to know.
+8. **Take the clip.** Every backbone receives `(B, C_in, T, H, W)`. If the
+   paper fed single frames with `T` hidden in the batch axis, normalise the
+   clip first, then fold `(b t)` for the 2D layers and unfold at the end, as
+   DeepPhys does.
 
-Then steps 2 to 5 above. DeepPhys shows the finished form: compare
+Then steps 2 to 4 above. DeepPhys shows the finished form: compare
 `neural_methods/model/DeepPhys.py` against the upstream file to see exactly
 how small the diff is.
 
 ## Checklist
 
 - [ ] `neural_methods/model/<Name>.py`: `in_channels` argument, published
-      sizes as defaults, one of the two `forward` shapes, `output_layers()`,
-      einops, no loss.
-- [ ] `src/models.py`: import, `<Name>Config` with `validate`,
-      `_build_<name>`, one line each in `MODEL_CONFIGS` and `MODEL_BUILDERS`.
-- [ ] `configs/models/<name>.yaml`: `NAME` plus one key per config field.
-- [ ] `configs/interfaces/<name>_interface.yaml`: the paper's rate, window,
-      resize, input preprocessing, single PPG trace, label preprocessing
-      and loss. Nothing Neckflix-specific.
-- [ ] `configs/training/<name>_training.yaml`: the paper's epochs, batch,
-      optimiser, rate, decay, schedule and precision, from the upstream
-      config and trainer class.
+      sizes as defaults, the paper's input normalisation as the first stage,
+      `(B, C_in, T, H, W) -> (B, 1, T)`, `output_layers()`, einops, no loss.
+- [ ] `src/model_config.py`: one line in `MODEL_CONFIGS`; a config class
+      only if there is a switch.
+- [ ] `src/models.py`: import, `_build_<name>`, one line in `MODEL_BUILDERS`.
+- [ ] `configs/original_model_config/<name>_<interface>.yaml`, from
+      `configs/_model_config_template.yaml`: `MODEL`
+      (`NAME` plus one key per config field), `INTERFACE` (the paper's rate,
+      window, resize, single PPG trace and loss; nothing Neckflix-specific)
+      and `TRAIN` (the paper's optimiser, rate, decay, schedule and
+      precision, from the upstream config and trainer class; its epochs and
+      batch size go in the README command).
 - [ ] The model builds and runs on the standard interface too; any size the
       paper did not use goes through an adaptive stage, not a refusal.
 - [ ] `tests/test_<name>.py`: one build-and-forward test, passing.

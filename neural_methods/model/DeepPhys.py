@@ -8,7 +8,10 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
-from neural_methods.model.shared import Attention_mask, dense_width
+from neural_methods.model.modules.diffnormalize import DiffNormalize
+from neural_methods.model.modules.standardize import Standardize
+from neural_methods.model.modules.attention_mask import Attention_mask
+from neural_methods.model.shared import dense_width
 
 
 class DeepPhys(nn.Module):
@@ -30,17 +33,25 @@ class DeepPhys(nn.Module):
         Returns:
           DeepPhys model.
 
-        Two things differ from the published network. The first conv of each
-        branch takes ``in_channels`` inputs (the interface's channel count)
-        instead of 3. And the dense layer is sized per axis, so a non-square
-        frame works; at a square frame it is the published width. The readout
-        stays a single output; a multi-signal run is one complete copy of this
-        network per trace (``MultiTraceModel``), never a widened or per-signal
-        head on a shared trunk. At ``3`` and a square frame this is exactly the
-        original, layer for layer and name for name.
+        Three things differ from the published network. The network takes the
+        raw clip and builds its own two inputs: the motion branch sees the
+        frame-to-frame difference (``DiffNormalize``) and the appearance
+        branch the z-scored frames (``Standardize``), each with the clip's own
+        statistics, exactly the toolbox's DiffNormalized and Standardized
+        blocks. The first conv of each branch takes ``in_channels`` inputs
+        (the interface's channel count) instead of 3. And the dense layer is
+        sized per axis, so a non-square frame works; at a square frame it is
+        the published width. The readout stays a single output; a
+        multi-signal run is one complete copy of this network per trace
+        (``MultiTraceModel``), never a widened or per-signal head on a shared
+        trunk. At ``3`` and a square frame this is exactly the original,
+        layer for layer and name for name.
         """
         super(DeepPhys, self).__init__()
         self.in_channels = in_channels
+        # Input preprocessing: raw clip -> motion and appearance blocks
+        self.motion_norm = DiffNormalize()
+        self.appearance_norm = Standardize()
         self.kernel_size = kernel_size
         self.dropout_rate1 = dropout_rate1
         self.dropout_rate2 = dropout_rate2
@@ -85,11 +96,16 @@ class DeepPhys(nn.Module):
         """The activation-free readout."""
         return (self.final_dense_2,)
 
-    def forward(self, inputs, params=None):
-        """``(B, 2 * in_channels, H, W)`` -> ``(B, 1)``: motion block first, appearance second."""
+    def forward(self, video: torch.Tensor) -> torch.Tensor:
+        """``(B, in_channels, T, H, W)`` raw clip -> ``(B, 1, T)``.
 
-        diff_input = inputs[:, :self.in_channels, :, :]
-        raw_input = inputs[:, self.in_channels:2 * self.in_channels, :, :]
+        The difference and the z-score are taken over the whole clip, then
+        every frame goes through the published 2D network on its own, T
+        folded into the batch axis.
+        """
+        b = video.shape[0]
+        diff_input = rearrange(self.motion_norm(video), "b c t h w -> (b t) c h w")
+        raw_input = rearrange(self.appearance_norm(video), "b c t h w -> (b t) c h w")
 
         d1 = torch.tanh(self.motion_conv1(diff_input))
         d2 = torch.tanh(self.motion_conv2(d1))
@@ -119,10 +135,10 @@ class DeepPhys(nn.Module):
 
         d7 = self.avg_pooling_3(gated2)
         d8 = self.dropout_3(d7)
-        d9 = rearrange(d8, "b c h w -> b (c h w)")
+        d9 = rearrange(d8, "n c h w -> n (c h w)")
         d10 = torch.tanh(self.final_dense_1(d9))
         d11 = self.dropout_4(d10)
         out = self.final_dense_2(d11)
 
-        return out
+        return rearrange(out, "(b t) s -> b s t", b=b)
 

@@ -3,18 +3,19 @@ after another, each fold a ``scripts/run.py`` run — several folds at a time,
 each on its own GPUs.
 
     uv run python main.py --datasets pure --test-participant-dataset pure \\
-        --model physnet --interface configs/interfaces/physnet_interface.yaml \\
-        --training configs/training/physnet_training.yaml
+        --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml \\
+        --epochs 30
     uv run python main.py --datasets neckflix --test-participant-dataset neckflix \\
         --test-participant-id 32 33 34 --parallel 2 --nproc-per-node 2 \\
-        --model physmamba --interface configs/interfaces/interface_neckflix.yaml \\
-        --training configs/training/physmamba_training.yaml
+        --config configs/combined_model_config/physmamba_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml \\
+        --epochs 20 --batch-size 4
 
 The folds are the participants named, in that order, or with none named
 every participant the test dataset admits, in the order their ids sort;
 every id is checked against the cache before the first fold starts. Each
-fold is a ``scripts/run.py`` subprocess with the same flags and one
-participant, with its own run directory under ``runs/<experiment>/`` —
+fold is a ``scripts/run.py`` subprocess with the same flags (config, epochs,
+batch size, workers, ``--no-gpu``) and one participant, with its own run
+directory under ``runs/<experiment>/`` —
 ``<test dataset>_<model>``, e.g. ``runs/pure_physmamba/``, unless
 ``--experiment`` says otherwise — named as run.py names it, stamped when
 the fold starts, and its own ``log.txt`` inside it. Nothing is written at
@@ -55,10 +56,14 @@ import torch
 from tqdm import tqdm
 
 from src.config import ConfigError
-from src.datasets import load_dataset_configs, load_stores, participants
-from src.experiment import add_config_arguments, add_limit_argument, run_name
+from src.dataset_config import load_dataset_configs
+from src.datasets import load_stores, participants
+from src.experiment import (
+    add_config_arguments, add_limit_argument, add_run_arguments, run_argv,
+    run_name, run_settings,
+)
+from src.model_config import load_config
 from src.trainer import DEFAULT_RUNS_DIR, LOSS_LOG_NAME
-from src.training import load_training
 
 REPO_ROOT = Path(__file__).resolve().parent
 RUN_SCRIPT = REPO_ROOT / "scripts" / "run.py"
@@ -104,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = add_config_arguments(argparse.ArgumentParser(
         description="Run one experiment: hold out one participant after "
                     "another, each fold a scripts/run.py run, several at a time."))
+    add_run_arguments(parser)
     # The split flags of scripts/run.py, as an experiment takes them: the
     # dataset is required, and the ids are several or none for all.
     parser.add_argument(
@@ -132,8 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
 def fold_argv(args, participant: str, run_dir: Path) -> list[str]:
     """The ``scripts/run.py`` arguments of one fold: the experiment's flags
     with this one participant held out, into this run directory."""
-    argv = ["--datasets", *args.datasets, "--model", args.model,
-            "--interface", str(args.interface), "--training", str(args.training),
+    argv = ["--datasets", *args.datasets, "--config", str(args.config),
+            *run_argv(args.run),
             "--test-participant-dataset", args.test_participant_dataset,
             "--test-participant-id", participant, "--run-dir", str(run_dir)]
     if args.limit_windows:
@@ -187,15 +193,15 @@ def epochs_logged(run_dir: Path) -> tuple:
         return 0, None
 
 
-def launch(args, training, runs_dir: Path, index: int, total: int,
+def launch(args, model_config, training, runs_dir: Path, index: int, total: int,
            participant: str, slot: int, gpus: list[str]) -> Fold:
     """Start one fold in ``slot``: its run directory and log under
     ``runs_dir``, its GPUs, its process, and its progress bar over the
     recipe's epochs."""
-    setup = SimpleNamespace(datasets=args.datasets, model=args.model,
+    setup = SimpleNamespace(datasets=args.datasets,
                             test_participant_dataset=args.test_participant_dataset,
                             test_participant_id=participant)
-    run_dir = runs_dir / run_name(setup, training, datetime.now())
+    run_dir = runs_dir / run_name(setup, model_config, training, datetime.now())
     run_dir.mkdir(parents=True, exist_ok=True)
     group = gpu_group(slot, gpus, args.nproc_per_node)
     env = dict(os.environ)
@@ -211,13 +217,13 @@ def launch(args, training, runs_dir: Path, index: int, total: int,
     say(f"fold {index}/{total}: holding out {args.test_participant_dataset} "
         f"{participant} on GPU(s) {','.join(group) or 'none'} -> {run_dir}")
     # disable=None: a bar on a terminal, nothing in a log file.
-    bar = tqdm(total=training.EPOCHS, desc=f"fold {index}/{total} {participant}",
+    bar = tqdm(total=args.run.epochs, desc=f"fold {index}/{total} {participant}",
                unit="epoch", position=slot, leave=False, disable=None,
                dynamic_ncols=True)
     return Fold(index, participant, run_dir, process, log, time.time(), bar)
 
 
-def run_pool(args, training, runs_dir: Path, folds: list[str],
+def run_pool(args, model_config, training, runs_dir: Path, folds: list[str],
              gpus: list[str]) -> tuple[list, list, list]:
     """Run every fold, ``args.parallel`` at a time, under ``runs_dir``;
     returns the run directories finished, the folds that failed, and the
@@ -230,8 +236,8 @@ def run_pool(args, training, runs_dir: Path, folds: list[str],
             while queue and not failed and len(running) < args.parallel:
                 index, participant = queue.pop(0)
                 slot = next(s for s in range(args.parallel) if s not in running)
-                running[slot] = launch(args, training, runs_dir, index, total,
-                                       participant, slot, gpus)
+                running[slot] = launch(args, model_config, training, runs_dir,
+                                       index, total, participant, slot, gpus)
             if not running:
                 break
             time.sleep(POLL_SECONDS)
@@ -280,9 +286,10 @@ def main(argv=None) -> list[Path]:
                      f"under torch.distributed.run, whose rendezvous store cannot "
                      f"start on the Windows torch build (no libuv); use one "
                      f"process per fold here, several on Linux")
+    args.run = run_settings(parser, args)
     try:
-        training = load_training(args.training)
-        gpus = [] if training.DEVICE == "cpu" else visible_gpus()
+        _, model_config, training = load_config(args.config)
+        gpus = visible_gpus() if args.run.gpu else []
         need = args.parallel * args.nproc_per_node
         if args.nproc_per_node > 1 and gpus and need > len(gpus):
             raise ConfigError(
@@ -297,17 +304,18 @@ def main(argv=None) -> list[Path]:
                 f"{dataset!r}; its participants are {present}")
         if training.MODEL_FILE_NAME and len(folds) > 1:
             raise ConfigError(
-                f"{args.training} names the run {training.MODEL_FILE_NAME!r}, so "
+                f"{args.config} names the run {training.MODEL_FILE_NAME!r}, so "
                 f"every fold would write the same directory; unset MODEL_FILE_NAME")
     except ValueError as err:          # ConfigError is a ValueError
         parser.error(str(err))
 
-    runs_dir = Path(DEFAULT_RUNS_DIR) / (args.experiment or f"{dataset}_{args.model}")
-    print(f"experiment: {args.model} on {args.datasets}, {len(folds)} fold(s) "
+    model = model_config.NAME.lower()
+    runs_dir = Path(DEFAULT_RUNS_DIR) / (args.experiment or f"{dataset}_{model}")
+    print(f"experiment: {model} on {args.datasets}, {len(folds)} fold(s) "
           f"holding out {dataset} {folds}, {args.parallel} at a time, "
           f"{args.nproc_per_node} process(es) each, GPUs {','.join(gpus) or 'none'}, "
           f"into {runs_dir}", flush=True)
-    done, failed, skipped = run_pool(args, training, runs_dir, folds, gpus)
+    done, failed, skipped = run_pool(args, model_config, training, runs_dir, folds, gpus)
     if failed:
         sys.exit(f"{len(failed)} fold(s) failed ({', '.join(f.participant for f in failed)}); "
                  f"{len(done)} finished, {len(skipped)} never started "

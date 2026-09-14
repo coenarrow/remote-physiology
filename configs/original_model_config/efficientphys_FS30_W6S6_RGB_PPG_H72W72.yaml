@@ -1,0 +1,25 @@
+MODEL:
+  NAME: EfficientPhys
+  FRAME_DEPTH: 10                # segment length the temporal shift (TSM) shifts within;
+                                 # upstream MODEL.EFFICIENTPHYS.FRAME_DEPTH, 10 in the PURE recipe
+
+# EfficientPhys paper interface. This is the rPPG-Toolbox configuration of EfficientPhys
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 6.0            # 180 frames, the upstream CHUNK_LENGTH
+  WINDOW_STRIDE: 6.0             # seconds the test set steps between windows
+  CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
+  TRACES: [PPG]                  # the paper predicts BVP and nothing else
+  RESIZE: {H: 72, W: 72}         # upstream EfficientPhys frame size
+  LOSS:                          # upstream trains EfficientPhys with MSE
+    PPG: {MSE: 1.0}
+
+# EfficientPhys paper recipe (PURE_PURE_UBFC-rPPG_EFFICIENTPHYS.yaml and EfficientPhysTrainer).
+# The paper's 30 epochs and batch 4 are the launcher's flags: --epochs 30 --batch-size 4
+TRAIN:
+  OPTIMIZER: AdamW             # upstream: optim.AdamW(lr, weight_decay=0)
+  LR: 9e-3
+  WEIGHT_DECAY: 0.0            # upstream decays nothing
+  SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
+  PRECISION: float32           # upstream trains in full precision

@@ -1,191 +1,38 @@
-"""The model stage: name a model, load its config, check it against the interface.
+"""The model stage: build the model a parsed ``MODEL`` section describes.
 
-A model is named on the command line (``--model deepphys``) and resolves to
-``configs/models/<name>.yaml``. That file carries ``NAME`` — the architecture
-— plus the switches an experiment may flip for it, and nothing else. Layer
-sizes are not config: an architecture is defined once, in its module, at its
-published values. Every width is derived from the interface (first layer from
-``CHANNELS``, one copy of the network per entry of ``TRACES``), so nothing is
-said in two places.
-
-Every key is required, unknown keys are refused, and a switch that names an
-interface block (a preprocessing the model reads by name) is checked here
-against the interface it will run with.
+The section's schema — ``NAME`` plus the switches an experiment may flip —
+is ``src.model_config``; this module is what turns a parsed one into a
+network. Layer sizes are not config: an architecture is defined once, in its
+module, at its published values. Every width is derived from the interface
+(first layer from ``CHANNELS``, one copy of the network per entry of
+``TRACES``), so nothing is said in two places. Input preprocessing is not a
+switch either: every backbone takes the raw clip and normalises it itself
+(``neural_methods.model.modules``).
 
 The built model is a :class:`MultiTraceModel`: one complete copy of the
 architecture per trace, speaking the batch dict. A model is a function from
 frames to predictions and nothing else — the loss is the trainer's.
 """
 
-from dataclasses import dataclass, fields
-from pathlib import Path
-
 import torch
 import torch.nn as nn
-from einops import rearrange
 
-from src.config import ConfigError, build, load_yaml
-from neural_methods.model import (
-    BigSmall as bigsmall, DeepPhys as deepphys, EfficientPhys as efficientphys,
+from src.config import ConfigError
+from neural_methods.model import (DeepPhys as deepphys, EfficientPhys as efficientphys,
     PhysFormer as physformer, PhysMamba as physmamba, PhysNet as physnet,
     RhythmFormer as rhythmformer, TS_CAN as tscan, iBVPNet as ibvpnet,
 )
 # The same idiom; FactorizePhys is a package, so its module needs its own line.
 from neural_methods.model.FactorizePhys import FactorizePhys as factorizephys
 from neural_methods.model.shared import min_frame_message
-from src.interface import InterfaceConfig
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-MODEL_CONFIG_DIR = REPO_ROOT / "configs" / "models"
+from src.model_config import (
+    FactorizePhysConfig, InterfaceConfig, ModelConfig, TemporalShiftConfig,
+)
 
 
 # ---------------------------------------------------------------------------
-# Per-architecture config classes
+# What a builder may demand of the interface
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class BigSmallConfig:
-    NAME: str = ""
-    BIG_INPUT: str = ""           # INPUT_PREPROCESSING block for the big branch
-    SMALL_INPUT: str = ""         # ... and for the small branch
-    FRAME_DEPTH: int = 0          # segment length the big branch holds a frame
-                                  # for, and the temporal shift shifts within
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        for key in ("BIG_INPUT", "SMALL_INPUT"):
-            _require_input_block(getattr(self, key), interface, f"{where}: {key}")
-        if self.BIG_INPUT == self.SMALL_INPUT:
-            raise ConfigError(
-                f"{where}: BIG_INPUT and SMALL_INPUT are both "
-                f"{self.BIG_INPUT!r}; the two branches read different "
-                f"preprocessings of the frame")
-        if self.FRAME_DEPTH <= 0:
-            raise ConfigError(
-                f"{where}: FRAME_DEPTH must be positive, got {self.FRAME_DEPTH}")
-
-
-@dataclass
-class DeepPhysConfig:
-    NAME: str = ""
-    MOTION_INPUT: str = ""        # INPUT_PREPROCESSING block for the motion branch
-    APPEARANCE_INPUT: str = ""    # ... and for the appearance branch
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        for key in ("MOTION_INPUT", "APPEARANCE_INPUT"):
-            _require_input_block(getattr(self, key), interface, f"{where}: {key}")
-        if self.MOTION_INPUT == self.APPEARANCE_INPUT:
-            raise ConfigError(
-                f"{where}: MOTION_INPUT and APPEARANCE_INPUT are both "
-                f"{self.MOTION_INPUT!r}; the two branches read different "
-                f"preprocessings of the frame")
-
-
-@dataclass
-class EfficientPhysConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the network reads
-    FRAME_DEPTH: int = 0          # segment length the temporal shift shifts within
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-        if self.FRAME_DEPTH <= 0:
-            raise ConfigError(
-                f"{where}: FRAME_DEPTH must be positive, got {self.FRAME_DEPTH}")
-
-
-@dataclass
-class FactorizePhysConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the stem reads
-    FSAM: bool = True             # run the factorized attention module, the
-                                  # ablation the paper reports; the paper path
-                                  # (FSAM_Res) is true
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-
-
-@dataclass
-class PhysFormerConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the stem reads
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-
-
-@dataclass
-class PhysMambaConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the stem reads
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-
-
-@dataclass
-class PhysNetConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the stem reads
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-
-
-@dataclass
-class RhythmFormerConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the stem reads
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-
-
-@dataclass
-class TSCANConfig:
-    NAME: str = ""
-    MOTION_INPUT: str = ""        # INPUT_PREPROCESSING block for the motion branch
-    APPEARANCE_INPUT: str = ""    # ... and for the appearance branch
-    FRAME_DEPTH: int = 0          # segment length the temporal shift shifts within
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        for key in ("MOTION_INPUT", "APPEARANCE_INPUT"):
-            _require_input_block(getattr(self, key), interface, f"{where}: {key}")
-        if self.MOTION_INPUT == self.APPEARANCE_INPUT:
-            raise ConfigError(
-                f"{where}: MOTION_INPUT and APPEARANCE_INPUT are both "
-                f"{self.MOTION_INPUT!r}; the two branches read different "
-                f"preprocessings of the frame")
-        if self.FRAME_DEPTH <= 0:
-            raise ConfigError(
-                f"{where}: FRAME_DEPTH must be positive, got {self.FRAME_DEPTH}")
-
-
-@dataclass
-class iBVPNetConfig:
-    NAME: str = ""
-    INPUT: str = ""               # INPUT_PREPROCESSING block the stem reads
-
-    def validate(self, interface: InterfaceConfig, where: str) -> None:
-        _require_input_block(self.INPUT, interface, f"{where}: INPUT")
-
-
-#: ``NAME`` -> the dataclass its file is parsed into.
-MODEL_CONFIGS = {
-    "BigSmall": BigSmallConfig,
-    "DeepPhys": DeepPhysConfig,
-    "EfficientPhys": EfficientPhysConfig,
-    "FactorizePhys": FactorizePhysConfig,
-    "PhysFormer": PhysFormerConfig,
-    "PhysMamba": PhysMambaConfig,
-    "PhysNet": PhysNetConfig,
-    "RhythmFormer": RhythmFormerConfig,
-    "TSCAN": TSCANConfig,
-    "iBVPNet": iBVPNetConfig,
-}
-
-
 def _require_min_frame(interface: InterfaceConfig, name: str, minimum: int) -> None:
     """A backbone whose stem pools spatially needs a frame it leaves something of.
     Only checkable here when the interface resizes; otherwise the backbone
@@ -210,53 +57,6 @@ def _require_frame_size(interface: InterfaceConfig, name: str) -> tuple:
     return (interface.RESIZE.H, interface.RESIZE.W)
 
 
-def _require_input_block(name: str, interface: InterfaceConfig, where: str) -> None:
-    """The interface has already checked its blocks against the vocabulary,
-    so a block it produces is a valid one."""
-    if name not in interface.INPUT_PREPROCESSING:
-        raise ConfigError(
-            f"{where} is {name!r}, which the interface does not produce; its "
-            f"INPUT_PREPROCESSING is {interface.INPUT_PREPROCESSING}")
-
-
-# ---------------------------------------------------------------------------
-# Loading
-# ---------------------------------------------------------------------------
-def resolve_model_config(name: str) -> Path:
-    path = MODEL_CONFIG_DIR / f"{name}.yaml"
-    if not path.is_file():
-        known = sorted(p.stem for p in MODEL_CONFIG_DIR.glob("*.yaml"))
-        raise ConfigError(
-            f"No model config {path.name} in {MODEL_CONFIG_DIR}; known: {known}")
-    return path
-
-
-def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):
-    """One model mapping — a loaded file, or the ``model`` section a run's
-    compiled config carries — typed by its ``NAME``, checked against
-    ``interface``. ``where`` names the source in errors."""
-    if not isinstance(mapping, dict) or not mapping:
-        raise ConfigError(f"{where}: a model config must be a non-empty mapping")
-    arch = mapping.get("NAME")
-    if arch not in MODEL_CONFIGS:
-        raise ConfigError(
-            f"{where}: NAME must be one of {sorted(MODEL_CONFIGS)}, got {arch!r}")
-    cls = MODEL_CONFIGS[arch]
-    missing = sorted(f.name for f in fields(cls) if f.name not in mapping)
-    if missing:
-        raise ConfigError(
-            f"{where}: every {arch} key is required; missing {missing}")
-    cfg = build(cls, mapping, where)
-    cfg.validate(interface, where)
-    return cfg
-
-
-def load_model_config(name: str, interface: InterfaceConfig):
-    """``configs/models/<name>.yaml``, typed by its ``NAME``, checked against ``interface``."""
-    path = resolve_model_config(name)
-    return parse_model_config(load_yaml(str(path)), interface, path.name)
-
-
 # ---------------------------------------------------------------------------
 # The multi-trace model
 # ---------------------------------------------------------------------------
@@ -269,31 +69,26 @@ class MultiTraceModel(nn.Module):
     cost is parameters, by design.
 
     A backbone is any ``nn.Module`` with ``forward(x)`` and
-    ``output_layers()``. ``per_frame=True`` backbones see one frame at a time,
-    ``(N, C_in, H, W) -> (N, 1)``, with T folded into the batch axis on the way
-    in and out; clip backbones see ``(B, C_in, T, H, W) -> (B, 1, T)``.
-
-    ``C_in = len(channels) * len(input_blocks)``: the backbone's input is the
-    interface's channels stacked in order, once per named preprocessing block,
-    blocks concatenated in ``input_blocks`` order. Channel and trace order is
-    owned here, never inferred from dict iteration.
+    ``output_layers()`` that takes a raw clip ``(B, C_in, T, H, W)`` and
+    returns ``(B, 1, T)``; whatever preprocessing the published network was
+    fed, the backbone applies itself. ``C_in = len(channels)``: the interface's
+    channels stacked in order. Channel and trace order is owned here, never
+    inferred from dict iteration.
 
     ``forward(batch)`` returns the same dict with ``predictions`` added,
     ``{trace: (B, T)}``. Nothing is dropped in transit and nothing else is
     computed: the loss belongs to the trainer.
     """
 
-    def __init__(self, make_copy, channels, traces, input_blocks, per_frame):
+    def __init__(self, make_copy, channels, traces):
         super().__init__()
         self.channels = tuple(channels)
         self.traces = tuple(traces)
-        self.input_blocks = tuple(input_blocks)
-        self.per_frame = per_frame
         self.copies = nn.ModuleDict({trace: make_copy() for trace in self.traces})
 
     @property
     def in_channels(self) -> int:
-        return len(self.channels) * len(self.input_blocks)
+        return len(self.channels)
 
     def output_layers(self):
         """Each copy's activation-free readout, in traces order."""
@@ -301,22 +96,13 @@ class MultiTraceModel(nn.Module):
                 for layer in self.copies[trace].output_layers()]
 
     def prepare_frames(self, batch) -> torch.Tensor:
-        """``batch['frames'][ch][block]`` ``(B, T, H, W)`` -> ``(B, C_in, T, H, W)``."""
+        """``batch['frames'][ch]`` ``(B, T, H, W)`` -> ``(B, C_in, T, H, W)``."""
         frames = batch["frames"]
-        blocks = [torch.stack([frames[ch][block] for ch in self.channels], dim=1)
-                  for block in self.input_blocks]
-        return torch.cat(blocks, dim=1)
+        return torch.stack([frames[ch] for ch in self.channels], dim=1)
 
     def forward_video(self, video: torch.Tensor) -> torch.Tensor:
         """``(B, C_in, T, H, W)`` -> ``(B, S, T)``, traces order."""
-        if self.per_frame:
-            frames = rearrange(video, "b c t h w -> (b t) c h w")
-            outs = [rearrange(self.copies[trace](frames), "(b t) s -> b s t",
-                              b=video.shape[0])
-                    for trace in self.traces]
-        else:
-            outs = [self.copies[trace](video) for trace in self.traces]
-        return torch.cat(outs, dim=1)
+        return torch.cat([self.copies[trace](video) for trace in self.traces], dim=1)
 
     def forward(self, batch: dict) -> dict:
         out = self.forward_video(self.prepare_frames(batch))
@@ -324,109 +110,83 @@ class MultiTraceModel(nn.Module):
         return {**batch, "predictions": predictions}
 
     def extra_repr(self) -> str:
-        return (f"channels={list(self.channels)}, traces={list(self.traces)}, "
-                f"input_blocks={list(self.input_blocks)}, per_frame={self.per_frame}")
+        return f"channels={list(self.channels)}, traces={list(self.traces)}"
 
 
 # ---------------------------------------------------------------------------
 # Builders: (model config, interface) -> MultiTraceModel
 # ---------------------------------------------------------------------------
-def _build_bigsmall(cfg: BigSmallConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "BigSmall", bigsmall.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: bigsmall.BigSmall(in_channels=width,
-                                            frame_depth=cfg.FRAME_DEPTH),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.BIG_INPUT, cfg.SMALL_INPUT], per_frame=False)
+def _multi_trace(make_copy, interface: InterfaceConfig) -> MultiTraceModel:
+    return MultiTraceModel(make_copy=make_copy, channels=interface.CHANNELS,
+                           traces=interface.TRACES)
 
 
-def _build_deepphys(cfg: DeepPhysConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_deepphys(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     size = _require_frame_size(interface, "DeepPhys")
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: deepphys.DeepPhys(in_channels=width, img_size=size),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.MOTION_INPUT, cfg.APPEARANCE_INPUT], per_frame=True)
+    return _multi_trace(lambda: deepphys.DeepPhys(in_channels=width, img_size=size),
+                        interface)
 
 
-def _build_efficientphys(cfg: EfficientPhysConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_efficientphys(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiTraceModel:
     size = _require_frame_size(interface, "EfficientPhys")
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: efficientphys.EfficientPhys(in_channels=width, img_size=size,
-                                                      frame_depth=cfg.FRAME_DEPTH),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(
+        lambda: efficientphys.EfficientPhys(in_channels=width, img_size=size,
+                                            frame_depth=cfg.FRAME_DEPTH),
+        interface)
 
 
 def _build_factorizephys(cfg: FactorizePhysConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "FactorizePhys", factorizephys.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: factorizephys.FactorizePhys(in_channels=width, use_fsam=cfg.FSAM),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(
+        lambda: factorizephys.FactorizePhys(in_channels=width, use_fsam=cfg.FSAM),
+        interface)
 
 
-def _build_physformer(cfg: PhysFormerConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_physformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysFormer", physformer.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: physformer.PhysFormer(in_channels=width),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(lambda: physformer.PhysFormer(in_channels=width), interface)
 
 
-def _build_physmamba(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_physmamba(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysMamba", physmamba.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: physmamba.PhysMamba(in_channels=width),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(lambda: physmamba.PhysMamba(in_channels=width), interface)
 
 
-def _build_physnet(cfg: PhysNetConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_physnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysNet", physnet.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: physnet.PhysNet(in_channels=width),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(lambda: physnet.PhysNet(in_channels=width), interface)
 
 
-def _build_rhythmformer(cfg: RhythmFormerConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_rhythmformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "RhythmFormer", rhythmformer.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: rhythmformer.RhythmFormer(in_channels=width),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(lambda: rhythmformer.RhythmFormer(in_channels=width), interface)
 
 
-def _build_tscan(cfg: TSCANConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_tscan(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiTraceModel:
     size = _require_frame_size(interface, "TSCAN")
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: tscan.TSCAN(in_channels=width, img_size=size,
-                                      frame_depth=cfg.FRAME_DEPTH),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.MOTION_INPUT, cfg.APPEARANCE_INPUT], per_frame=False)
+    return _multi_trace(
+        lambda: tscan.TSCAN(in_channels=width, img_size=size,
+                            frame_depth=cfg.FRAME_DEPTH),
+        interface)
 
 
-def _build_ibvpnet(cfg: iBVPNetConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_ibvpnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "iBVPNet", ibvpnet.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return MultiTraceModel(
-        make_copy=lambda: ibvpnet.iBVPNet(in_channels=width),
-        channels=interface.CHANNELS, traces=interface.TRACES,
-        input_blocks=[cfg.INPUT], per_frame=False)
+    return _multi_trace(lambda: ibvpnet.iBVPNet(in_channels=width), interface)
 
 
-#: ``NAME`` -> builder. One line per architecture, beside its config class.
+#: ``NAME`` -> builder. One line per architecture, matching its line in
+#: ``src.model_config.MODEL_CONFIGS``.
 MODEL_BUILDERS = {
-    "BigSmall": _build_bigsmall,
     "DeepPhys": _build_deepphys,
     "EfficientPhys": _build_efficientphys,
     "FactorizePhys": _build_factorizephys,

@@ -8,8 +8,8 @@ limitation, not the design's goal: no file under `src/evaluation/`
 mentions torch, but the signal registry it needs
 (`src/signal_transforms.py`) shares a module with torch-dependent label
 normalisation, reached transitively through `src/outputs.py` ->
-`src/interface.py` -> `src/config.py`. Importing `src.evaluation` still
-pulls in torch, `src.interface` and `src.config`, so a laptop with no
+`src/model_config.py`. Importing `src.evaluation` still
+pulls in torch and `src.model_config`, so a laptop with no
 torch install cannot run it yet. Every `<recording>/<perspective>/`
 folder under an epoch's `test_records/` is scored afresh, and its
 tables are written beside its trace tables. Clause and page numbers

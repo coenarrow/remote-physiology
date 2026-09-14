@@ -13,8 +13,10 @@ ESH 2023) and large-scale LOSO sweeps on an HPC cluster.
 
 **Extending the repo should be cheap, because everything shared is written
 once.** A new dataset is a `channel_map` subclass plus a markdown cache spec;
-a new model is a backbone `nn.Module`, a config class and builder in
-`src/models.py`, a YAML in `configs/models/` and one smoke test
+a new model is a backbone `nn.Module`, a registry line in
+`src/model_config.py` (plus a config class only if it has a switch), a
+builder in `src/models.py`, one config YAML under
+`configs/original_model_config/` and one smoke test
 (`docs/adding_a_model.md` is the recipe) — never a new trainer, loader, loss
 module, or plot set. When new work needs something a
 shared piece almost does, extend the shared piece for everyone rather than
@@ -61,19 +63,21 @@ multi-signal contract.
   no-ops at the paper's shape — never hard-coded refusals, and never a silent
   crop or truncation. The only refusal left is a frame the stem pools to
   nothing, named by the builder.
-- **`configs/interfaces/<name>_interface.yaml` is the paper.** That directory
-  is what the per-model interfaces are for: when migrating a model, its
-  `<name>_interface.yaml` (the architecture's `NAME` lowercased) *is* the
-  rPPG-Toolbox configuration of it — rate, window, resize, input
-  preprocessing, the single PPG trace the paper predicts, its label
-  preprocessing and its loss. Nothing Neckflix-specific goes in it. Its
-  twin, `configs/training/<name>_training.yaml`, *is* the rPPG-Toolbox
-  training recipe of the model: epochs, batch size, optimiser, rate, decay,
-  schedule, precision, read off the upstream `train_configs/` file *and*
-  the upstream trainer class (the optimiser and schedule live there, not in
-  the YAML). Nothing in code declares or checks the paper setup; the files
-  do. Model comparisons run every model on the same standard interface; the
-  paper files are where a migration is checked against the paper.
+- **`configs/original_model_config/<name>_<interface>.yaml` is the paper.**
+  That directory is what the per-model config files are for: when migrating
+  a model, its file (named after the architecture and the interface it
+  encodes, e.g. `deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml`) *is* the
+  rPPG-Toolbox configuration of it. Its `INTERFACE` section is the paper's
+  rate, window, resize, the single PPG trace the paper predicts and its
+  loss; its `TRAIN` section is the paper's optimiser, rate, decay, schedule
+  and precision, read off the upstream `train_configs/` file *and* the
+  upstream trainer class (the optimiser and schedule live there, not in the
+  YAML); the paper's epochs and batch size are the README command's
+  `--epochs` and `--batch-size`. Nothing Neckflix-specific goes in it.
+  Nothing in code declares or checks the paper setup; the files do. Model
+  comparisons run every model on the same standard interface
+  (`configs/combined_model_config/`); the paper files are where a migration
+  is checked against the paper.
 - **A finished migration ends with a command in `README.md`.** When a model
   migrated from rPPG-Toolbox is done, add under "Algorithms" the exact
   `scripts/run.py` command that trains it on the PURE dataset

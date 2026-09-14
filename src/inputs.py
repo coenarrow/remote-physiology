@@ -1,7 +1,7 @@
 """The input side: windows read out of the zarr cache, shaped to the interface.
 
 One :class:`WindowedDataset` per dataset name, built from that dataset's
-admitted stores (``src.datasets``) and the interface (``src.interface``).
+admitted stores (``src.datasets``) and the interface (``src.model_config``).
 Training instances draw one random window per (recording, perspective) per
 epoch; the test instance strides through every recording at
 ``WINDOW_STRIDE``. Same class both sides, and the training instances are
@@ -20,14 +20,18 @@ Per sample, in this order — preprocess what the store has, then pad:
 
 1. read the native span of every modality present and resample it to ``FS``;
 2. resize present frames to ``RESIZE``;
-3. ``INPUT_PREPROCESSING`` on each present channel, ``LABEL_PREPROCESSING``
-   on each present trace;
+3. normalise each present trace by signal (``src.signal_transforms.label_mode``:
+   z-score for a shape signal, raw for an absolute one);
 4. pad every demanded channel or trace the store lacks with zeros and a
    False mask.
 
+Frames are emitted raw: every backbone normalises its own input
+(``neural_methods.model.modules``), so the dataset never standardises or
+differences a frame.
+
 Emitted (``default_collate`` prepends the batch axis)::
 
-    {"frames":       {ch:  {prep: (T, H, W) float32}},  # frames["G"]["Raw"]
+    {"frames":       {ch:  (T, H, W) float32},          # raw pixel values
      "labels":       {sig: (T,) float32},
      "label_stats":  {sig: {stat: () float32}},         # physical units
      "channel_mask": {ch:  () bool},
@@ -38,9 +42,7 @@ Emitted (``default_collate`` prepends the batch axis)::
 ``start_frame`` is the window's first frame **at FS**, not in the store's
 native frames: every window downstream (``src.outputs``, the evaluation)
 sits on the interface's time base, and the store's rate is a detail only this
-module knows. Input preprocessing is per channel: each channel's window is standardised or
-differenced with its own statistics, so a channel's block never depends on
-which other channels the interface happens to demand.
+module knows.
 """
 
 import warnings
@@ -51,8 +53,8 @@ import numpy as np
 import torch
 import zarr
 
-from src.frame_transforms import FRAME_TRANSFORMS, resize_video
-from src.interface import InterfaceConfig
+from src.frame_transforms import resize_video
+from src.model_config import InterfaceConfig
 from src.signal_transforms import (
     MODALITY_CHANNELS, STAT_NAMES, TRACE_KEYS, TRACE_KEYS_INVERSE, finite_stats,
     normalise_label,
@@ -246,7 +248,7 @@ class WindowedDataset(torch.utils.data.Dataset):
         # 1. read + resample every present modality
         videos = {m: s.plan.take(np.asarray(group[m]["video"]["data"][:, start:end]), axis=1)
                   for m in s.modalities}
-        # 2 + 3. resize and preprocess present channels; 4. pad the rest
+        # 2. resize present channels; 4. pad the rest
         frames, channel_mask = {}, {}
         for ch in self.interface.CHANNELS:
             source = self.channel_modality(ch)
@@ -256,11 +258,9 @@ class WindowedDataset(torch.utils.data.Dataset):
                 plane = torch.from_numpy(np.ascontiguousarray(videos[modality][index])).float()
                 if self.interface.resizes:
                     plane = resize_video(plane, (self.interface.RESIZE.H, self.interface.RESIZE.W))
-                frames[ch] = {prep: FRAME_TRANSFORMS[prep](plane)
-                              for prep in self.interface.INPUT_PREPROCESSING}
+                frames[ch] = plane
             else:
-                frames[ch] = {prep: torch.zeros((self.interface.window_frames, *self._pad_hw(s)))
-                              for prep in self.interface.INPUT_PREPROCESSING}
+                frames[ch] = torch.zeros((self.interface.window_frames, *self._pad_hw(s)))
             channel_mask[ch] = torch.tensor(present)
 
         labels, label_stats, label_mask = {}, {}, {}
@@ -271,7 +271,7 @@ class WindowedDataset(torch.utils.data.Dataset):
             if present:
                 finite = torch.isfinite(trace)
                 stats = finite_stats(trace)
-                normed = normalise_label(trace, stats, self.interface.LABEL_PREPROCESSING[sig])
+                normed = normalise_label(trace, stats, sig)
                 labels[sig] = torch.where(finite, normed, trace.new_zeros(()))
             else:
                 labels[sig] = torch.zeros(self.interface.window_frames)

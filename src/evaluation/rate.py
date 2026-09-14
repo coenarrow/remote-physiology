@@ -24,9 +24,9 @@ least two cardiac traces:
     The median of the per-trace rates: the cheap baseline the fusion has to
     beat.
 
-No config. The band and the detrender are the upstream ones; the label
-modes are ``raw`` / ``zscore`` / ``minmax`` and the trace tables are already in
-physical units, so nothing here needs to know how a trace was preprocessed.
+No config. The band and the detrender are the upstream ones, and the trace
+tables are already in physical units, so nothing here needs to know how a
+trace's label was normalised.
 The three upstream helpers this needs (the smoothness-prior detrender, the
 FFT length and the maximum amplitude of cross-correlation) live at the top
 of this module; the rest of the toolbox's post-processing is gone.

@@ -10,14 +10,16 @@ Two guarantees callers depend on:
   deep-merges them in order before the file's own keys; scalars and lists
   override, mappings merge. Dot-less exponents such as ``LR: 9e-3`` load as
   numbers (YAML 1.2 semantics rather than PyYAML's 1.1 default).
-* ``build`` fills a dataclass from a mapping, refusing unknown keys with the
-  full dotted path, coercing ints to floats where the field asks for a float,
-  and recursing into nested dataclass fields.
+* ``build`` fills a dataclass from a mapping: every field is a required key
+  unless the caller names it optional, unknown keys are refused with the
+  full dotted path, ints are coerced to floats where the field asks for a
+  float, and nested dataclass fields are built the same way.
 """
 
 import os
 import re
 from dataclasses import fields, is_dataclass
+from typing import get_type_hints
 
 import yaml
 
@@ -87,8 +89,9 @@ def _coerce_scalar(value, target, path):
     return value
 
 
-def build(cls, mapping, path):
-    """One dataclass from one YAML mapping, refusing unknown keys."""
+def build(cls, mapping, path, optional=()):
+    """One dataclass from one YAML mapping: every field is a required key
+    except those named in ``optional``, and no other key is admitted."""
     if mapping is None:
         mapping = {}
     if not isinstance(mapping, dict):
@@ -99,26 +102,32 @@ def build(cls, mapping, path):
         raise ConfigError(
             f"{path or 'config'} has unknown key(s) {unknown}; "
             f"valid keys: {sorted(known)}")
+    missing = sorted(k for k in known if k not in mapping and k not in optional)
+    if missing:
+        note = f" (optional: {sorted(optional)})" if optional else ""
+        raise ConfigError(
+            f"{path or 'config'}: every key is required{note}; missing {missing}")
+    types = get_type_hints(cls)       # resolved, even under deferred annotations
     kwargs = {}
-    for name, f in known.items():
+    for name in known:
         if name not in mapping:
             continue
-        value = mapping[name]
+        value, target = mapping[name], types[name]
         sub = f"{path}.{name}" if path else name
-        if is_dataclass(f.type):
-            kwargs[name] = build(f.type, value, sub)
-        elif f.type is dict:
+        if is_dataclass(target):
+            kwargs[name] = build(target, value, sub)
+        elif target is dict:
             if value is None:
                 value = {}
             if not isinstance(value, dict):
                 raise ConfigError(f"{sub} must be a mapping, got {value!r}")
             kwargs[name] = dict(value)
-        elif f.type is list:
+        elif target is list:
             if value is None:
                 value = []
             if not isinstance(value, list):
                 raise ConfigError(f"{sub} must be a list, got {value!r}")
             kwargs[name] = list(value)
         else:
-            kwargs[name] = _coerce_scalar(value, f.type, sub)
+            kwargs[name] = _coerce_scalar(value, target, sub)
     return cls(**kwargs)

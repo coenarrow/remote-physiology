@@ -4,9 +4,13 @@ One class, ``Trainer``, holding the state that ``fit`` and ``test`` share —
 runtime, criterion, optimiser, scheduler, scaler — and the run directory both
 write to. Everything it does is stated by the three configs it is handed:
 
-* the **interface** says what the loss is (``LOSS``, per trace) and which
-  traces are predicted in raw units (``LABEL_PREPROCESSING``);
+* the **interface** says what the loss is (``LOSS``, per trace); which
+  traces are predicted in raw units follows from the signal registry
+  (``src.signal_transforms.label_mode``), not from any config;
 * the **training recipe** says how the train set is optimised;
+* the **run settings** (``src.model_config.RunSettings``, the launcher's
+  flags) say for how many epochs, in what batches, with how many loader
+  workers;
 * the **model** says nothing — it is a function from frames to predictions.
 
 There is no validation split: LOSO scores on the held-out participant after
@@ -29,7 +33,7 @@ model is wrapped in ``DistributedDataParallel``, the train set is sharded by a
 ``DistributedSampler`` reshuffled every epoch, the test set by a plain strided
 subset (no padding, so no duplicate records), loss sums are reduced across
 ranks before averaging so the log is global, and only the main rank prints,
-writes and saves. ``BATCH_SIZE`` is per process.
+writes and saves. The batch size is per process.
 
 Two absolute-scale guardrails live here because they are trainer-side
 machinery, not architecture: each readout's bias starts at its trace's
@@ -52,10 +56,12 @@ from tqdm import tqdm
 from neural_methods.loss.PerSignalLoss import PerSignalLoss, weight_losses
 from src.config import ConfigError
 from src.distributed import Runtime, all_reduce_sum, gather_lists
-from src.interface import InterfaceConfig
+from src.memory import (
+    describe_device, describe_peak, device_memory, peak_memory, reset_peak,
+)
+from src.model_config import InterfaceConfig, RunSettings, TrainingConfig
 from src.models import MultiTraceModel
-from src.signal_transforms import denormalise_label, signal_prior
-from src.training import TrainingConfig
+from src.signal_transforms import denormalise_label, is_absolute, signal_prior
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RUNS_DIR = REPO_ROOT / "runs"
@@ -72,7 +78,7 @@ PRECISION_DTYPES = {
 }
 
 #: The recipe's ``OPTIMIZER`` -> constructor over parameter groups. Adding one
-#: is a line here plus its name in ``src.training.OPTIMIZERS``.
+#: is a line here plus its name in ``src.model_config.OPTIMIZERS``.
 OPTIMIZERS = {
     "Adam": lambda groups, cfg: torch.optim.Adam(groups, lr=cfg.LR),
     "AdamW": lambda groups, cfg: torch.optim.AdamW(groups, lr=cfg.LR),
@@ -81,7 +87,7 @@ OPTIMIZERS = {
 #: The recipe's ``SCHEDULER`` -> constructor, stepped once per batch;
 #: ``total_steps`` is known at fit. ``Constant`` is the rate the recipe
 #: states, every step (what an upstream ``StepLR`` that never fires inside
-#: ``EPOCHS`` amounts to).
+#: the run's epochs amounts to).
 SCHEDULERS = {
     "OneCycle": lambda optimizer, cfg, total_steps: torch.optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=cfg.LR, total_steps=total_steps),
@@ -135,8 +141,7 @@ def init_output_bias(model: MultiTraceModel, interface: InterfaceConfig) -> None
                     f"{type(model).__name__}: the {trace} readout needs exactly "
                     f"one bias entry, got "
                     f"{None if layer.bias is None else layer.bias.numel()}.")
-            raw = interface.LABEL_PREPROCESSING[trace] == "raw"
-            layer.bias.fill_(signal_prior(trace) if raw else 0.0)
+            layer.bias.fill_(signal_prior(trace) if is_absolute(trace) else 0.0)
 
 
 def parameter_groups(model: MultiTraceModel, weight_decay: float) -> list:
@@ -150,16 +155,16 @@ def parameter_groups(model: MultiTraceModel, weight_decay: float) -> list:
     return groups
 
 
-def to_physical(record: dict, label_preprocessing: dict) -> dict:
+def to_physical(record: dict) -> dict:
     """One record with ``predictions`` and ``labels`` back in physical units.
 
     Exact, not approximate: the stats that produced the normalisation ride in
-    the record. For a ``raw`` signal the inverse is the identity.
+    the record. For an absolute signal the inverse is the identity.
     """
     stats = record["label_stats"]
     out = dict(record)
     for key in ("predictions", "labels"):
-        out[key] = {sig: denormalise_label(trace, stats[sig], label_preprocessing[sig])
+        out[key] = {sig: denormalise_label(trace, stats[sig], sig)
                     for sig, trace in record[key].items()}
     return out
 
@@ -216,11 +221,12 @@ class Trainer:
     """Fit ``model`` by the recipe, then record its predictions on the test set."""
 
     def __init__(self, model: MultiTraceModel, interface: InterfaceConfig,
-                 training: TrainingConfig, runtime: Runtime, run_dir: Path,
-                 config: dict | None = None):
+                 training: TrainingConfig, run: RunSettings, runtime: Runtime,
+                 run_dir: Path, config: dict | None = None):
         check_window(model, interface)
         self.interface = interface
         self.training = training
+        self.run = run
         self.runtime = runtime
         self.config = {} if config is None else config
         self.run_dir = Path(run_dir)
@@ -245,11 +251,11 @@ class Trainer:
     # -- helpers ------------------------------------------------------------
     def _loader(self, dataset: Dataset, sampler=None, shuffle: bool = False) -> DataLoader:
         return DataLoader(
-            dataset, batch_size=self.training.BATCH_SIZE, sampler=sampler,
+            dataset, batch_size=self.run.batch_size, sampler=sampler,
             shuffle=shuffle and sampler is None,
-            num_workers=self.training.NUM_WORKERS,
+            num_workers=self.run.num_workers,
             pin_memory=self.device.type == "cuda",
-            persistent_workers=self.training.NUM_WORKERS > 0)
+            persistent_workers=self.run.num_workers > 0)
 
     def _autocast(self):
         return torch.autocast(self.device.type, dtype=self.dtype,
@@ -305,25 +311,35 @@ class Trainer:
         script's chance to run and score the held-out participant on that
         epoch's weights.
         """
-        cfg, runtime = self.training, self.runtime
+        cfg, runtime, epochs = self.training, self.runtime, self.run.epochs
         sampler = DistributedSampler(train_dataset, num_replicas=runtime.world_size,
                                      rank=runtime.rank, shuffle=True) \
             if runtime.distributed else None
         loader = self._loader(train_dataset, sampler=sampler, shuffle=True)
         scheduler = SCHEDULERS[cfg.SCHEDULER](
-            self.optimizer, cfg, total_steps=cfg.EPOCHS * len(loader))
+            self.optimizer, cfg, total_steps=epochs * len(loader))
         self._prepare_run_dir()
+        # The first step is a full forward and backward, so its peak is what
+        # every step of the run costs the device: print it once, against the
+        # memory that was free before it, so a run that will not fit says so.
+        memory = device_memory(self.device)
+        if memory and runtime.is_main:
+            print(f"gpu: {describe_device(memory)}")
+        reset_peak(self.device)
         log = []
-        for epoch in range(cfg.EPOCHS):
+        for epoch in range(epochs):
             if sampler is not None:
                 sampler.set_epoch(epoch)
             self.net.train()
             started = time.time()
             sums = {"batches": 0.0}
-            progress = self._progress(loader, f"epoch {epoch + 1}/{cfg.EPOCHS}")
+            progress = self._progress(loader, f"epoch {epoch + 1}/{epochs}")
             for batch in progress:
                 total, weighted = self.step(batch)
                 scheduler.step()
+                if memory and runtime.is_main:
+                    progress.write(f"gpu: {describe_peak(peak_memory(self.device), memory)}")
+                    memory = None
                 for trace, components in weighted.items():
                     for component, value in components.items():
                         key = f"{trace}/{component}"
@@ -347,7 +363,7 @@ class Trainer:
     def _print_epoch(self, row: dict) -> None:
         per_trace = ", ".join(f"{t}={row.get(f'{t}/total', 0.0):.4g}"
                               for t in self.model.traces)
-        print(f"epoch {row['epoch']}/{self.training.EPOCHS}: "
+        print(f"epoch {row['epoch']}/{self.run.epochs}: "
               f"loss {row['total']:.4g} ({per_trace}) in {row['seconds']:.0f}s")
 
     def _write_loss_log(self, log: list) -> None:
@@ -383,6 +399,5 @@ class Trainer:
             out = {k: v for k, v in out.items() if k != "frames"}
             out["predictions"] = {t: p.float() for t, p in out["predictions"].items()}
             for sample in iter_samples(out):
-                records.append(to_physical(detach_to_cpu(sample),
-                                           self.interface.LABEL_PREPROCESSING))
+                records.append(to_physical(detach_to_cpu(sample)))
         return gather_lists(records, runtime)

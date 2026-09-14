@@ -1,0 +1,97 @@
+# The model config: one file with exactly three sections, MODEL, INTERFACE
+# and TRAIN, in this order. It is what --config takes, and it is the whole
+# description of an experiment except the datasets (their own files under
+# configs/datasets/) and the run flags (--epochs, --batch-size,
+# --num-workers, --no-gpu). Its schema is src/model_config.py.
+#
+# Every key is required and unknown keys are refused, so a run's config is
+# exactly what its file says. <angle brackets> below mark a value to fill in;
+# the comment gives the type and, where the value is drawn from a list, the
+# list. Paper configs live in configs/original_model_config/, Neckflix ones
+# in configs/combined_model_config/, both named
+#   <model>_FS<rate>_W<window s>S<stride s>_<channels>_<traces>_H<h>W<w>.yaml
+
+# The architecture, plus the switches an experiment may flip for it. Layer
+# sizes are never here: an architecture is defined once, in its module under
+# neural_methods/model/, at its published values, and every width comes from
+# the interface (first layer from CHANNELS, one copy of the network per entry
+# of TRACES). Most architectures have no switch, so their section is NAME
+# alone. The switches that exist, per NAME:
+#   EfficientPhys, TSCAN   FRAME_DEPTH: <int > 0>   segment length the temporal
+#                                                   shift shifts within (paper: 10)
+#   FactorizePhys          FSAM: <bool>              the factorized attention
+#                                                   module; false is the paper's ablation
+MODEL:
+  NAME: <string>                 # DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
+                                 # PhysMamba | PhysNet | RhythmFormer | TSCAN | iBVPNet
+
+# What every sample looks like when it reaches the model, and the loss. Every
+# loaded dataset is shaped to this before concatenation: a channel or trace a
+# store lacks arrives as zeros with a False mask.
+INTERFACE:
+  FS: <number > 0>               # frames per second the model sees; faster
+                                 # stores are decimated to it
+  UPSAMPLING: <string>           # refuse | interpolate: what to do with a store
+                                 # slower than FS (interpolate blends frames
+                                 # and labels linearly, never duplicates)
+  WINDOW_SECONDS: <number > 0>   # window length; WINDOW_SECONDS x FS must be a
+                                 # whole number of frames (within 0.01), so a
+                                 # frame count N is written as N / FS to six
+                                 # decimals (160 frames at 30 fps: 5.333333)
+  WINDOW_STRIDE: <number >= 1/FS>  # seconds the test set steps between windows,
+                                 # a whole number of frames likewise; training
+                                 # draws one random window per sample and
+                                 # ignores it
+  CHANNELS: [<string>, ...]      # ordered camera channels, no repeats, from
+                                 # R | G | B | I | D | Y | T (red, green, blue,
+                                 # infrared, depth, grey, thermal); the model's
+                                 # first layer is this wide, in this order
+  TRACES: [<string>, ...]        # ordered signals to predict, no repeats, from
+                                 # PPG | ECG | ABP | CVP | RESP | EDA | SPO2
+                                 # (BVP is accepted as PPG); one copy of the
+                                 # network per entry. PPG, ECG, RESP and EDA are
+                                 # shape signals, z-scored per window; ABP, CVP
+                                 # and SPO2 are absolute, predicted in their
+                                 # physical units
+  RESIZE: {H: <int>, W: <int>}   # frame size the model sees, both > 0; or
+                                 # {H: 0, W: 0} for no resize. DeepPhys, TS-CAN
+                                 # and EfficientPhys size a dense layer from
+                                 # the frame and need a resize; the pooling
+                                 # backbones have a floor (PhysFormer 8,
+                                 # PhysMamba / PhysNet / RhythmFormer 16,
+                                 # FactorizePhys 23, iBVPNet 64)
+  LOSS:                          # exactly one entry per trace in TRACES, each
+                                 # {COMPONENT: <number > 0>, ...} with at least
+                                 # one component. A component that should not
+                                 # count is left out, not zeroed. Components:
+                                 #   CCC         concordance correlation (shape and level)
+                                 #   NEGPEARSON  negative Pearson (shape only)
+                                 #   MSE         mean squared error
+                                 #   MEAN        L1 on the window mean, in the label's units
+                                 #   MAX         L1 on the soft per-beat maximum (systolic)
+                                 #   MIN         L1 on the soft per-beat minimum (diastolic)
+                                 #   SPECTRAL    log-spectrum L1 up to 4 Hz (uses FS)
+                                 # The weights are where per-signal scale lives:
+                                 # raw ABP error is O(10 mmHg), CVP O(1 mmHg),
+                                 # CCC and NEGPEARSON O(1).
+    <TRACE>: {<COMPONENT>: <number > 0>}
+    # e.g. the paper losses    PPG: {MSE: 1.0}   or   PPG: {NEGPEARSON: 1.0}
+    # e.g. the Neckflix losses ABP: {CCC: 1.0, MEAN: 0.05, MAX: 0.05, MIN: 0.05}
+    #                          CVP: {CCC: 1.0, MEAN: 0.20, MAX: 0.05, MIN: 0.05}
+
+# How the train set is optimised. Epochs, batch size, workers and the GPU
+# choice are not here: they are the launcher's flags. The readouts are always
+# exempt from weight decay (src/trainer.py). A reduced precision on a CPU run
+# drops to float32 with a warning.
+TRAIN:
+  OPTIMIZER: <string>            # Adam | AdamW (src/trainer.py OPTIMIZERS)
+  LR: <number > 0>               # the learning rate, and OneCycle's peak
+  WEIGHT_DECAY: <number >= 0>    # 0.0 = no decay
+  SCHEDULER: <string>            # OneCycle | Constant, stepped once per batch
+                                 # (OneCycle over every step of the run;
+                                 # Constant holds LR)
+  PRECISION: <string>            # float32 | bfloat16 | float16 (autocast dtype;
+                                 # float16 adds loss scaling)
+  # MODEL_FILE_NAME: <string>    # optional, the only optional key: names the
+                                 # run directory instead of the default
+                                 # <MODEL>_<DATASET>.<participant|all>-..._<YYYYMMDDHHMM>

@@ -1,7 +1,7 @@
 """What one training run of a setup costs in memory, without running it.
 
-Takes the same four config files as ``scripts/run.py`` (datasets,
-interface, model, training), builds the model and optimiser exactly as the
+Takes the same config files as ``scripts/run.py`` (the datasets and the one
+model/interface/training file), builds the model and optimiser exactly as the
 trainer does, draws one real batch of windows from the loaded stores, takes
 exactly one training step on it, and reports:
 
@@ -18,9 +18,9 @@ which is why this measures a step rather than estimating one. The step is a
 real one on a real batch: it needs the cache mounted, and it needs the GPU
 the run would use (an ``salloc`` on the target partition, or the dev box).
 
-    uv run tools/memory_report.py --datasets pure --model physnet \\
-        --interface configs/interfaces/physnet_interface.yaml \\
-        --training configs/training/physnet_training.yaml
+    uv run tools/memory_report.py --datasets pure \\
+        --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml \\
+        --batch-size 4
 """
 
 import argparse
@@ -35,39 +35,24 @@ from torch.utils.data import ConcatDataset, DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import ConfigError                # noqa: E402
-from src.datasets import load_dataset_configs, load_stores   # noqa: E402
+from src.dataset_config import load_dataset_configs          # noqa: E402
+from src.datasets import load_stores                         # noqa: E402
 from src.distributed import init_runtime, shutdown           # noqa: E402
-from src.experiment import add_config_arguments   # noqa: E402
-from src.interface import load_interface          # noqa: E402
-from src.models import build_model, load_model_config        # noqa: E402
+from src.experiment import (                      # noqa: E402
+    add_config_arguments, add_run_arguments, run_settings,
+)
+from src.memory import (                          # noqa: E402
+    device_memory, human, peak_memory, reset_peak, tensor_bytes,
+)
+from src.model_config import load_config          # noqa: E402
+from src.models import build_model                # noqa: E402
 from src.trainer import Trainer                   # noqa: E402
-from src.training import load_training            # noqa: E402
 from src.inputs import WindowedDataset            # noqa: E402
 
 #: A CUDA context is created per process outside the allocator's books, so
 #: neither ``max_memory_reserved`` nor a warm ``mem_get_info`` delta sees it.
 #: This is a working allowance for the driver, kernels and cuBLAS workspace.
 CUDA_CONTEXT_BYTES = 500 * 2 ** 20
-
-
-def tensor_bytes(obj) -> int:
-    """Bytes of every tensor in a nested dict/list/tuple of tensors."""
-    if torch.is_tensor(obj):
-        return obj.numel() * obj.element_size()
-    if isinstance(obj, dict):
-        return sum(tensor_bytes(v) for v in obj.values())
-    if isinstance(obj, (list, tuple)):
-        return sum(tensor_bytes(v) for v in obj)
-    return 0
-
-
-def human(n_bytes: float) -> str:
-    """``n_bytes`` in the largest binary unit that keeps the number readable."""
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n_bytes) < 1024 or unit == "TB":
-            return f"{n_bytes:.1f} {unit}" if unit != "B" else f"{n_bytes:.0f} B"
-        n_bytes /= 1024
-    return f"{n_bytes:.1f} TB"
 
 
 def one_batch(datasets: dict, stores: dict, interface, batch_size: int):
@@ -85,44 +70,29 @@ def one_batch(datasets: dict, stores: dict, interface, batch_size: int):
 def measure(device: torch.device, probe) -> dict | None:
     """Run ``probe()`` and return what the device's allocator saw, or None on
     a device with nothing to read (CPU)."""
-    if device.type == "cuda":
-        free_before, total = torch.cuda.mem_get_info(device)
-        torch.cuda.reset_peak_memory_stats(device)
-        probe()
-        torch.cuda.synchronize(device)
-        return {
-            "name": torch.cuda.get_device_name(device),
-            "peak_allocated": torch.cuda.max_memory_allocated(device),
-            "peak_reserved": torch.cuda.max_memory_reserved(device),
-            "context": CUDA_CONTEXT_BYTES,
-            "total": total,
-            "free_before": free_before,
-        }
-    if device.type == "mps":
-        probe()
-        torch.mps.synchronize()
-        reserved = torch.mps.driver_allocated_memory()
-        total = torch.mps.recommended_max_memory()
-        return {
-            "name": "Apple MPS",
-            "peak_allocated": torch.mps.current_allocated_memory(),
-            "peak_reserved": reserved,
-            "context": 0,
-            "total": total,
-            "free_before": total,   # unified memory: no separate free figure
-        }
+    memory = device_memory(device)
+    reset_peak(device)
     probe()
-    return None
+    peak = peak_memory(device)
+    if memory is None:
+        return None
+    return {
+        "name": memory["name"],
+        "peak_allocated": peak["allocated"],
+        "peak_reserved": peak["reserved"],
+        "context": CUDA_CONTEXT_BYTES if device.type == "cuda" else 0,
+        "total": memory["total"],
+        "free_before": memory["free"],
+    }
 
 
 def report(args) -> dict:
-    interface = load_interface(args.interface)
-    model_config = load_model_config(args.model, interface)
-    training = load_training(args.training)
-    runtime = init_runtime(training)
+    run = args.run
+    interface, model_config, training = load_config(args.config)
+    runtime = init_runtime(training, run.gpu)
     configs = load_dataset_configs(args.datasets)
     stores = load_stores(configs)
-    batch, n_windows = one_batch(configs, stores, interface, training.BATCH_SIZE)
+    batch, n_windows = one_batch(configs, stores, interface, run.batch_size)
     model = build_model(model_config, interface)
     n_params = sum(p.numel() for p in model.parameters())
 
@@ -131,7 +101,7 @@ def report(args) -> dict:
     state = {}
 
     def probe():
-        trainer = Trainer(model, interface, training, runtime,
+        trainer = Trainer(model, interface, training, run, runtime,
                           Path(tempfile.gettempdir()) / "memory_report")
         state["loss"], _ = trainer.step(batch)
         state["optimiser"] = trainer.optimizer
@@ -149,10 +119,10 @@ def report(args) -> dict:
         "parameters": n_params,
         "precision": runtime.precision,
         "optimiser": training.OPTIMIZER,
-        "batch_size": training.BATCH_SIZE,
+        "batch_size": run.batch_size,
         "batch_windows": next(iter(batch["label_mask"].values())).shape[0],
         "train_windows": n_windows,
-        "num_workers": training.NUM_WORKERS,
+        "num_workers": run.num_workers,
         "window_frames": interface.window_frames,
         "frame_hw": _frame_hw(batch),
         "bytes": {
@@ -168,8 +138,7 @@ def report(args) -> dict:
 
 
 def _frame_hw(batch) -> tuple[int, int]:
-    channel = next(iter(batch["frames"].values()))
-    plane = next(iter(channel.values()))
+    plane = next(iter(batch["frames"].values()))
     return tuple(plane.shape[-2:])
 
 
@@ -185,7 +154,7 @@ def print_report(r: dict) -> None:
           f"{r['in_channels']} ch x {r['window_frames']} x {h} x {w} frames + labels")
     if r["batch_windows"] < r["batch_size"]:
         print(f"  NOTE: only {r['train_windows']} training windows, so this batch is "
-              f"smaller than BATCH_SIZE {r['batch_size']}; the step below understates "
+              f"smaller than --batch-size {r['batch_size']}; the step below understates "
               f"a full one")
     static = b["weights"] + b["gradients"] + b["optimiser_state"]
     print(f"  static total     {human(static):>10}   weights + gradients + optimiser state")
@@ -214,14 +183,15 @@ def print_report(r: dict) -> None:
     in_flight = (2 * r["num_workers"] + 1) * b["batch"]
     print(f"host: DataLoader keeps ~{2 * r['num_workers'] + 1} batches in flight "
           f"({human(in_flight)}) plus one Python process per worker "
-          f"(NUM_WORKERS {r['num_workers']})")
+          f"(--num-workers {r['num_workers']})")
 
 
 def main(argv=None) -> dict:
-    parser = add_config_arguments(argparse.ArgumentParser(
+    parser = add_run_arguments(add_config_arguments(argparse.ArgumentParser(
         description="Measure what one training run of this setup takes in "
-                    "memory — one real step on one real batch — without running it."))
+                    "memory — one real step on one real batch — without running it.")))
     args = parser.parse_args(argv)
+    args.run = run_settings(parser, args)
     try:
         r = report(args)
     except ValueError as err:          # ConfigError is a ValueError

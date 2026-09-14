@@ -21,15 +21,19 @@ when the window already divides by 4, so on
 pass is the published one. Frames may be any size from 16x16, the smallest
 the four 2x spatial pools leave anything of.
 
-A clip backbone on the multi-signal contract: ``(B, C_in, T, H, W)`` in,
-``(B, 1, T)`` out, preprocessing done by the dataset, the loss owned by the
-trainer. All reshaping is einops.
+A clip backbone on the multi-signal contract: ``(B, C_in, T, H, W)`` raw
+frames in, ``(B, 1, T)`` out, the loss owned by the trainer. The input
+preprocessing is the network's own first stage: the raw clip is
+difference-normalised (``DiffNormalize``, the toolbox's DiffNormalized block,
+with the clip's own statistics) before the stem, which is what the published
+network was fed. All reshaping is einops.
 """
 
 import torch.nn as nn
 from einops import rearrange
 from torch.nn import functional as F
 
+from neural_methods.model.modules.diffnormalize import DiffNormalize
 from neural_methods.model.shared import nearest_multiple, require_min_frame
 
 #: Two ``MaxPool3d`` stages spatial-only plus two spatial-and-temporal
@@ -52,6 +56,8 @@ class PhysNet(nn.Module):
         super().__init__()
         self.in_channels = in_channels
 
+        # Input preprocessing: raw clip -> difference-normalised clip
+        self.input_norm = DiffNormalize()
         self.ConvBlock1 = nn.Sequential(
             nn.Conv3d(in_channels, 16, [1, 5, 5], stride=1, padding=[0, 2, 2]),
             nn.BatchNorm3d(16),
@@ -128,11 +134,11 @@ class PhysNet(nn.Module):
         return (self.ConvBlock10,)
 
     def forward(self, x):
-        """``(B, in_channels, T, H, W)`` -> ``(B, 1, T)``."""
+        """``(B, in_channels, T, H, W)`` raw clip -> ``(B, 1, T)``."""
         frames, height, width = x.shape[2:]
         require_min_frame("PhysNet", MIN_FRAME, height, width)
 
-        x = self.ConvBlock1(x)
+        x = self.ConvBlock1(self.input_norm(x))
         x = self.MaxpoolSpa(x)
 
         x = self.ConvBlock2(x)

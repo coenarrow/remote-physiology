@@ -8,7 +8,11 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
-from neural_methods.model.shared import TSM, Attention_mask, dense_width
+from neural_methods.model.modules.diffnormalize import DiffNormalize
+from neural_methods.model.modules.standardize import Standardize
+from neural_methods.model.modules.attention_mask import Attention_mask
+from neural_methods.model.modules.temporal_shift import TSM
+from neural_methods.model.shared import dense_width
 
 
 class TSCAN(nn.Module):
@@ -34,17 +38,25 @@ class TSCAN(nn.Module):
         Returns:
           TSCAN model.
 
-        Three things differ from the published network. First, the first
-        conv of each branch takes ``in_channels`` inputs (the interface's
-        channel count) instead of 3, as DeepPhys does. Second, the temporal
-        shift (the shared ``TSM``) is adaptive to any clip length ``T``; at a
-        ``T`` that is a multiple of ``frame_depth`` this computes exactly the
-        published shift. Third, the dense layer is sized per axis, so a
-        non-square frame works; at a square frame it is the published width.
-        At the defaults this is the original network, layer for layer.
+        Four things differ from the published network. First, the network
+        takes the raw clip and builds its own two inputs: the motion branch
+        sees the frame-to-frame difference (``DiffNormalize``) and the
+        appearance branch the z-scored frames (``Standardize``), each with
+        the clip's own statistics, exactly the toolbox's DiffNormalized and
+        Standardized blocks. Second, the first conv of each branch takes
+        ``in_channels`` inputs (the interface's channel count) instead of 3,
+        as DeepPhys does. Third, the temporal shift (the shared ``TSM``) is
+        adaptive to any clip length ``T``; at a ``T`` that is a multiple of
+        ``frame_depth`` this computes exactly the published shift. Fourth,
+        the dense layer is sized per axis, so a non-square frame works; at a
+        square frame it is the published width. At the defaults this is the
+        original network, layer for layer.
         """
         super(TSCAN, self).__init__()
         self.in_channels = in_channels
+        # Input preprocessing: raw clip -> motion and appearance blocks
+        self.motion_norm = DiffNormalize()
+        self.appearance_norm = Standardize()
         self.kernel_size = kernel_size
         self.dropout_rate1 = dropout_rate1
         self.dropout_rate2 = dropout_rate2
@@ -101,15 +113,13 @@ class TSCAN(nn.Module):
         return (self.final_dense_2,)
 
     def forward(self, video: torch.Tensor) -> torch.Tensor:
-        """``(B, 2 * in_channels, T, H, W)`` -> ``(B, 1, T)``: motion block
-        first, appearance second, folded to one 2D frame per row for the
+        """``(B, in_channels, T, H, W)`` raw clip -> ``(B, 1, T)``: the
+        difference-normalised clip feeds the motion branch and the z-scored
+        clip the appearance branch, folded to one 2D frame per row for the
         published network and unfolded back around each temporal shift."""
         b = video.shape[0]
-        diff_input = video[:, :self.in_channels]
-        raw_input = video[:, self.in_channels:2 * self.in_channels]
-
-        diff_input = rearrange(diff_input, "b c t h w -> b t c h w")
-        raw_input = rearrange(raw_input, "b c t h w -> (b t) c h w")
+        diff_input = rearrange(self.motion_norm(video), "b c t h w -> b t c h w")
+        raw_input = rearrange(self.appearance_norm(video), "b c t h w -> (b t) c h w")
 
         diff_input = self.TSM_1(diff_input)
         diff_input = rearrange(diff_input, "b t c h w -> (b t) c h w")

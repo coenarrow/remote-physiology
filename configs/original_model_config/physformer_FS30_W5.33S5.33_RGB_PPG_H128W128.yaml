@@ -1,0 +1,23 @@
+MODEL:
+  NAME: PhysFormer
+
+# PhysFormer paper interface. This is the rPPG-Toolbox configuration of PhysFormer
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 5.333333       # 160 frames (160 / 30), the upstream CHUNK_LENGTH
+  WINDOW_STRIDE: 5.333333        # seconds the test set steps between windows
+  CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
+  TRACES: [PPG]                  # the paper predicts BVP and nothing else
+  RESIZE: {H: 128, W: 128}       # upstream PhysFormer frame size
+  LOSS:                          # upstream: negative Pearson plus a frequency
+    PPG: {NEGPEARSON: 1.0}       # cross-entropy/KL term (DLDL) the loss module lacks
+
+# PhysFormer paper recipe (PURE_PURE_UBFC-rPPG_PHYSFORMER_BASIC.yaml and PhysFormerTrainer).
+# The paper's 10 epochs and batch 4 are the launcher's flags: --epochs 10 --batch-size 4
+TRAIN:
+  OPTIMIZER: Adam              # upstream: optim.Adam(lr, weight_decay=0.00005)
+  LR: 1e-4
+  WEIGHT_DECAY: 5e-5
+  SCHEDULER: Constant          # upstream: StepLR(50, 0.5), never reached in 10 epochs
+  PRECISION: float32           # upstream trains in full precision

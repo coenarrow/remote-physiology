@@ -119,9 +119,9 @@ under `dataset/cachers/pure`, synced on the job's first run, which is why
 the sync belongs inside the job rather than on the login node.
 
 On the frame size: native is 640x480 and 27 GB. At 256x256 the cache is
-about 6 GB and every interface in `configs/interfaces/` (the largest wants
-144) is served by downsampling only. `--resize 128 128` halves that again
-and is exact for PhysMamba, but BigSmall's 144 would then be upsampled.
+about 6 GB and every paper config in `configs/original_model_config/`
+(the largest wants 128) is served by downsampling only. `--resize 128 128`
+halves that again and is exact for every one of them.
 Change the line in the script if you want a different size; the frames
 are resized once more, to the interface's size, at load time regardless.
 
@@ -175,7 +175,7 @@ What the script asks for, and why:
 | --- | --- | --- |
 | `--partition` | `gpu` | the dev/test partition; if it sits pending, `scancel` and resubmit to `pophealth` with `--gres=gpu:a100:2`, then `medical` with `--gres=gpu:h100:2` |
 | `--gres` | `gpu:v100:2` | `--parallel 2` times `--nproc-per-node 1` |
-| `--cpus-per-task` | `8` | `--parallel 2` times the recipe's `NUM_WORKERS` of 4 |
+| `--cpus-per-task` | `8` | `--parallel 2` times `--num-workers 4` |
 | `--mem` | `32G` | two PhysMamba folds at 128x128, batch 4, fit comfortably |
 | `--time` | `2:00:00` | a fold took nine minutes on the dev box; ten folds two at a time is under an hour |
 
@@ -223,4 +223,4 @@ from the directory alone.
 | `--parallel 2 x --nproc-per-node 1 needs 2 GPUs and 1 are visible` | `--gres` and the two numbers disagree | make `--gres` equal their product |
 | `$'\r': command not found` | a CRLF SLURM script | `git add --renormalize .` and recommit; `.gitattributes` prevents it from here on |
 | Job pending for long | partition busy | the escalation ladder in step 7 |
-| CUDA out of memory in a fold's `log.txt` | two folds on one card, or a bigger interface than this one | `--parallel 1`, or run `tools/memory_report.py` with the same four config flags to size it |
+| CUDA out of memory in a fold's `log.txt` | two folds on one card, or a bigger interface than this one | `--parallel 1`, or run `tools/memory_report.py` with the same `--config` and run flags to size it |

@@ -1,0 +1,22 @@
+MODEL:
+  NAME: DeepPhys
+
+INTERFACE:
+  FS: 30
+  UPSAMPLING: refuse                      # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 10.0                    # T = WINDOW_SECONDS x FS
+  WINDOW_STRIDE: 1.0                      # Striding is test-only; training draws random windows
+  CHANNELS: [R, G, B, I, D]               # Ordered camera channels. Options [R,G,B,I,D]
+  TRACES: [ABP, CVP]                      # Options: [PPG, ABP, CVP, ECG, RR]
+  RESIZE: {H: 72, W: 72}                  # Resizing before model; {H: 0, W: 0} = no resize
+  LOSS:                                   # one entry per trace: {component: weight}, as in
+    ABP: {CCC: 1.0, MEAN: 0.05, MAX: 0.05, MIN: 0.05}   # the standard interface
+    CVP: {CCC: 1.0, MEAN: 0.20, MAX: 0.05, MIN: 0.05}
+
+
+TRAIN:                         # epochs, batch size, workers and --no-gpu are the launcher's flags
+  OPTIMIZER: Adam
+  LR: 3e-3
+  WEIGHT_DECAY: 5e-4
+  SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
+  PRECISION: float32           # upstream trains in full precision

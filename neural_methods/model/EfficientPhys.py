@@ -7,7 +7,10 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
-from neural_methods.model.shared import TSM, Attention_mask, dense_width
+from neural_methods.model.modules.standardize import Standardize
+from neural_methods.model.modules.temporal_shift import TSM
+from neural_methods.model.modules.attention_mask import Attention_mask 
+from neural_methods.model.shared import dense_width
 
 
 class EfficientPhys(nn.Module):
@@ -33,18 +36,23 @@ class EfficientPhys(nn.Module):
         Returns:
           EfficientPhys model.
 
-        Three things differ from the published network. First, the first
-        conv and the input batch norm take ``in_channels`` inputs (the
-        interface's channel count) instead of 3, as DeepPhys does. Second,
-        the temporal shift (the shared ``TSM``, the one TS-CAN uses) is
-        adaptive to any clip length ``T``; at a ``T`` that is a multiple of
-        ``frame_depth`` this computes exactly the published shift. Third, the
-        dense layer is sized per axis, so a non-square frame works; at a
-        square frame it is the published width. At the defaults this is the
-        original network, layer for layer.
+        Four things differ from the published network. First, the network
+        takes the raw clip and z-scores it itself (``Standardize``, the
+        toolbox's Standardized block, with the clip's own statistics) before
+        its own frame difference. Second, the first conv and the input batch
+        norm take ``in_channels`` inputs (the interface's channel count)
+        instead of 3, as DeepPhys does. Third, the temporal shift (the shared
+        ``TSM``, the one TS-CAN uses) is adaptive to any clip length ``T``;
+        at a ``T`` that is a multiple of ``frame_depth`` this computes
+        exactly the published shift. Fourth, the dense layer is sized per
+        axis, so a non-square frame works; at a square frame it is the
+        published width. At the defaults this is the original network, layer
+        for layer.
         """
         super(EfficientPhys, self).__init__()
         self.in_channels = in_channels
+        # Input preprocessing: raw clip -> standardised clip
+        self.input_norm = Standardize()
         self.kernel_size = kernel_size
         self.dropout_rate1 = dropout_rate1
         self.dropout_rate2 = dropout_rate2
@@ -94,9 +102,10 @@ class EfficientPhys(nn.Module):
         return (self.final_dense_2,)
 
     def forward(self, video: torch.Tensor) -> torch.Tensor:
-        """``(B, in_channels, T, H, W)`` -> ``(B, 1, T)``: difference each
-        clip along its own time axis, then fold to one 2D frame per row for
-        the published network and unfold back around each temporal shift.
+        """``(B, in_channels, T, H, W)`` raw clip -> ``(B, 1, T)``: z-score
+        the clip, difference it along its own time axis, then fold to one 2D
+        frame per row for the published network and unfold back around each
+        temporal shift.
 
         ``torch.diff`` leaves ``T - 1`` rows, so a zero frame is appended to
         each clip. That is numerically what upstream produced by appending a
@@ -105,7 +114,7 @@ class EfficientPhys(nn.Module):
         frame, and no difference taken across a clip boundary.
         """
         b = video.shape[0]
-        frames = rearrange(video, "b c t h w -> b t c h w")
+        frames = rearrange(self.input_norm(video), "b c t h w -> b t c h w")
         diff_input = torch.diff(frames, dim=1)
         diff_input = torch.cat((diff_input, torch.zeros_like(frames[:, :1])), dim=1)
         diff_input = rearrange(diff_input, "b t c h w -> (b t) c h w")

@@ -6,14 +6,16 @@ model over the held-out participant and scores the records;
 ``tools/memory_report.py`` takes the same setup without running it. This
 module is written once for both:
 
-* the argparse groups they have in common — the four config files a run is
-  made of, and the held-out participant;
+* the argparse groups they have in common — the dataset files and the one
+  config file a run is made of (``src.model_config.load_config`` reads it),
+  the run settings (epochs, batch size, workers, GPU or not), and the
+  held-out participant;
 * ``compile_config``, the one mapping of everything a run ran on, which the
   run writes as ``config.yaml`` and carries inside ``model.pt``;
 * ``rebuild``, the typed reading of that mapping back into the interface,
   model, recipe and datasets — through the same parsers the files go
-  through, so a run rebuilt from its checkpoint is checked exactly as a
-  loaded one is;
+  through (``src.model_config``, ``src.dataset_config``), so a run rebuilt
+  from its checkpoint is checked exactly as a loaded one is;
 * the windowed datasets each side of the split becomes, and the progress
   lines the script prints on the way.
 """
@@ -29,16 +31,17 @@ from pathlib import Path
 import torch
 from torch.utils.data import ConcatDataset, Subset
 
-from src.config import ConfigError
-from src.datasets import (
-    DatasetConfig, Split, hold_out_participant, parse_dataset_config,
-    resolve_dataset_configs,
+from src.config import ConfigError, build
+from src.dataset_config import (
+    DatasetConfig, parse_dataset_config, resolve_dataset_configs,
 )
+from src.datasets import Split, hold_out_participant
 from src.distributed import Runtime
-from src.interface import DEFAULT_INTERFACE_PATH, InterfaceConfig, parse_interface
-from src.models import parse_model_config, resolve_model_config
+from src.model_config import (
+    InterfaceConfig, RunSettings, TrainingConfig, parse_interface,
+    parse_model_config, parse_training,
+)
 from src.trainer import CHECKPOINT_NAME, CONFIG_NAME
-from src.training import DEFAULT_TRAINING_PATH, TrainingConfig, parse_training
 from src.inputs import WindowedDataset
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -48,24 +51,58 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Arguments
 # ---------------------------------------------------------------------------
 def add_config_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """The four config files every run is made of: datasets, interface, model,
-    training. Shared with the tools that take a run's setup without running
-    it (``tools/memory_report.py``)."""
+    """The config files every run is made of: the datasets, and the one file
+    that holds the model, its interface and its training recipe. Shared with
+    the tools that take a run's setup without running it
+    (``tools/memory_report.py``)."""
     parser.add_argument(
         "--datasets", nargs="+", required=True, metavar="NAME",
         help="dataset config name(s), each resolved to "
              "configs/datasets/<NAME>.yaml (e.g. --datasets neckflix pure)")
     parser.add_argument(
-        "--interface", metavar="PATH", default=DEFAULT_INTERFACE_PATH,
-        help="the interface config (default: configs/interface.yaml)")
-    parser.add_argument(
-        "--model", required=True, metavar="NAME",
-        help="model config name, resolved to configs/models/<NAME>.yaml "
-             "(e.g. --model deepphys)")
-    parser.add_argument(
-        "--training", metavar="PATH", default=DEFAULT_TRAINING_PATH,
-        help="the training recipe (default: configs/training.yaml)")
+        "--config", required=True, metavar="PATH",
+        help="the config file: MODEL, INTERFACE and TRAIN sections "
+             "(e.g. configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml)")
     return parser
+
+
+def add_run_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """The run settings (:class:`RunSettings`), defaults from the dataclass."""
+    d = RunSettings()
+    parser.add_argument(
+        "--epochs", type=int, default=d.epochs, metavar="N",
+        help=f"training epochs (default: {d.epochs})")
+    parser.add_argument(
+        "--batch-size", type=int, default=d.batch_size, metavar="N",
+        help=f"windows per batch, per process, train and test alike "
+             f"(default: {d.batch_size})")
+    parser.add_argument(
+        "--num-workers", type=int, default=d.num_workers, metavar="N",
+        help=f"DataLoader worker processes (default: {d.num_workers})")
+    parser.add_argument(
+        "--no-gpu", action="store_true",
+        help="train on the CPU even where a GPU exists (default: use CUDA or "
+             "Apple MPS if present, else fall back to the CPU with a warning)")
+    return parser
+
+
+def run_settings(parser: argparse.ArgumentParser, args) -> RunSettings:
+    """The parsed run flags as one :class:`RunSettings`, checked."""
+    if args.epochs < 1 or args.batch_size < 1:
+        parser.error("--epochs and --batch-size are at least 1")
+    if args.num_workers < 0:
+        parser.error("--num-workers is at least 0")
+    return RunSettings(epochs=args.epochs, batch_size=args.batch_size,
+                       num_workers=args.num_workers, gpu=not args.no_gpu)
+
+
+def run_argv(run: RunSettings) -> list[str]:
+    """The flags that reproduce ``run`` on another launcher's command line."""
+    argv = ["--epochs", str(run.epochs), "--batch-size", str(run.batch_size),
+            "--num-workers", str(run.num_workers)]
+    if not run.gpu:
+        argv.append("--no-gpu")
+    return argv
 
 
 def add_split_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -150,7 +187,8 @@ def git_state() -> dict:
     return {"commit": commit, "dirty": dirty}
 
 
-def run_name(args, training: TrainingConfig, now: datetime | None = None) -> str:
+def run_name(args, model_config, training: TrainingConfig,
+             now: datetime | None = None) -> str:
     """``MODEL_FILE_NAME`` if the recipe names the run; otherwise
     ``<MODEL>_<DATASET>.<held-out participant or all>-..._<YYYYMMDDHHMM>``,
     e.g. ``PHYSMAMBA_PURE.all-NECKFLIX.24_202609091000`` for PhysMamba
@@ -162,18 +200,20 @@ def run_name(args, training: TrainingConfig, now: datetime | None = None) -> str
         f"{name.upper()}."
         f"{args.test_participant_id if name == args.test_participant_dataset else 'all'}"
         for name in args.datasets)
-    return f"{args.model.upper()}_{datasets}_{stamp}"
+    return f"{model_config.NAME.upper()}_{datasets}_{stamp}"
 
 
 def compile_config(script: str, argv, args, interface: InterfaceConfig, model_config,
-                   training: TrainingConfig, runtime: Runtime, datasets: dict,
-                   split: Split, run_dir: Path) -> dict:
+                   training: TrainingConfig, run: RunSettings, runtime: Runtime,
+                   datasets: dict, split: Split, run_dir: Path) -> dict:
     """Everything this run ran on, as one plain mapping.
 
     The four config sections (``datasets``, ``interface``, ``model``,
     ``training``) are exactly what their files loaded as after ``BASE``
     merging and validation, so each feeds back to its parser (``rebuild``);
-    ``sources`` says which files those were. ``split`` lists the stores on
+    ``sources`` says which files those were: the dataset files, and the one
+    config file the other three sections came from. ``run`` is the run
+    settings the flags gave. ``split`` lists the stores on
     each side of the hold-out (``test`` is empty when nobody is held out),
     ``runtime`` the device and precision actually used (after any
     downgrade), ``git`` the code the run executed. Written to the run
@@ -186,9 +226,7 @@ def compile_config(script: str, argv, args, interface: InterfaceConfig, model_co
         "sources": {
             "datasets": {name: str(path.resolve())
                          for name, path in resolve_dataset_configs(args.datasets).items()},
-            "interface": str(Path(args.interface).resolve()),
-            "model": str(resolve_model_config(args.model).resolve()),
-            "training": str(Path(args.training).resolve()),
+            "config": str(Path(args.config).resolve()),
         },
         "datasets": {name: asdict(cfg) for name, cfg in datasets.items()},
         "split": {
@@ -200,6 +238,7 @@ def compile_config(script: str, argv, args, interface: InterfaceConfig, model_co
         "interface": asdict(interface),
         "model": asdict(model_config),
         "training": asdict(training),
+        "run": asdict(run),
         "runtime": {
             "device": str(runtime.device),
             "precision": runtime.precision,
@@ -214,8 +253,9 @@ class Setup:
     """A run's configs, typed again from its compiled config."""
 
     interface: InterfaceConfig
-    model: object                        # one of ``src.models.MODEL_CONFIGS``
+    model: object                        # one of ``src.model_config.MODEL_CONFIGS``
     training: TrainingConfig
+    run: RunSettings
     datasets: dict[str, DatasetConfig]
     test_participant_dataset: str | None
     test_participant_id: str | None
@@ -224,17 +264,18 @@ class Setup:
 def rebuild(config: dict, where: str = CONFIG_NAME) -> Setup:
     """The typed reading of a compiled config, through the parsers the files
     went through: a rebuilt run is validated exactly as a loaded one was."""
-    for key in ("interface", "model", "training", "datasets"):
+    for key in ("interface", "model", "training", "run", "datasets"):
         if key not in config:
             raise ConfigError(f"{where} has no {key} section; was it written by "
                               f"scripts/run.py?")
     interface = parse_interface(config["interface"], f"{where}: interface")
     model = parse_model_config(config["model"], interface, f"{where}: model")
     training = parse_training(config["training"], f"{where}: training")
+    run = build(RunSettings, config["run"], f"{where}: run")
     datasets = {name: parse_dataset_config(mapping, f"{where}: datasets.{name}")
                 for name, mapping in config["datasets"].items()}
     split = config.get("split") or {}
-    return Setup(interface, model, training, datasets,
+    return Setup(interface, model, training, run, datasets,
                  split.get("test_participant_dataset"), split.get("test_participant_id"))
 
 
@@ -254,19 +295,22 @@ def load_checkpoint(run_dir: Path) -> dict:
 # ---------------------------------------------------------------------------
 # What every script prints on the way
 # ---------------------------------------------------------------------------
-def print_setup(interface: InterfaceConfig, model_config, training: TrainingConfig) -> None:
+def print_setup(interface: InterfaceConfig, model_config, training: TrainingConfig,
+                run: RunSettings) -> None:
     print(f"interface: {interface.window_frames} frames per window at "
           f"{interface.FS} fps, test stride {interface.stride_frames} "
           f"frames, channels {interface.CHANNELS}, traces {interface.TRACES}")
     print(f"model: {model_config}")
     print(f"training: {training}")
+    print(f"run: {run.epochs} epoch(s), batch {run.batch_size}, "
+          f"{run.num_workers} worker(s), {'gpu' if run.gpu else 'no gpu'}")
 
 
-def print_runtime(runtime: Runtime, training: TrainingConfig) -> None:
+def print_runtime(runtime: Runtime, run: RunSettings) -> None:
     if runtime.distributed:
         print(f"runtime: rank {runtime.rank} of {runtime.world_size} on "
               f"{runtime.device}, global batch "
-              f"{training.BATCH_SIZE * runtime.world_size}")
+              f"{run.batch_size * runtime.world_size}")
     else:
         print(f"runtime: single process on {runtime.device}, "
               f"precision {runtime.precision}")

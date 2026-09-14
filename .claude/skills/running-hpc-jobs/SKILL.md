@@ -62,8 +62,8 @@ cd "/group/pgh004/carrow/repo/remote-physiology"
 module load cuda
 
 uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc --test-participant-id 15 \
-    --model physmamba --interface configs/interfaces/interface_neckflix.yaml \
-    --training configs/training/physmamba_training.yaml --parallel 2 --nproc-per-node 1
+    --config configs/combined_model_config/physmamba_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml \
+    --epochs 20 --batch-size 4 --num-workers 4 --parallel 2 --nproc-per-node 1
 ```
 
 The command is the dev-box command plus two numbers: `--parallel` folds at a time and
@@ -76,7 +76,7 @@ Required in every script:
 - **`module load cuda`** — GPU jobs fail without it
 - **`uv run`** for all Python; never bare `python`
 - **`--gres` equals `--parallel` times `--nproc-per-node`** — `main.py` refuses otherwise
-- **`--cpus-per-task`** at least `--parallel` times `--nproc-per-node` times the recipe's `NUM_WORKERS`
+- **`--cpus-per-task`** at least `--parallel` times `--nproc-per-node` times `--num-workers`
 - **`--mem`** set to the minimum the job needs (a 2-GPU dev run fits in 32G)
 - **A `<name>_hpc.yaml` dataset config** — the committed dataset files point at the dev-box
   cache, so the cluster loads `BASE: <name>.yaml` plus its own `CACHED_PATH`, as
@@ -103,8 +103,8 @@ salloc --job-name=Interactive_Session --partition=pophealth \
 module load cuda
 cd /mmfs1/data/group/pgh004/carrow/repo/remote-physiology
 uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc --test-participant-id 15 \
-    --model physmamba --interface configs/interfaces/interface_neckflix.yaml \
-    --training configs/training/physmamba_3ep.yaml --limit-windows 8
+    --config configs/combined_model_config/physmamba_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml \
+    --epochs 3 --limit-windows 8
 exit    # release the allocation when done
 ```
 

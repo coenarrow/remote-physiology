@@ -1,0 +1,23 @@
+MODEL:
+  NAME: PhysMamba
+
+# PhysMamba paper interface. This is the rPPG-Toolbox configuration of PhysMamba
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 4.266667       # 128 frames (128 / 30), the upstream CHUNK_LENGTH
+  WINDOW_STRIDE: 4.266667        # seconds the test set steps between windows
+  CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
+  TRACES: [PPG]                  # the paper predicts BVP and nothing else
+  RESIZE: {H: 128, W: 128}       # upstream PhysMamba frame size
+  LOSS:                          # upstream trains PhysMamba with negative Pearson
+    PPG: {NEGPEARSON: 1.0}
+
+# PhysMamba paper recipe (PURE_PURE_UBFC-rPPG_PHYSMAMBA_BASIC.yaml and PhysMambaTrainer).
+# The paper's 20 epochs and batch 4 are the launcher's flags: --epochs 20 --batch-size 4
+TRAIN:
+  OPTIMIZER: Adam              # upstream: optim.Adam(lr, weight_decay=0.0005)
+  LR: 3e-3
+  WEIGHT_DECAY: 5e-4
+  SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
+  PRECISION: float32           # upstream trains in full precision

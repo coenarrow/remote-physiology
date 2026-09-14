@@ -20,7 +20,7 @@
 #   sbatch .slurm_scripts/PURE_PhysMamba_3ep.slurm
 #   sbatch .slurm_scripts/PURE_PhysMamba_3ep.slurm 01 02
 #
-# Sizing: --cpus-per-task is --parallel times the recipe's NUM_WORKERS (4);
+# Sizing: --cpus-per-task is --parallel times --num-workers (4);
 # --gres is --parallel times --nproc-per-node.
 
 mkdir -p logs
@@ -36,4 +36,4 @@ if [ "$#" -gt 0 ]; then
     FOLDS=(--test-participant-id "$@")
 fi
 
-uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" --model physmamba --interface configs/interfaces/physmamba_interface.yaml --training configs/training/physmamba_3ep.yaml --parallel 2 --nproc-per-node 1
+uv run python main.py --datasets pure_hpc --test-participant-dataset pure_hpc "${FOLDS[@]}" --config configs/original_model_config/physmamba_FS30_W4.27S4.27_RGB_PPG_H128W128.yaml --epochs 3 --batch-size 4 --num-workers 4 --parallel 2 --nproc-per-node 1

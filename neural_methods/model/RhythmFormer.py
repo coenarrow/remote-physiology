@@ -48,8 +48,11 @@ three adaptive stages, each an exact no-op at the paper's shape:
 
 No parameter is added, renamed or resized, so the upstream checkpoint loads
 strictly. A clip backbone on the multi-signal contract: ``(B, C_in, T, H, W)``
-in, ``(B, 1, T)`` out, preprocessing done by the dataset, the loss owned by
-the trainer. All reshaping is einops.
+raw frames in, ``(B, 1, T)`` out, the loss owned by the trainer. The input
+preprocessing is the network's own first stage: the raw clip is z-scored
+(``Standardize``, the toolbox's Standardized block, with the clip's own
+statistics) before the stem, which is what the published network was fed.
+All reshaping is einops.
 """
 
 import math
@@ -60,6 +63,7 @@ from timm.layers import DropPath, trunc_normal_
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from neural_methods.model.modules.standardize import Standardize
 from neural_methods.model.shared import (
     nearest_multiple, require_min_frame, sum_spatial,
 )
@@ -441,6 +445,8 @@ class RhythmFormer(nn.Module):
         #: The deepest stage patches time by 8, so the window must divide by it.
         self.temporal_stride = max(t_patchs)
 
+        # Input preprocessing: raw clip -> standardised clip
+        self.input_norm = Standardize()
         self.Fusion_Stem = Fusion_Stem(in_channels=in_channels, dim=stem_dim)
         self.patch_embedding = nn.Conv3d(
             stem_dim, embed_dim[0], kernel_size=(1, PATCH_SPATIAL, PATCH_SPATIAL),
@@ -481,11 +487,11 @@ class RhythmFormer(nn.Module):
         return (self.ConvBlockLast,)
 
     def forward(self, x):
-        """``(B, in_channels, T, H, W)`` -> ``(B, 1, T)``."""
+        """``(B, in_channels, T, H, W)`` raw clip -> ``(B, 1, T)``."""
         frames, height, width = x.shape[2:]
         require_min_frame("RhythmFormer", MIN_FRAME, height, width)
 
-        x = self.Fusion_Stem(rearrange(x, "b c t h w -> b t c h w"))
+        x = self.Fusion_Stem(rearrange(self.input_norm(x), "b c t h w -> b t c h w"))
         # The token grid is read off the stem's output, not asserted to be H/4.
         x = rearrange(x, "(b t) c h w -> b c t h w", t=frames)
         x = self.patch_embedding(x)            # [B, dim, T, H/16, W/16]

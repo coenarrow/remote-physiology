@@ -38,8 +38,11 @@ stages around that network, both exact no-ops at the paper's shape:
 
 No parameter is added, renamed or resized, so the upstream checkpoint loads
 strictly. A clip backbone on the multi-signal contract: ``(B, C_in, T, H, W)``
-in, ``(B, 1, T)`` out, preprocessing done by the dataset, the loss owned by
-the trainer. All reshaping is einops.
+raw frames in, ``(B, 1, T)`` out, the loss owned by the trainer. The input
+preprocessing is the network's own first stage: the raw clip is
+difference-normalised (``DiffNormalize``, the toolbox's DiffNormalized block,
+with the clip's own statistics) before the stem, which is what the published
+network was fed. All reshaping is einops.
 """
 
 import math
@@ -49,6 +52,7 @@ from einops import einsum, rearrange, reduce
 from torch import nn
 from torch.nn import functional as F
 
+from neural_methods.model.modules.diffnormalize import DiffNormalize
 from neural_methods.model.shared import (
     nearest_multiple, require_min_frame, sum_spatial,
 )
@@ -378,6 +382,8 @@ class PhysFormer(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.gra_sharp = float(gra_sharp)
+        # Input preprocessing: raw clip -> difference-normalised clip
+        self.input_norm = DiffNormalize()
         self.backbone = ViT_ST_ST_Compact3_TDC_gra_sharp(
             patches=patches, dim=dim, ff_dim=ff_dim, num_heads=num_heads,
             num_layers=num_layers, dropout_rate=dropout_rate, theta=theta,
@@ -385,8 +391,8 @@ class PhysFormer(nn.Module):
         )
 
     def forward(self, video):
-        """``(B, in_channels, T, H, W)`` -> ``(B, 1, T)``; attention maps are dropped."""
-        rPPG, *_ = self.backbone(video, self.gra_sharp)
+        """``(B, in_channels, T, H, W)`` raw clip -> ``(B, 1, T)``; attention maps are dropped."""
+        rPPG, *_ = self.backbone(self.input_norm(video), self.gra_sharp)
         return rPPG
 
     def output_layers(self):

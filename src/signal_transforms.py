@@ -11,14 +11,14 @@ signal (ABP, CVP, SpO2) carries meaning in its physical units, so it is fed to
 the model raw and scored on level as well as shape; a ``shape`` signal (PPG,
 ECG, respiration) is per-window normalised and only its waveform matters.
 
-**Label normalisation.** Every mode in ``LABEL_TRANSFORMS`` shares one
-signature — ``(trace, stats) -> trace`` — and an exact inverse, both keyed
-by the mode's name in the interface's ``LABEL_PREPROCESSING``. The dataset
-computes ``finite_stats`` of the window once, normalises with them, and
-stamps them into the batch as ``label_stats`` in physical units; the trainer
-inverts predictions and labels with the same stats, so the round trip is
-exact. The stats broadcast against a per-sample ``(T,)`` trace and a
-collated ``(B, T)`` batch alike.
+**Label normalisation.** Follows from the class, never from a config key:
+a shape signal is z-scored over the window, an absolute signal is left raw
+(``label_mode``). Each mode is a ``(trace, stats) -> trace`` forward with an
+exact inverse. The dataset computes ``finite_stats`` of the window once,
+normalises with them, and stamps them into the batch as ``label_stats`` in
+physical units; the trainer inverts predictions and labels with the same
+stats, so the round trip is exact. The stats broadcast against a per-sample
+``(T,)`` trace and a collated ``(B, T)`` batch alike.
 """
 
 import torch
@@ -192,31 +192,28 @@ def _zscore_inverse(sig, stats):
     return sig * _align(stats["std"], sig).clamp_min(EPS) + _align(stats["mean"], sig)
 
 
-def _minmax(trace, stats):
-    span = (_align(stats["max"], trace) - _align(stats["min"], trace)).clamp_min(EPS)
-    return (trace - _align(stats["min"], trace)) / span
-
-
-def _minmax_inverse(sig, stats):
-    span = (_align(stats["max"], sig) - _align(stats["min"], sig)).clamp_min(EPS)
-    return sig * span + _align(stats["min"], sig)
-
-
-#: ``LABEL_PREPROCESSING`` vocabulary: mode -> ``(forward, inverse)``, each
-#: ``(trace, stats) -> trace``. ``raw`` leaves physical units untouched — the
-#: mode for absolute-class signals; the other two are per-window.
-LABEL_TRANSFORMS = {
+#: mode -> ``(forward, inverse)``, each ``(trace, stats) -> trace``. ``raw``
+#: leaves physical units untouched; ``zscore`` is per-window.
+_LABEL_MODES = {
     "raw": (_raw, _raw),
     "zscore": (_zscore, _zscore_inverse),
-    "minmax": (_minmax, _minmax_inverse),
 }
 
 
-def normalise_label(trace: Tensor, stats: dict, mode: str) -> Tensor:
-    """Forward normalisation with precomputed ``stats``, never recomputed."""
-    return LABEL_TRANSFORMS[mode][0](trace, stats)
+def label_mode(sig) -> str:
+    """How this signal's label reaches the model: ``raw`` for an absolute
+    signal (the level is part of the prediction), ``zscore`` for a shape
+    signal (only the waveform matters). Fixed by the registry, not by any
+    config."""
+    return "raw" if is_absolute(sig) else "zscore"
 
 
-def denormalise_label(sig: Tensor, stats: dict, mode: str) -> Tensor:
-    """The exact inverse: a normalised trace back in physical units."""
-    return LABEL_TRANSFORMS[mode][1](sig, stats)
+def normalise_label(trace: Tensor, stats: dict, sig) -> Tensor:
+    """Forward normalisation of one window of ``sig`` with precomputed
+    ``stats``, never recomputed."""
+    return _LABEL_MODES[label_mode(sig)][0](trace, stats)
+
+
+def denormalise_label(trace: Tensor, stats: dict, sig) -> Tensor:
+    """The exact inverse: a normalised window of ``sig`` back in physical units."""
+    return _LABEL_MODES[label_mode(sig)][1](trace, stats)

@@ -26,7 +26,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.interface import InterfaceConfig
+from src.model_config import InterfaceConfig
+from src.signal_transforms import label_mode
 
 RECORDS_DIR = "test_records"
 META_NAME = "meta.json"
@@ -126,7 +127,7 @@ def write_records(records, out_dir, interface: InterfaceConfig, meta: dict) -> P
         "stride_frames": interface.stride_frames,
         "channels": list(interface.CHANNELS),
         "traces": list(interface.TRACES),
-        "label_preprocessing": dict(interface.LABEL_PREPROCESSING),
+        "label_preprocessing": {t: label_mode(t) for t in interface.TRACES},
         **meta,
         "n_windows": len(records),
     }

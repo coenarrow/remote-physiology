@@ -2,10 +2,12 @@
 
     uv run python scripts/run.py --datasets pure \\
         --test-participant-dataset pure --test-participant-id 01 \\
-        --model physnet --interface configs/interfaces/physnet_interface.yaml \\
-        --training configs/training/physnet_training.yaml
+        --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml \\
+        --epochs 30 --batch-size 4 --num-workers 8
 
-One command is one fold. It fits the model by the recipe and writes the run
+One command is one fold. It fits the model by the recipe, for the epochs,
+batch size and workers the flags say (``--no-gpu`` keeps it off the GPU;
+otherwise a GPU is used when there is one), and writes the run
 directory — ``runs/<MODEL>_<DATASET>.<held-out participant or all>-..._<YYYYMMDDHHMM>``,
 e.g. ``runs/PHYSMAMBA_PURE.all-NECKFLIX.24_202609091000``, or
 ``MODEL_FILE_NAME`` if the recipe names it — holding ``config.yaml``
@@ -35,20 +37,20 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import ConfigError                                # noqa: E402
-from src.datasets import load_dataset_configs, load_stores       # noqa: E402
+from src.dataset_config import load_dataset_configs              # noqa: E402
+from src.datasets import load_stores                             # noqa: E402
 from src.distributed import init_runtime, shutdown               # noqa: E402
 from src.evaluation.recording import score_recording             # noqa: E402
 from src.experiment import (                                     # noqa: E402
-    add_config_arguments, add_limit_argument, add_split_arguments,
-    check_split_arguments, compile_config, limit_windows, print_model,
-    print_runtime, print_setup, print_split, print_stores, run_name,
-    split_stores, test_windows, train_windows,
+    add_config_arguments, add_limit_argument, add_run_arguments,
+    add_split_arguments, check_split_arguments, compile_config, limit_windows,
+    print_model, print_runtime, print_setup, print_split, print_stores,
+    run_name, run_settings, split_stores, test_windows, train_windows,
 )
-from src.interface import load_interface                         # noqa: E402
-from src.models import build_model, load_model_config            # noqa: E402
+from src.model_config import load_config                         # noqa: E402
+from src.models import build_model                               # noqa: E402
 from src.outputs import META_NAME, RECORDS_DIR, write_records    # noqa: E402
 from src.trainer import CHECKPOINT_NAME, DEFAULT_RUNS_DIR, Trainer  # noqa: E402
-from src.training import load_training                           # noqa: E402
 
 SCRIPT = "scripts/run.py"
 #: One directory per epoch under the run directory, 1-based like ``losses.csv``.
@@ -59,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = add_config_arguments(argparse.ArgumentParser(
         description="Train one model holding one participant out or none, run "
                     "it over the held-out participant and score the records."))
+    add_run_arguments(parser)
     add_split_arguments(parser)
     parser.add_argument(
         "--runs-dir", metavar="PATH", default=DEFAULT_RUNS_DIR,
@@ -88,22 +91,21 @@ def main(argv=None) -> Path:
     parser = build_parser()
     args = parser.parse_args(argv)
     check_split_arguments(parser, args)
+    run = run_settings(parser, args)
 
     try:
-        interface = load_interface(args.interface)
-        model_config = load_model_config(args.model, interface)
-        training = load_training(args.training)
-        print_setup(interface, model_config, training)
+        interface, model_config, training = load_config(args.config)
+        print_setup(interface, model_config, training, run)
         # Name the run now, before the process group exists: the name
         # carries the start minute, and every rank stamps it here, within
         # milliseconds of the launch, so they all land in one directory.
         run_dir = (Path(args.run_dir) if args.run_dir
-                   else Path(args.runs_dir) / run_name(args, training))
+                   else Path(args.runs_dir) / run_name(args, model_config, training))
         # Resolve device / precision / process group against this machine
         # first: under a launch that cannot run distributed, only rank 0
         # continues past this line.
-        runtime = init_runtime(training)
-        print_runtime(runtime, training)
+        runtime = init_runtime(training, run.gpu)
+        print_runtime(runtime, run)
         configs = load_dataset_configs(args.datasets)
         stores = load_stores(configs)
         print_stores(configs, stores)
@@ -123,9 +125,9 @@ def main(argv=None) -> Path:
 
     print(f"run: {run_dir}")
     config = compile_config(SCRIPT, argv, args, interface, model_config, training,
-                            runtime, configs, split, run_dir)
+                            run, runtime, configs, split, run_dir)
     try:
-        trainer = Trainer(model, interface, training, runtime, run_dir, config)
+        trainer = Trainer(model, interface, training, run, runtime, run_dir, config)
     except ConfigError as err:
         parser.error(str(err))
     meta = {"dataset": args.test_participant_dataset,

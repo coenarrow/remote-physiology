@@ -7,23 +7,29 @@ of a backbone, with each requirement marked. Copy it to
 the published network. Then register it in ``src/models.py`` and write
 ``configs/models/<name>.yaml`` — the steps are in ``docs/adding_a_model.md``.
 
-What a backbone is, in one paragraph: a function from one preprocessed
-clip (or frame) to one trace. It never sees the batch dict, never knows which
-trace it is predicting, never normalises its input and never computes a
-loss. The wrapper makes one copy per trace and owns the dict; the dataset
-does the preprocessing; the trainer owns the loss.
+What a backbone is, in one paragraph: a function from one raw clip to one
+trace. It never sees the batch dict, never knows which trace it is
+predicting and never computes a loss. It does normalise its own input: the
+dataset hands over raw resized pixels, and whatever the published network
+was fed (standardised frames, frame differences) the backbone applies
+itself as its first stage, from ``neural_methods.model.modules``. The
+wrapper makes one copy per trace and owns the dict; the trainer owns the
+loss.
 """
 
 import torch
 import torch.nn as nn
 from einops import rearrange
 
+from neural_methods.model.modules.diffnormalize import DiffNormalize
+
 
 class TemplateNet(nn.Module):
     """``(B, C_in, T, H, W) -> (B, 1, T)``: a clip backbone.
 
-    For a per-frame backbone (``per_frame=True`` in the builder) the contract
-    is instead ``(N, C_in, H, W) -> (N, 1)``; see ``DeepPhys.py``.
+    Every backbone takes a whole clip. A published network that ran on single
+    frames folds ``T`` into the batch axis itself after normalising the clip;
+    see ``DeepPhys.py``.
     """
 
     # INTERIM ONLY, for a migration that has not got there yet. The
@@ -41,12 +47,17 @@ class TemplateNet(nn.Module):
 
     def __init__(self, in_channels: int = 3, hidden: int = 16):
         """``in_channels`` is REQUIRED and is the only width the wrapper
-        always passes: ``len(interface.CHANNELS) * len(input_blocks)``.
-        Anything else the interface determines (an ``img_size`` for a dense
-        layer, say) is an argument the builder passes. Every published
-        hyperparameter is a default here, never a YAML key."""
+        always passes: ``len(interface.CHANNELS)``. Anything else the
+        interface determines (an ``img_size`` for a dense layer, say) is an
+        argument the builder passes. Every published hyperparameter is a
+        default here, never a YAML key."""
         super().__init__()
         self.in_channels = in_channels
+        # REQUIRED: the input preprocessing the paper's DATA_TYPE named, as
+        # the network's own first stage. ``DiffNormalize`` for a
+        # DiffNormalized paper, ``Standardize`` for a Standardized one, a
+        # bare ``nn.Identity()`` for a paper that took Raw frames.
+        self.input_norm = DiffNormalize()
         self.features = nn.Sequential(
             nn.Conv3d(in_channels, hidden, kernel_size=(3, 3, 3), padding=(1, 1, 1)),
             nn.BatchNorm3d(hidden),
@@ -65,12 +76,11 @@ class TemplateNet(nn.Module):
     def forward(self, video: torch.Tensor) -> torch.Tensor:
         """``(B, C_in, T, H, W) -> (B, 1, T)``.
 
-        The input is already resized and preprocessed by the dataset: the
-        interface's channels stacked in order, once per named preprocessing
-        block, blocks concatenated in the order the builder lists them. A
-        backbone reading two blocks (DeepPhys) slices them off the channel
-        axis itself.
+        The input is raw: the interface's channels stacked in order, resized
+        by the dataset and nothing else. Normalise first. A two-branch
+        network (DeepPhys, TS-CAN) runs the clip through two normalisers and
+        feeds one branch each.
         """
-        x = self.features(video)
+        x = self.features(self.input_norm(video))
         x = rearrange(x, "b c t 1 1 -> b c t")      # einops, never view/permute
         return self.readout(x)                       # (B, 1, T), three dims

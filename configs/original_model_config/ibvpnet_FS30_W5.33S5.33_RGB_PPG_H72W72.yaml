@@ -1,0 +1,23 @@
+MODEL:
+  NAME: iBVPNet
+
+# iBVPNet paper interface. This is the rPPG-Toolbox configuration of iBVPNet
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 5.333333       # 160 frames (160 / 30), the upstream CHUNK_LENGTH
+  WINDOW_STRIDE: 5.333333        # seconds the test set steps between windows
+  CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
+  TRACES: [PPG]                  # the paper predicts BVP and nothing else
+  RESIZE: {H: 72, W: 72}         # upstream iBVPNet frame size
+  LOSS:                          # upstream trains iBVPNet with negative Pearson
+    PPG: {NEGPEARSON: 1.0}
+
+# iBVPNet paper recipe (PURE_PURE_iBVP_iBVPNet_BASIC.yaml and iBVPNetTrainer).
+# The paper's 30 epochs and batch 4 are the launcher's flags: --epochs 30 --batch-size 4
+TRAIN:
+  OPTIMIZER: Adam              # upstream: optim.Adam(lr), no weight decay
+  LR: 1e-3
+  WEIGHT_DECAY: 0.0
+  SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
+  PRECISION: float32           # upstream trains in full precision

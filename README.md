@@ -12,6 +12,22 @@ and others as they appear.
 
 One store per recording in a **zarr cache** written by the preprocessor.
 
+**Labels are normalised by signal, not by config.** Every label window is
+handled one of two ways, fixed by which signal it is
+([`src/signal_transforms.py`](src/signal_transforms.py), the `SIGNALS`
+table):
+
+| Signals | Label the model trains on |
+| --- | --- |
+| PPG, ECG, respiration (RR) | z-scored over the window: only the waveform matters |
+| everything else (ABP, CVP, SpO2, ...) | raw, in physical units: the level is part of the prediction |
+
+The window's mean and standard deviation ride in the batch, so predictions
+and labels come back in physical units exactly. There is no interface key
+for this and no switch; a new signal picks its side when it is added to the
+table. Frames likewise reach every model raw, and each backbone applies its
+own published input normalisation as its first stage.
+
 
 
 ## Install
@@ -64,62 +80,67 @@ one.
 
 ## Algorithms
 
-**On the multi-signal contract today**, in name order: BigSmall, DeepPhys,
+**On the multi-signal contract today**, in name order: DeepPhys,
 EfficientPhys, FactorizePhys, PhysFormer, PhysMamba, PhysNet, RhythmFormer,
-TS-CAN, iBVPNet. Two of them, FactorizePhys and iBVPNet, read `Raw` frames,
-which the standard interface
-([`configs/interfaces/interface_neckflix.yaml`](configs/interfaces/interface_neckflix.yaml))
-does not produce yet; their paper interfaces do.
+TS-CAN, iBVPNet.
 
 Each one trains on the PURE dataset holding out its first participant, on
 the model's own paper interface and paper training recipe (the rPPG-Toolbox
-definition of that model; see `configs/interfaces/` and `configs/training/`).
-A fold is one command. It fits the model and, after every epoch, runs that
-epoch's model over the held-out participant and scores the records:
+definition of that model). A run's config is one file with three sections:
+`MODEL` (the architecture and its switches), `INTERFACE` (rate, window,
+channels, traces, frame size, loss) and `TRAIN` (the recipe: optimiser,
+rate, decay, schedule, precision). The paper
+configs live in `configs/original_model_config/`, the Neckflix ones in
+`configs/combined_model_config/`. How long and on what a run trains are
+flags, not config: `--epochs` (default 1), `--batch-size` (default 4),
+`--num-workers` (default 8) and `--no-gpu` (otherwise a GPU is used when
+there is one, else the CPU with a warning). A fold is one command. It fits
+the model and, after every epoch, runs that epoch's model over the held-out
+participant and scores the records:
 
 ```bash
-# fits the model; writes runs/PHYSNET_PURE.01_<YYYYMMDDHHMM>/ (config.yaml, losses.csv, model.pt = the latest epoch)
+# fits the model; writes runs/DEEPPHYS_PURE.01_<YYYYMMDDHHMM>/ (config.yaml, losses.csv, model.pt = the latest epoch)
 # after every epoch: runs it over the held-out participant and scores the records; writes epoch_NN/model.pt and
 #   epoch_NN/test_records/ with <TRACE>_beats.csv, signals.csv, rates.csv and <TRACE>.png beside each recording's trace tables
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physnet --interface configs/interfaces/physnet_interface.yaml --training configs/training/physnet_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 ```
 
 With no held-out participant it trains on every admitted store, as
 `runs/<MODEL>_<DATASET>.all-..._<YYYYMMDDHHMM>/`, and stops there. Add
-`--limit-windows 8` for a wiring check.
+`--limit-windows 8 --epochs 2` for a wiring check.
 
-The command per model:
+The command per model. Each file under `configs/original_model_config/` is
+named `<model>_FS<rate>_W<window s>S<stride s>_<channels>_<traces>_H<h>W<w>`
+after the paper interface it encodes; the epochs after `--epochs` are the
+paper's:
 
 ```bash
-# BigSmall
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model bigsmall --interface configs/interfaces/bigsmall_interface.yaml --training configs/training/bigsmall_training.yaml
-
 # DeepPhys
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model deepphys --interface configs/interfaces/deepphys_interface.yaml --training configs/training/deepphys_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 
 # EfficientPhys
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model efficientphys --interface configs/interfaces/efficientphys_interface.yaml --training configs/training/efficientphys_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/efficientphys_FS30_W6S6_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 
 # FactorizePhys
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model factorizephys --interface configs/interfaces/factorizephys_interface.yaml --training configs/training/factorizephys_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/factorizephys_FS30_W5.33S5.33_RGB_PPG_H72W72.yaml --epochs 10 --batch-size 4
 
 # PhysFormer
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physformer --interface configs/interfaces/physformer_interface.yaml --training configs/training/physformer_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physformer_FS30_W5.33S5.33_RGB_PPG_H128W128.yaml --epochs 10 --batch-size 4
 
 # PhysMamba
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physmamba --interface configs/interfaces/physmamba_interface.yaml --training configs/training/physmamba_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physmamba_FS30_W4.27S4.27_RGB_PPG_H128W128.yaml --epochs 20 --batch-size 4
 
 # PhysNet
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model physnet --interface configs/interfaces/physnet_interface.yaml --training configs/training/physnet_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physnet_FS30_W4.27S4.27_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 
 # RhythmFormer
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model rhythmformer --interface configs/interfaces/rhythmformer_interface.yaml --training configs/training/rhythmformer_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/rhythmformer_FS30_W5.33S5.33_RGB_PPG_H128W128.yaml --epochs 30 --batch-size 4
 
 # TS-CAN
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model tscan --interface configs/interfaces/tscan_interface.yaml --training configs/training/tscan_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/tscan_FS30_W6S6_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 
 # iBVPNet
-uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --model ibvpnet --interface configs/interfaces/ibvpnet_interface.yaml --training configs/training/ibvpnet_training.yaml
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/ibvpnet_FS30_W5.33S5.33_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 ```
 
 Outputs land in `runs/<MODEL>_PURE.01_<YYYYMMDDHHMM>/` (the model, each
@@ -157,13 +178,13 @@ level.
 
 ```bash
 # every participant of PURE in turn, one fold at a time
-uv run python main.py --datasets pure --test-participant-dataset pure --model physmamba --interface configs/interfaces/physmamba_interface.yaml --training configs/training/physmamba_training.yaml
+uv run python main.py --datasets pure --test-participant-dataset pure --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 
 # three Neckflix participants, two folds at a time on one GPU each
-uv run python main.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 32 33 34 --parallel 2 --model physmamba --interface configs/interfaces/interface_neckflix.yaml --training configs/training/physmamba_training.yaml
+uv run python main.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 32 33 34 --parallel 2 --config configs/combined_model_config/physmamba_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 20
 
 # one fold across 4 GPUs under torch.distributed.run
-uv run python main.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 32 --nproc-per-node 4 --model physmamba --interface configs/interfaces/interface_neckflix.yaml --training configs/training/physmamba_training.yaml
+uv run python main.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 32 --nproc-per-node 4 --config configs/combined_model_config/physmamba_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 20
 ```
 
 `--test-participant-id` names the folds, in that order; without it every
@@ -189,11 +210,11 @@ walks a run through end to end.
 
 To put another architecture on the contract, new or migrated from upstream,
 follow [docs/adding_a_model.md](docs/adding_a_model.md): one backbone module,
-one config class and builder, three YAMLs (the model config, the paper
-interface and the paper training recipe), one smoke test, and the command
-above. Templates to copy sit
-at [`configs/models/_model_template.yaml`](configs/models/_model_template.yaml)
-and [`neural_methods/model/_template.py`](neural_methods/model/_template.py).
+one registry line and builder, one config YAML (the paper's model section,
+interface and training recipe), one smoke test, and the command above.
+Starting points to copy are
+[`neural_methods/model/_template.py`](neural_methods/model/_template.py) and
+DeepPhys's [config file](configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml).
 
 The original papers are linked from the
 [upstream README](https://github.com/ubicomplab/rPPG-Toolbox#notebook-algorithms).

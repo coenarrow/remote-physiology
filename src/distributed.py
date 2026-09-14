@@ -1,15 +1,17 @@
 """Where a run executes: which device, how many processes, and what to do
 when the machine cannot give what the recipe asked for.
 
-The recipe asks for a device and a precision; the launcher may ask for
-several processes. This module resolves those against the machine and
-returns one :class:`Runtime`. Every downgrade is a warning, never silence:
+The recipe asks for a precision; the launcher says whether a GPU may be
+used (``--no-gpu`` says not) and may ask for several processes. This module
+resolves those against the machine and returns one :class:`Runtime`. Every
+downgrade is a warning, never silence:
 
 * launched under ``torch.distributed.run`` but distributed training cannot
   work here (no backend, fewer GPUs than ranks, no accelerator at all, Apple
   MPS) -> rank 0 carries on as a single process, every other rank exits;
-* ``DEVICE: gpu`` with no CUDA and no MPS -> CPU, and a non-float32
-  precision drops to float32 with it;
+* a GPU wanted but neither CUDA nor MPS present -> CPU, and a non-float32
+  precision drops to float32 with it; ``--no-gpu`` with a non-float32
+  precision drops it the same way;
 * CUDA without NCCL (Windows) -> the Gloo backend, which works but is slower.
 
 Single-process runs never touch ``torch.distributed`` at all.
@@ -24,7 +26,7 @@ from dataclasses import dataclass
 import torch
 import torch.distributed as dist
 
-from src.training import TrainingConfig
+from src.model_config import TrainingConfig
 
 
 @dataclass(frozen=True)
@@ -53,32 +55,35 @@ def _cuda_devices() -> int:
     return torch.cuda.device_count() if torch.cuda.is_available() else 0
 
 
-def _resolve_device(training: TrainingConfig, local_rank: int) -> tuple[torch.device, str]:
+def _resolve_device(training: TrainingConfig, use_gpu: bool,
+                    local_rank: int) -> tuple[torch.device, str]:
     """The device and precision this process will actually use."""
-    if training.DEVICE == "cpu":
-        return torch.device("cpu"), training.PRECISION
-    if _cuda_devices() > 0:
+    if use_gpu and _cuda_devices() > 0:
         return torch.device("cuda", local_rank), training.PRECISION
-    if torch.backends.mps.is_available():
+    if use_gpu and torch.backends.mps.is_available():
         return torch.device("mps"), training.PRECISION
     precision = training.PRECISION
     note = ""
     if precision != "float32":
         note = f"; PRECISION {precision} needs an accelerator, using float32"
         precision = "float32"
-    warnings.warn(
-        f"DEVICE is gpu but this {platform.system()} machine has neither CUDA "
-        f"nor MPS; falling back to CPU{note}")
+    if use_gpu:
+        warnings.warn(
+            f"this {platform.system()} machine has neither CUDA nor MPS; "
+            f"falling back to CPU{note}")
+    elif note:
+        warnings.warn(f"--no-gpu{note}")
     return torch.device("cpu"), precision
 
 
 def _distributed_blocker(device: torch.device, world_size: int,
-                         training: TrainingConfig) -> str | None:
+                         use_gpu: bool) -> str | None:
     """Why a multi-process launch cannot be a distributed run here, or None.
 
-    A recipe that *asks* for CPU may run Gloo DDP across CPU processes (how a
-    dev box exercises the distributed path); one that asked for a GPU and
-    fell back to CPU may not — that is a degraded run, kept to one process.
+    A launch that *asks* for CPU (``--no-gpu``) may run Gloo DDP across CPU
+    processes (how a dev box exercises the distributed path); one that
+    wanted a GPU and fell back to CPU may not — that is a degraded run, kept
+    to one process.
     """
     if not dist.is_available():
         return "torch.distributed is not available in this build"
@@ -86,13 +91,14 @@ def _distributed_blocker(device: torch.device, world_size: int,
         return "distributed training is not supported over Apple MPS"
     if device.type == "cuda" and _cuda_devices() < world_size:
         return f"only {_cuda_devices()} CUDA device(s) are visible"
-    if device.type == "cpu" and training.DEVICE == "gpu":
+    if device.type == "cpu" and use_gpu:
         return "no accelerator is available"
     return None
 
 
-def init_runtime(training: TrainingConfig) -> Runtime:
-    """Resolve the recipe against this machine and the launcher's environment.
+def init_runtime(training: TrainingConfig, use_gpu: bool = True) -> Runtime:
+    """Resolve the recipe and the launcher's device choice against this
+    machine and the launcher's environment.
 
     Call once, first thing, in every process. Under a multi-process launch that
     cannot run distributed, the non-main processes exit here so exactly one
@@ -101,12 +107,13 @@ def init_runtime(training: TrainingConfig) -> Runtime:
     world_size = _launched_world_size()
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    device, precision = _resolve_device(training, local_rank if world_size > 1 else 0)
+    device, precision = _resolve_device(training, use_gpu,
+                                        local_rank if world_size > 1 else 0)
 
     if world_size <= 1:
         return Runtime(device=device, precision=precision)
 
-    blocker = _distributed_blocker(device, world_size, training)
+    blocker = _distributed_blocker(device, world_size, use_gpu)
     if blocker is not None:
         if rank != 0:
             sys.exit(0)

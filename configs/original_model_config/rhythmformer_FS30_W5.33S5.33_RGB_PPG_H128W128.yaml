@@ -1,0 +1,23 @@
+MODEL:
+  NAME: RhythmFormer
+
+# RhythmFormer paper interface. This is the rPPG-Toolbox configuration of RhythmFormer
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 5.333333       # 160 frames (160 / 30), the upstream CHUNK_LENGTH
+  WINDOW_STRIDE: 5.333333        # seconds the test set steps between windows
+  CHANNELS: [R, G, B]            # ordered camera channels, subset of R,G,B,I,D
+  TRACES: [PPG]                  # the paper predicts BVP and nothing else
+  RESIZE: {H: 128, W: 128}       # upstream RhythmFormer frame size
+  LOSS:                          # upstream: negative Pearson (weighted 0.2) plus frequency
+    PPG: {NEGPEARSON: 1.0}       # cross-entropy and heart-rate KL terms the loss module lacks
+
+# RhythmFormer paper recipe (PURE_PURE_UBFC-rPPG_RHYTHMFORMER_BASIC.yaml and RhythmFormerTrainer).
+# The paper's 30 epochs and batch 4 are the launcher's flags: --epochs 30 --batch-size 4
+TRAIN:
+  OPTIMIZER: AdamW             # upstream: optim.AdamW(lr, weight_decay=0)
+  LR: 9e-3
+  WEIGHT_DECAY: 0.0            # upstream decays nothing
+  SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
+  PRECISION: float32           # upstream trains in full precision

@@ -34,4 +34,4 @@ if [ "$#" -gt 0 ]; then
     FOLDS=(--test-participant-id "$@")
 fi
 
-uv run python main.py --datasets neckflix --test-participant-dataset neckflix "${FOLDS[@]}" --model physmamba --interface configs/interfaces/interface_neckflix.yaml --training configs/training/physmamba_training.yaml --parallel 1 --nproc-per-node 4
+uv run python main.py --datasets neckflix --test-participant-dataset neckflix "${FOLDS[@]}" --config configs/combined_model_config/physmamba_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 20 --batch-size 4 --num-workers 4 --parallel 1 --nproc-per-node 4
