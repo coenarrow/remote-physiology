@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=PURE_Cache
-#SBATCH --partition=work
+#SBATCH --partition=pophealth
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -38,7 +38,7 @@ if [ ! -d "${PURE_RAW}" ]; then
     exit 1
 fi
 
-uv run --project dataset/cachers/pure pure-preprocess --input-dir "${PURE_RAW}" --output-dir "${PURE_CACHE}" --resize 256 256 --num-workers 4
+uv run --project dataset/cachers/pure pure-preprocess --input-dir "${PURE_RAW}" --output-dir "${PURE_CACHE}" --num-workers 4
 
 echo "stores written: $(ls -d "${PURE_CACHE}"/*.zarr | wc -l)"
 
