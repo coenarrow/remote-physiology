@@ -1,0 +1,31 @@
+# Synthetic neck: which stores participate. Nothing here about channels,
+# traces, windows or rates — that is the interface's business.
+#
+# The stores are written by `synthetic-neck generate --zarr` (the submodule at
+# tools/synthetic_datasets/synthetic_neck); dataset/data_loader/SYNTHETIC_NECK.md
+# is their cache spec. FILTERS is keyed by the store's own root attrs, exactly
+# as the generator writes them. Every entry carries both an `include` and an
+# `exclude` list; an empty list is no constraint on that side. A store is
+# admitted when it passes every entry.
+#
+# Values compare as strings. A store lacking an attr (or carrying null) fails
+# an include on it and passes an exclude. Nested attrs are addressed with dots
+# (`synthetic_neck.params.trace.heart_rate_bpm`). `FILTERS: {}` admits every
+# store.
+#
+# Filterable root attrs (one store = one sample, perspective "1"; rgb, plus ir
+# and depth when the sample drew them):
+#   participant        '1', '2', ...; the sample index. Ids collide with other
+#                      datasets' ids, so hold one out with
+#                      --test-participant-dataset synthetic_neck
+#   recording          same value as participant
+#   posture            supine | recumbent | sitting (Neckflix's spelling)
+#   monk_tone          Monk skin tone 1..10, or null when not drawn
+#   preset             lesson | benchmark | neckflix | custom
+#   seed               the sample's seed (int)
+#   synthetic_neck.*   the generator's full per-sample metadata: seed, preset,
+#                      version, frame_size, fps, n_frames, streams, config.*,
+#                      params.* (the drawn values), geometry_px.*, derived.*,
+#                      visibility.* (green-channel SNR and draw attempts)
+CACHED_PATH: "D:/synthetic_neck_zarr"
+FILTERS: {}
