@@ -22,6 +22,17 @@ controlled degradations), `neckflix` (ranges calibrated from Neckflix).
 seed (sample `i` uses `seed + i`), so a cache can be rebuilt from its
 `dataset.json`.
 
+**Clip length versus the model window.** The default clip is
+`video.duration_s` = 10 s at 30 fps, i.e. 300 frames. A model window of 10 s
+at FS 30 is also 300 frames, so each sample yields exactly one window:
+random-window training sees a fixed crop, not a resampled one. A config
+whose window is longer than the clip skips every synthetic store, with a
+warning — `src/inputs.py`'s per-store frame-count check (around line 197)
+skips any sample whose `frame_count` is shorter than the window's native
+span. If you need longer or more varied clips, set
+`--set video.duration_s=<seconds>` to at least the window length, and longer
+if you want window variety.
+
 ## What the generator writes
 
 ```text
@@ -90,6 +101,12 @@ The ids `"1"`, `"2"`, ... collide with other datasets' ids. Hold out a
 participant together with its dataset:
 `--test-participant-dataset synthetic_neck --test-participant-id 3`. The
 dataset name is the stem of `configs/datasets/synthetic_neck.yaml`.
+
+**LOSO granularity.** `participant` is the sample index, so a
+leave-one-subject-out sweep (`main.py`) with no `--test-participant-id` runs
+one fold per unique participant id admitted for the dataset — one fold per
+sample, since every sample is its own participant. A 200-sample cache means
+200 folds.
 
 ## Liberties taken
 

@@ -26,6 +26,9 @@
 #   synthetic_neck.*   the generator's full per-sample metadata: seed, preset,
 #                      version, frame_size, fps, n_frames, streams, config.*,
 #                      params.* (the drawn values), geometry_px.*, derived.*,
-#                      visibility.* (green-channel SNR and draw attempts)
+#                      visibility.* (green-channel SNR and draw attempts),
+#                      plus rgbid_streams, depth_units_mm and vessel_ids —
+#                      folder-layout fields kept verbatim, describing the
+#                      generator's folder output rather than this store
 CACHED_PATH: "D:/synthetic_neck_zarr"
 FILTERS: {}
