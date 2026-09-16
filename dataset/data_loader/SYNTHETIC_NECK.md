@@ -59,7 +59,13 @@ if you want window variety.
 
 - **Frames**: rendered square at `video.frame_size` (300 by default), with
   no resize at write time; resizing is consumer-side as usual. Chunks are
-  `(C, min(32, T), H, W)`.
+  `(C, min(32, T), H, W)`. Every stored signal has a footprint: the carotid
+  and jugular masks carry the delayed ABP and CVP (darkening in RGB and IR,
+  a depth lift); every skin pixel carries the PPG at neck timing (a uniform
+  darkening, weaker than the carotid, no depth lift); the whole frame
+  brightens and moves nearer with `rr`; ECG is present as rate only. The
+  submodule's `docs/superpowers/specs/2026-09-16-frame-physiology-design.md`
+  gives the terms.
 - **Timestamps**: synthesised from the nominal rate, starting at 0 and
   identical in every modality.
 - **`abp`, `cvp`, `ecg`, `ppg`, `rr`**: the generator's 1 kHz traces, linearly
@@ -76,14 +82,14 @@ if you want window variety.
   noise (1.6 mm sd at 1 m, growing with distance squared) is already in it.
 - **`ir`**: uint8, not Neckflix's uint16 Kinect IR; the two scales are not
   comparable.
-- **`vessel_ids`**: one static map per sample (nothing in the scene moves),
-  on the frames' pixel grid. It is not part of the contract, and the
+- **`vessel_ids`**: one static map per sample (nothing in the scene moves
+  in-plane), on the frames' pixel grid. It is not part of the contract, and the
   validator and the reader only walk root groups, so neither sees it. If
   frames are resized consumer-side, resize this map nearest-neighbour to
   match.
 - **Guaranteed pulse**: the generator redraws a sample, up to 20 times,
-  until the green channel's vessel-averaged cardiac SNR is at least 10 for
-  both vessels. IR and depth carry no such guarantee.
+  until the green channel's region-averaged cardiac SNR is at least 10 for
+  the artery, the vein and the skin. IR and depth carry no such guarantee.
 
 ### Root attributes
 
