@@ -20,6 +20,7 @@
 #                      --test-participant-dataset synthetic_neck
 #   recording          same value as participant
 #   posture            supine | recumbent | sitting (Neckflix's spelling)
+#   abp_site           radial | brachial; the stored ABP's catheter site
 #   monk_tone          Monk skin tone 1..10, or null when not drawn
 #   preset             lesson | benchmark | neckflix | custom
 #   seed               the sample's seed (int)

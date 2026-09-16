@@ -1,7 +1,8 @@
 # Synthetic Neck Cache Spec
 
 Synthetic neck videos with ground-truth arterial (ABP) and central venous
-(CVP) pressure, rendered by `synthetic-neck`, the generator carried as a
+(CVP) pressure, ECG, finger PPG and respiration, rendered by
+`synthetic-neck`, the generator carried as a
 submodule at `tools/synthetic_datasets/synthetic_neck`. There is no raw
 dataset and no separate cacher: `synthetic-neck generate --zarr` renders
 straight into stores that satisfy [the cache contract](../../docs/cache-contract.md).
@@ -46,7 +47,10 @@ if you want window variety.
         |   |-- timestamps_us/data  (T,) int64          round(i * 1e6 / fps)
         |   |-- video/data          (3, T, H, W) uint8   Delta + blosc-zstd
         |   |-- abp/data            (T,) float64        attrs: units="mmHg"
-        |   `-- cvp/data            (T,) float64        attrs: units="mmHg"
+        |   |-- cvp/data            (T,) float64        attrs: units="mmHg"
+        |   |-- ecg/data            (T,) float64        attrs: units="mV"
+        |   |-- ppg/data            (T,) float64        attrs: units="arb"
+        |   `-- rr/data             (T,) float64        attrs: units="arb"
         |-- ir/                     only when the sample drew IR + depth
         |   `-- video/data          (1, T, H, W) uint8, plus rgb's three siblings
         `-- depth/                  only when the sample drew IR + depth
@@ -58,9 +62,15 @@ if you want window variety.
   `(C, min(32, T), H, W)`.
 - **Timestamps**: synthesised from the nominal rate, starting at 0 and
   identical in every modality.
-- **`abp`, `cvp`**: the generator's 1 kHz traces, linearly interpolated at
-  the frame times. They are exactly the traces the pixels were rendered from,
-  and the same arrays sit under every modality.
+- **`abp`, `cvp`, `ecg`, `ppg`, `rr`**: the generator's 1 kHz traces, linearly
+  interpolated at the frame times, identical under every modality. ABP is
+  stored at a drawn catheter site (`abp_site`, radial or brachial); the
+  carotid pixels are rendered from it shifted back to central timing. ECG is
+  the McSharry ECGSYN waveform in mV. PPG is a finger pulse and `rr` a chest
+  excursion in [0, 1], both `arb`. All five share one cardiac timeline and
+  one respiratory waveform; the generator's spec
+  (`docs/superpowers/specs/2026-09-16-physiological-traces-design.md` in the
+  submodule) tabulates the delays and their sources.
 - **`depth`**: float32 millimetres. That is Neckflix's unit but not its
   integer dtype, so the pulse's 0.3-0.5 mm skin lift survives. Kinect-like
   noise (1.6 mm sd at 1 m, growing with distance squared) is already in it.
@@ -82,6 +92,7 @@ if you want window variety.
   "participant": "1",          # the sample index; every sample is its own participant
   "recording": "1",            # same value
   "posture": "recumbent",      # supine | recumbent | sitting, from trace.posture_deg 0 | 45 | 90
+  "abp_site": "radial",        # radial | brachial, from trace.abp_site
   "monk_tone": 6,              # Monk skin tone 1-10 when the preset draws one, else null
   "preset": "neckflix",
   "seed": 2027,                # this sample's seed: base seed 2026 + index 1
