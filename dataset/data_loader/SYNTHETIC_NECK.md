@@ -78,8 +78,9 @@ if you want window variety.
   (`docs/superpowers/specs/2026-09-16-physiological-traces-design.md` in the
   submodule) tabulates the delays and their sources.
 - **`depth`**: float32 millimetres. That is Neckflix's unit but not its
-  integer dtype, so the pulse's 0.3-0.5 mm skin lift survives. Kinect-like
-  noise (1.6 mm sd at 1 m, growing with distance squared) is already in it.
+  integer dtype, so the pulse's 0.3-0.5 mm skin lift and the 0.5-1.0 mm rise
+  of the whole frame with breathing survive. Kinect-like noise (1.6 mm sd at
+  1 m, growing with distance squared) is already in it.
 - **`ir`**: uint8, not Neckflix's uint16 Kinect IR; the two scales are not
   comparable.
 - **`vessel_ids`**: one static map per sample (nothing in the scene moves
