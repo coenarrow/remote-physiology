@@ -127,7 +127,7 @@ def main(argv=None) -> Path:
     config = compile_config(SCRIPT, argv, args, interface, model_config, training,
                             run, runtime, configs, split, run_dir)
     try:
-        trainer = Trainer(model, interface, training, run, runtime, run_dir, config)
+        trainer = Trainer(model, interface, model_config, training, run, runtime, run_dir, config)
     except ConfigError as err:
         parser.error(str(err))
     meta = {"dataset": args.test_participant_dataset,

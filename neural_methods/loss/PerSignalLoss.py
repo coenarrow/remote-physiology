@@ -298,8 +298,9 @@ def weight_losses(raw, weights):
 
     Reads    : ``raw`` = {module: {component: () tensor}} (unweighted,
                graph-attached), ``weights`` = {module: {component: float}};
-               a component with no weight entry is weighted 1.0, which is how
-               a model stage the config never mentions still contributes.
+               every component in ``raw`` must have a weight — the callers
+               compute only what the config names, so a missing weight is a
+               programming error, not a default.
     Returns  : ``(total, weighted)``. ``total`` is the scalar to
                backpropagate — the mean over modules of each module's weighted
                component sum, which is exactly the old mean-over-signals when
@@ -317,7 +318,7 @@ def weight_losses(raw, weights):
         module_weights = weights.get(module, {})
         module_total, entries = zero, {}
         for component, value in components.items():
-            term = module_weights.get(component, 1.0) * value
+            term = module_weights[component] * value
             entries[component] = float(term.detach())
             module_total = module_total + term
         entries['total'] = float(module_total.detach())

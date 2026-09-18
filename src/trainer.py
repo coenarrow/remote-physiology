@@ -11,7 +11,9 @@ write to. Everything it does is stated by the three configs it is handed:
 * the **run settings** (``src.model_config.RunSettings``, the launcher's
   flags) say for how many epochs, in what batches, with how many loader
   workers;
-* the **model** says nothing — it is a function from frames to predictions.
+* the **model config** says which of the backbone's own regularisers count
+  and their weights (``REGULARISATION``); the model itself is a function
+  from frames to predictions that may also report those terms.
 
 There is no validation split: LOSO scores on the held-out participant after
 every epoch (``fit``'s ``after_epoch`` hook), and the last epoch is the
@@ -59,7 +61,7 @@ from src.distributed import Runtime, all_reduce_sum, gather_lists
 from src.memory import (
     describe_device, describe_peak, device_memory, peak_memory, reset_peak,
 )
-from src.model_config import InterfaceConfig, RunSettings, TrainingConfig
+from src.model_config import InterfaceConfig, ModelConfig, RunSettings, TrainingConfig
 from src.models import MultiTraceModel
 from src.signal_transforms import denormalise_label, is_absolute, signal_prior
 
@@ -221,10 +223,12 @@ class Trainer:
     """Fit ``model`` by the recipe, then record its predictions on the test set."""
 
     def __init__(self, model: MultiTraceModel, interface: InterfaceConfig,
-                 training: TrainingConfig, run: RunSettings, runtime: Runtime,
-                 run_dir: Path, config: dict | None = None):
+                 model_config: ModelConfig, training: TrainingConfig,
+                 run: RunSettings, runtime: Runtime, run_dir: Path,
+                 config: dict | None = None):
         check_window(model, interface)
         self.interface = interface
+        self.model_config = model_config
         self.training = training
         self.run = run
         self.runtime = runtime
@@ -242,6 +246,11 @@ class Trainer:
             ids = [self.device] if self.device.type == "cuda" else None
             self.net = DistributedDataParallel(model, device_ids=ids)
         self.criterion = PerSignalLoss(interface.TRACES, interface.LOSS, fs=interface.FS)
+        # Every weight, loss and regulariser, per trace: the interface's LOSS
+        # block plus the model config's REGULARISATION. A term not named here
+        # is not merged in _losses, so it is off.
+        self.weights = {trace: {**components, **model_config.REGULARISATION}
+                        for trace, components in self.criterion.weights.items()}
         self.optimizer = OPTIMIZERS[training.OPTIMIZER](
             parameter_groups(model, training.WEIGHT_DECAY), training)
         # Loss scaling is only a float16 concern; bfloat16 has float32's range.
@@ -263,9 +272,16 @@ class Trainer:
 
     def _losses(self, out: dict) -> tuple:
         """``(total, weighted)``: the scalar to backpropagate and the per-trace
-        per-component floats for logging, weights from the interface."""
+        per-component floats for logging. The loss components come from the
+        criterion, weighted by the interface; the backbone's regularisers that
+        the model config names are merged in beside them, per trace, and
+        weighted by it. A term the config leaves out is dropped here."""
         raw = self.criterion(out["predictions"], out["labels"], out["label_mask"])
-        return weight_losses(raw, self.criterion.weights)
+        named = self.model_config.REGULARISATION
+        for trace, terms in out["regularisers"].items():
+            raw[trace].update({term: value for term, value in terms.items()
+                               if term in named})
+        return weight_losses(raw, self.weights)
 
     def _progress(self, iterable, desc: str):
         return tqdm(iterable, desc=desc, leave=False, disable=not self.runtime.is_main)
