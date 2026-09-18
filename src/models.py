@@ -57,6 +57,22 @@ def _require_frame_size(interface: InterfaceConfig, name: str) -> tuple:
     return (interface.RESIZE.H, interface.RESIZE.W)
 
 
+def _require_regularisers(cfg: ModelConfig, copy: nn.Module) -> None:
+    """The terms the config weights must be terms the backbone computes.
+
+    A backbone declares them as a class attribute ``REGULARISERS`` and returns
+    them from ``regularisers()`` after each forward; a backbone with neither
+    has none, so any non-empty mapping is refused by name.
+    """
+    known = tuple(getattr(type(copy), "REGULARISERS", ()))
+    unknown = sorted(t for t in cfg.REGULARISATION if t not in known)
+    if unknown:
+        have = f"has {list(known)}" if known else "has no regularisers"
+        raise ConfigError(
+            f"{cfg.NAME}: REGULARISATION names {[u.upper() for u in unknown]} "
+            f"but the backbone {have}")
+
+
 # ---------------------------------------------------------------------------
 # The multi-trace model
 # ---------------------------------------------------------------------------
@@ -70,8 +86,10 @@ class MultiTraceModel(nn.Module):
 
     A backbone is any ``nn.Module`` with ``forward(x)`` and
     ``output_layers()`` that takes a raw clip ``(B, C_in, T, H, W)`` and
-    returns ``(B, 1, T)``; whatever preprocessing the published network was
-    fed, the backbone applies itself. ``C_in = len(channels)``: the interface's
+    returns ``(B, 1, T)``; a backbone with regularisers also declares
+    ``REGULARISERS`` and returns them from ``regularisers()`` after each
+    forward; whatever preprocessing the published network was fed, the
+    backbone applies itself. ``C_in = len(channels)``: the interface's
     channels stacked in order. Channel and trace order is owned here, never
     inferred from dict iteration.
 
@@ -107,7 +125,15 @@ class MultiTraceModel(nn.Module):
     def forward(self, batch: dict) -> dict:
         out = self.forward_video(self.prepare_frames(batch))
         predictions = {trace: out[:, i] for i, trace in enumerate(self.traces)}
-        return {**batch, "predictions": predictions}
+        return {**batch, "predictions": predictions,
+                "regularisers": self.collect_regularisers()}
+
+    def collect_regularisers(self) -> dict:
+        """``{trace: {term: () tensor}}`` each copy computed on its last forward,
+        every term it declares; which ones count is the trainer's, from the
+        model config. ``{}`` per trace for a backbone with none."""
+        return {trace: dict(copy.regularisers()) if hasattr(copy, "regularisers") else {}
+                for trace, copy in self.copies.items()}
 
     def extra_repr(self) -> str:
         return f"channels={list(self.channels)}, traces={list(self.traces)}"
@@ -116,16 +142,18 @@ class MultiTraceModel(nn.Module):
 # ---------------------------------------------------------------------------
 # Builders: (model config, interface) -> MultiTraceModel
 # ---------------------------------------------------------------------------
-def _multi_trace(make_copy, interface: InterfaceConfig) -> MultiTraceModel:
-    return MultiTraceModel(make_copy=make_copy, channels=interface.CHANNELS,
-                           traces=interface.TRACES)
+def _multi_trace(make_copy, interface: InterfaceConfig, cfg: ModelConfig) -> MultiTraceModel:
+    model = MultiTraceModel(make_copy=make_copy, channels=interface.CHANNELS,
+                            traces=interface.TRACES)
+    _require_regularisers(cfg, next(iter(model.copies.values())))
+    return model
 
 
 def _build_deepphys(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     size = _require_frame_size(interface, "DeepPhys")
     width = len(interface.CHANNELS)
     return _multi_trace(lambda: deepphys.DeepPhys(in_channels=width, img_size=size),
-                        interface)
+                        interface, cfg)
 
 
 def _build_efficientphys(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiTraceModel:
@@ -134,7 +162,7 @@ def _build_efficientphys(cfg: TemporalShiftConfig, interface: InterfaceConfig) -
     return _multi_trace(
         lambda: efficientphys.EfficientPhys(in_channels=width, img_size=size,
                                             frame_depth=cfg.FRAME_DEPTH),
-        interface)
+        interface, cfg)
 
 
 def _build_factorizephys(cfg: FactorizePhysConfig, interface: InterfaceConfig) -> MultiTraceModel:
@@ -142,31 +170,31 @@ def _build_factorizephys(cfg: FactorizePhysConfig, interface: InterfaceConfig) -
     width = len(interface.CHANNELS)
     return _multi_trace(
         lambda: factorizephys.FactorizePhys(in_channels=width, use_fsam=cfg.FSAM),
-        interface)
+        interface, cfg)
 
 
 def _build_physformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysFormer", physformer.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physformer.PhysFormer(in_channels=width), interface)
+    return _multi_trace(lambda: physformer.PhysFormer(in_channels=width), interface, cfg)
 
 
 def _build_physmamba(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysMamba", physmamba.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physmamba.PhysMamba(in_channels=width), interface)
+    return _multi_trace(lambda: physmamba.PhysMamba(in_channels=width), interface, cfg)
 
 
 def _build_physnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysNet", physnet.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physnet.PhysNet(in_channels=width), interface)
+    return _multi_trace(lambda: physnet.PhysNet(in_channels=width), interface, cfg)
 
 
 def _build_rhythmformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "RhythmFormer", rhythmformer.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: rhythmformer.RhythmFormer(in_channels=width), interface)
+    return _multi_trace(lambda: rhythmformer.RhythmFormer(in_channels=width), interface, cfg)
 
 
 def _build_tscan(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiTraceModel:
@@ -175,13 +203,13 @@ def _build_tscan(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiT
     return _multi_trace(
         lambda: tscan.TSCAN(in_channels=width, img_size=size,
                             frame_depth=cfg.FRAME_DEPTH),
-        interface)
+        interface, cfg)
 
 
 def _build_ibvpnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "iBVPNet", ibvpnet.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: ibvpnet.iBVPNet(in_channels=width), interface)
+    return _multi_trace(lambda: ibvpnet.iBVPNet(in_channels=width), interface, cfg)
 
 
 #: ``NAME`` -> builder. One line per architecture, matching its line in
