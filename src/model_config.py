@@ -62,11 +62,41 @@ CONFIG_SECTIONS = {"MODEL": "model", "INTERFACE": "interface", "TRAIN": "trainin
 # ---------------------------------------------------------------------------
 @dataclass
 class ModelConfig:
-    """An architecture with no switch: the section is ``NAME`` and nothing else."""
+    """An architecture's section: ``NAME`` plus the switches an experiment may
+    flip. ``REGULARISATION`` is the one optional key: the terms of the
+    backbone's own regularisers that count and their weights, ``{}`` or
+    absent for none (a term left out is off, never zeroed)."""
     NAME: str = ""
+    REGULARISATION: dict = field(default_factory=dict)   # {TERM: weight > 0}
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
-        pass
+        self.REGULARISATION = normalise_regularisation(self.REGULARISATION, where)
+
+
+#: The one key of the MODEL section a file may leave out.
+OPTIONAL_MODEL_KEYS = ("REGULARISATION",)
+
+
+def normalise_regularisation(weights, where: str) -> dict:
+    """``{TERM: weight}`` (YAML spelling) -> ``{term: float}``, lower-case keys,
+    every weight a positive number. Which terms exist is the backbone's to
+    say; ``src.models`` checks the names when it builds the model."""
+    if weights is None:
+        weights = {}
+    if not isinstance(weights, dict):
+        raise ConfigError(
+            f"{where}: REGULARISATION must be a mapping of term to weight, got "
+            f"{weights!r}")
+    out = {}
+    for term, weight in weights.items():
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) \
+                or weight <= 0:
+            raise ConfigError(
+                f"{where}: REGULARISATION.{term} must be a positive number "
+                f"(a term that should not count is left out, not zeroed), got "
+                f"{weight!r}")
+        out[str(term).lower()] = float(weight)
+    return out
 
 
 @dataclass
@@ -75,6 +105,7 @@ class TemporalShiftConfig(ModelConfig):
     FRAME_DEPTH: int = 0
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
         if self.FRAME_DEPTH <= 0:
             raise ConfigError(
                 f"{where}: FRAME_DEPTH must be positive, got {self.FRAME_DEPTH}")
@@ -109,7 +140,7 @@ def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):
     if arch not in MODEL_CONFIGS:
         raise ConfigError(
             f"{where}: NAME must be one of {sorted(MODEL_CONFIGS)}, got {arch!r}")
-    cfg = build(MODEL_CONFIGS[arch], mapping, where)
+    cfg = build(MODEL_CONFIGS[arch], mapping, where, optional=OPTIONAL_MODEL_KEYS)
     cfg.validate(interface, where)
     return cfg
 
