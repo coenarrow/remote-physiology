@@ -93,9 +93,10 @@ class MultiTraceModel(nn.Module):
     channels stacked in order. Channel and trace order is owned here, never
     inferred from dict iteration.
 
-    ``forward(batch)`` returns the same dict with ``predictions`` added,
-    ``{trace: (B, T)}``. Nothing is dropped in transit and nothing else is
-    computed: the loss belongs to the trainer.
+    ``forward(batch)`` returns the same dict with ``predictions`` and
+    ``regularisers`` added, ``{trace: (B, T)}`` and ``{trace: {term: () tensor}}``.
+    Nothing is dropped in transit and nothing else is computed: the loss
+    belongs to the trainer.
     """
 
     def __init__(self, make_copy, channels, traces):
@@ -129,11 +130,25 @@ class MultiTraceModel(nn.Module):
                 "regularisers": self.collect_regularisers()}
 
     def collect_regularisers(self) -> dict:
-        """``{trace: {term: () tensor}}`` each copy computed on its last forward,
-        every term it declares; which ones count is the trainer's, from the
-        model config. ``{}`` per trace for a backbone with none."""
-        return {trace: dict(copy.regularisers()) if hasattr(copy, "regularisers") else {}
-                for trace, copy in self.copies.items()}
+        """``{trace: {term: () tensor}}``: every term each copy declares in
+        ``REGULARISERS``, read from its ``regularisers()`` after the forward.
+        Which ones count is the trainer's, from the model config. ``{}`` per
+        trace for a backbone that declares none. A backbone that declares a
+        term and does not return it is refused here, at the first forward."""
+        collected = {}
+        for trace, copy in self.copies.items():
+            declared = tuple(getattr(type(copy), "REGULARISERS", ()))
+            if not declared:
+                collected[trace] = {}
+                continue
+            returned = copy.regularisers() if hasattr(copy, "regularisers") else {}
+            missing = [t for t in declared if t not in returned]
+            if missing:
+                raise RuntimeError(
+                    f"{type(copy).__name__} declares REGULARISERS {list(declared)} "
+                    f"but regularisers() did not return {missing}")
+            collected[trace] = {t: returned[t] for t in declared}
+        return collected
 
     def extra_repr(self) -> str:
         return f"channels={list(self.channels)}, traces={list(self.traces)}"

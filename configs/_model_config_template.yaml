@@ -21,7 +21,7 @@
 #                                                   shift shifts within (paper: 10)
 #   FactorizePhys          FSAM: <bool>              the factorized attention
 #                                                   module; false is the paper's ablation
-# One key is optional for every NAME:
+# One key is optional for every NAME and is normally left out:
 #   REGULARISATION: {<TERM>: <number > 0>, ...}   the backbone's own loss terms
 #                                                 (penalties on its internals, not
 #                                                 on the prediction) that count,
@@ -33,7 +33,6 @@
 MODEL:
   NAME: <string>                 # DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
                                  # PhysMamba | PhysNet | RhythmFormer | TSCAN | iBVPNet
-  REGULARISATION: {}             # optional; see above
 
 # What every sample looks like when it reaches the model, and the loss. Every
 # loaded dataset is shaped to this before concatenation: a channel or trace a

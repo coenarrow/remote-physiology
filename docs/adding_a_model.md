@@ -169,6 +169,13 @@ them per trace (`ABP/sparsity`). The backbone computes every term it
 declares; which ones count is the config's `REGULARISATION` (step 2), and
 a term left out is off.
 
+One caution for a distributed run: the trainer wraps the model in
+`DistributedDataParallel` with `find_unused_parameters=False`, so a
+parameter that feeds only a regulariser and nothing else has no gradient
+when that term is left out of `REGULARISATION`, and DDP refuses the step.
+Route every such parameter into the prediction too, or keep its term
+weighted.
+
 ### Any frame size, any window length
 
 Every model must accept whatever `RESIZE` and `WINDOW_SECONDS` an interface

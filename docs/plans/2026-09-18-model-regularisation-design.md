@@ -63,7 +63,9 @@ columns match the loss components' spelling. It does **not** know the
 term names; those belong to the module, and `src/models.py` is the one
 file that imports every module. The builder refuses, by name, a term the
 module does not declare, which for the nine models with no `REGULARISERS`
-means any non-empty mapping.
+means any non-empty mapping. It also refuses a term whose name is a loss
+component (MSE, CCC and the rest), because the trainer merges both into
+one per-trace dict.
 
 `INTERPRETABLE` is not a regulariser: it is PhysHydra's structural switch
 (the attention branch exists or not) and follows the existing pattern of
@@ -108,14 +110,29 @@ concern.
 every term each copy computed:
 
 ```python
-out["regularisers"] = {trace: dict(copy.regularisers()) if hasattr(copy, "regularisers") else {}
-                       for trace, copy in self.copies.items()}
+def collect_regularisers(self) -> dict:
+    collected = {}
+    for trace, copy in self.copies.items():
+        declared = tuple(getattr(type(copy), "REGULARISERS", ()))
+        if not declared:
+            collected[trace] = {}
+            continue
+        returned = copy.regularisers() if hasattr(copy, "regularisers") else {}
+        missing = [t for t in declared if t not in returned]
+        if missing:
+            raise RuntimeError(
+                f"{type(copy).__name__} declares REGULARISERS {list(declared)} "
+                f"but regularisers() did not return {missing}")
+        collected[trace] = {t: returned[t] for t in declared}
+    return collected
 ```
 
 One copy per trace means one set of terms per trace: the sparsity of the
 ABP copy's attention and of the CVP copy's are separate scalars and are
-logged separately. For a backbone without the method the entry is
-`{trace: {}}` and nothing downstream changes.
+logged separately. For a backbone that declares none the entry is
+`{trace: {}}` and nothing downstream changes. For a backbone that declares
+a term and does not return it from `regularisers()`, the wrapper refuses
+at the first forward, naming the missing term.
 
 `_multi_trace` checks `cfg.REGULARISATION` against the backbone's
 `REGULARISERS` (a class attribute, read off one copy, `()` when absent) through a
@@ -126,8 +143,8 @@ check without repeating it.
 ## Trainer
 
 `Trainer` is handed the model config as one more constructor argument
-(`scripts/run.py` is the only caller; `src.experiment.rebuild` never
-constructs a trainer). It then owns every weight: `self.weights` is built
+(`scripts/run.py` and `tools/memory_report.py` are the two callers;
+`src.experiment.rebuild` never constructs a trainer). It then owns every weight: `self.weights` is built
 once in `__init__` as `{trace: {**criterion.weights[trace],
 **model_config.REGULARISATION}}`.
 
@@ -166,6 +183,7 @@ its own config".
 | `src/models.py` | `regularisers` in the wrapper's dict, `_require_regularisers` called from `_multi_trace` |
 | `src/trainer.py` | `model_config` argument, merged weights, `_losses` filter and merge, docstring |
 | `scripts/run.py` | pass the model config to `Trainer` |
+| `tools/memory_report.py` | pass the model config to `Trainer` |
 | `neural_methods/loss/PerSignalLoss.py` | `weight_losses` without the 1.0 default |
 | `configs/_model_config_template.yaml` | `REGULARISATION` under the switches comment |
 | `docs/adding_a_model.md` | "Regularisers" under step 1 and step 2 |

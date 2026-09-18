@@ -414,7 +414,8 @@ class Trainer:
             batch = move_to_device(batch, self.device, non_blocking=True)
             with self._autocast():
                 out = self.net(batch)
-            out = {k: v for k, v in out.items() if k != "frames"}
+            # regularisers are training-only; test scores predictions against labels
+            out = {k: v for k, v in out.items() if k not in ("frames", "regularisers")}
             out["predictions"] = {t: p.float() for t, p in out["predictions"].items()}
             for sample in iter_samples(out):
                 records.append(to_physical(detach_to_cpu(sample)))

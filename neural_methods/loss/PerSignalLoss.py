@@ -315,7 +315,7 @@ def weight_losses(raw, weights):
                  for value in components.values()), torch.zeros(()))
     module_totals, weighted = [], {}
     for module, components in raw.items():
-        module_weights = weights.get(module, {})
+        module_weights = weights[module]
         module_total, entries = zero, {}
         for component, value in components.items():
             term = module_weights[component] * value
