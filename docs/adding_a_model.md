@@ -29,9 +29,11 @@ speaking the batch dict: frames in, predictions out, nothing else.
   is no input-preprocessing switch anywhere in config.
 - **The loss is the trainer's, not the model's.** The interface's `LOSS` block
   states it per trace; a model that computes its own loss is wrong.
-- **The trainer reaches into the model in exactly one place**: the readouts
-  returned by `output_layers()`. It seeds each readout's bias with the trace's
-  physiological prior and exempts the readouts from weight decay.
+- **The trainer reaches into the model in two places**: the readouts
+  returned by `output_layers()`, whose bias it seeds with the trace's
+  physiological prior and which it exempts from weight decay; and, for a
+  model that declares `REGULARISERS`, the terms returned by `regularisers()`,
+  which it weights from the model config's `REGULARISATION`.
 
 Because the wrapper owns channel order, trace order and the dict, an
 architecture never sees a dict at all. It sees a tensor and returns a tensor.
