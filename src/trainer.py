@@ -275,7 +275,9 @@ class Trainer:
         per-component floats for logging. The loss components come from the
         criterion, weighted by the interface; the backbone's regularisers that
         the model config names are merged in beside them, per trace, and
-        weighted by it. A term the config leaves out is dropped here."""
+        weighted by it. A term the config leaves out is dropped here; a term
+        cannot collide with a loss component's name because
+        ``normalise_regularisation`` refuses such names at config load."""
         raw = self.criterion(out["predictions"], out["labels"], out["label_mask"])
         named = self.model_config.REGULARISATION
         for trace, terms in out["regularisers"].items():

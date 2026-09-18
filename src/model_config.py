@@ -49,7 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from neural_methods.loss.PerSignalLoss import normalise_loss_weights
+from neural_methods.loss.PerSignalLoss import COMPONENTS, normalise_loss_weights
 from src.config import ConfigError, build, load_yaml
 from src.signal_transforms import validate_channels, validate_traces
 
@@ -80,7 +80,10 @@ OPTIONAL_MODEL_KEYS = ("REGULARISATION",)
 def normalise_regularisation(weights, where: str) -> dict:
     """``{TERM: weight}`` (YAML spelling) -> ``{term: float}``, lower-case keys,
     every weight a positive number. Which terms exist is the backbone's to
-    say; ``src.models`` checks the names when it builds the model."""
+    say; ``src.models`` checks the names when it builds the model. A
+    regulariser name may not be a loss component name, because the trainer
+    merges both into one per-trace dict and a collision would silently
+    overwrite the loss component's tensor."""
     if weights is None:
         weights = {}
     if not isinstance(weights, dict):
@@ -95,7 +98,13 @@ def normalise_regularisation(weights, where: str) -> dict:
                 f"{where}: REGULARISATION.{term} must be a positive number "
                 f"(a term that should not count is left out, not zeroed), got "
                 f"{weight!r}")
-        out[str(term).lower()] = float(weight)
+        key = str(term).lower()
+        if key in COMPONENTS:
+            raise ConfigError(
+                f"{where}: REGULARISATION.{term} is a loss component name; a "
+                f"regulariser must not share a name with "
+                f"{sorted(c.upper() for c in COMPONENTS)}")
+        out[key] = float(weight)
     return out
 
 
