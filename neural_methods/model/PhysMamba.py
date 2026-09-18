@@ -36,6 +36,7 @@ from timm.layers import trunc_normal_, DropPath
 from torch.nn import functional as F
 
 from neural_methods.model.mamba_compat import make_mamba
+from neural_methods.model.modules.cdc_t import CDC_T
 from neural_methods.model.modules.diffnormalize import DiffNormalize
 from neural_methods.model.shared import nearest_multiple, require_min_frame
 
@@ -72,34 +73,6 @@ class LateralConnection(nn.Module):
     def forward(self, slow_path, fast_path):
         fast_path = self.conv(fast_path)
         return fast_path + slow_path
-
-class CDC_T(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
-                 padding=1, dilation=1, groups=1, bias=False, theta=0.2):
-
-        super(CDC_T, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding,
-                              dilation=dilation, groups=groups, bias=bias)
-        self.theta = theta
-
-    def forward(self, x):
-
-        out_normal = self.conv(x)
-
-        if math.fabs(self.theta - 0.0) < 1e-8:
-            return out_normal
-        else:
-            # only CD works on temporal kernel size>1
-            if self.conv.weight.shape[2] > 1:
-                kernel_diff = self.conv.weight[:, :, 0, :, :].sum(2).sum(2) + self.conv.weight[:, :, 2, :, :].sum(
-                    2).sum(2)
-                kernel_diff = rearrange(kernel_diff, "cout cin -> cout cin 1 1 1")
-                out_diff = F.conv3d(input=x, weight=kernel_diff, bias=self.conv.bias, stride=self.conv.stride,
-                                    padding=0, dilation=self.conv.dilation, groups=self.conv.groups)
-                return out_normal - self.theta * out_diff
-
-            else:
-                return out_normal
 
 class MambaLayer(nn.Module):
     def __init__(self, dim, d_state = 16, d_conv = 4, expand = 2, channel_token = False):

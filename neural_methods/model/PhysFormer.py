@@ -45,17 +45,14 @@ with the clip's own statistics) before the stem, which is what the published
 network was fed. All reshaping is einops.
 """
 
-import math
-
 import torch
 from einops import einsum, rearrange, reduce
 from torch import nn
 from torch.nn import functional as F
 
+from neural_methods.model.modules.cdc_t import CDC_T
 from neural_methods.model.modules.diffnormalize import DiffNormalize
-from neural_methods.model.shared import (
-    nearest_multiple, require_min_frame, sum_spatial,
-)
+from neural_methods.model.shared import nearest_multiple, require_min_frame
 
 #: The stem's three ``MaxPool3d((1, 2, 2))`` stages, i.e. the spatial factor
 #: the tube patch embedding sees on top of its own patch size.
@@ -68,40 +65,6 @@ MIN_FRAME = STEM_SPATIAL_STRIDE
 #: The head's two ``Upsample(scale_factor=(2, 1, 1))`` stages. The temporal
 #: patch size has to match it for the output to come back at the input length.
 HEAD_TEMPORAL_UPSAMPLE = 4
-
-
-class CDC_T(nn.Module):
-    """Temporal center-difference 3-D convolution.
-
-    ``theta`` controls the mix of the plain convolution and the central
-    difference one; ``theta = 0`` is an ordinary ``Conv3d``.
-    """
-
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
-                 padding=1, dilation=1, groups=1, bias=False, theta=0.6):
-        super().__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size,
-                              stride=stride, padding=padding, dilation=dilation,
-                              groups=groups, bias=bias)
-        self.theta = theta
-
-    def forward(self, x):
-        out_normal = self.conv(x)
-
-        if math.fabs(self.theta - 0.0) < 1e-8:
-            return out_normal
-
-        # Only the central difference over a temporal kernel > 1 is meaningful.
-        if self.conv.weight.shape[2] > 1:
-            kernel_diff = (sum_spatial(self.conv.weight[:, :, 0])
-                           + sum_spatial(self.conv.weight[:, :, 2]))
-            kernel_diff = rearrange(kernel_diff, "cout cin -> cout cin 1 1 1")
-            out_diff = F.conv3d(input=x, weight=kernel_diff, bias=self.conv.bias,
-                                stride=self.conv.stride, padding=0,
-                                dilation=self.conv.dilation, groups=self.conv.groups)
-            return out_normal - self.theta * out_diff
-
-        return out_normal
 
 
 class MultiHeadedSelfAttention_TDC_gra_sharp(nn.Module):

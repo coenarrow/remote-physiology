@@ -7,10 +7,6 @@ consumer:
 * :func:`nearest_multiple` — the adaptive stages round a length to a whole
   number of tubes, patches or temporal strides. Used by PhysFormer, PhysMamba,
   PhysNet, RhythmFormer and iBVPNet.
-* :func:`sum_spatial` — a central-difference convolution's kernel summed over
-  its spatial plane, row by row then across, which is the accumulation order
-  the published implementations used and therefore part of the answer in
-  float32. Used by PhysFormer's and RhythmFormer's ``CDC_T``.
 * :func:`dense_width` — the flattened feature count entering the dense head of
   the CAN family, derived per axis so a non-square frame works. Used by
   DeepPhys, TS-CAN and EfficientPhys.
@@ -25,23 +21,10 @@ consumer:
   EfficientPhys and (with ``wrap=True``, the published WTSM) BigSmall.
 """
 
-from einops import reduce
-from torch import Tensor
-
 
 def nearest_multiple(n: int, k: int) -> int:
     """The positive multiple of ``k`` nearest to ``n``."""
     return max(round(n / k), 1) * k
-
-
-def sum_spatial(weight: Tensor) -> Tensor:
-    """``(co, ci, kh, kw)`` summed over the kernel plane, row by row then across.
-
-    Two reductions rather than one over both axes: in float32 the accumulation
-    order is part of the answer, and this is the order the original summed in.
-    """
-    return reduce(reduce(weight, "co ci kh kw -> co ci kw", "sum"),
-                  "co ci kw -> co ci", "sum")
 
 
 def dense_width(height: int, width: int, filters: int) -> int:

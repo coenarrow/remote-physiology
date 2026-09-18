@@ -49,6 +49,7 @@ from einops import rearrange
 from torch.nn import functional as F
 
 from neural_methods.model.FactorizePhys.FSAM import FeaturesFactorizationModule
+from neural_methods.model.modules.conv_block_3d import ConvBlock3D
 from neural_methods.model.shared import require_min_frame
 
 #: The published filter counts of the three stages.
@@ -64,35 +65,22 @@ HEAD_SPATIAL = 13
 MIN_FRAME = 23
 
 
-class ConvBlock3D(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, stride, padding):
-        super().__init__()
-        self.conv_block_3d = nn.Sequential(
-            nn.Conv3d(in_channel, out_channel, kernel_size, stride, padding=padding, bias=False),
-            nn.Tanh(),
-            nn.InstanceNorm3d(out_channel),
-        )
-
-    def forward(self, x):
-        return self.conv_block_3d(x)
-
-
 class rPPG_FeatureExtractor(nn.Module):
     """The 3-D convolutional stem. Shapes below are the paper's 72x72 frames."""
 
     def __init__(self, inCh, dropout_rate=0.1):
         super().__init__()
-        # inCh, out_channel, kernel_size, stride, padding
-        #                                                        Input: #B, inCh, 160, 72, 72
+        # inCh, out_channel, kernel_size, stride, padding, bias
+        #                                                                    Input: #B, inCh, 160, 72, 72
         self.FeatureExtractor = nn.Sequential(
-            ConvBlock3D(inCh, nf[0], [3, 3, 3], [1, 1, 1], [1, 1, 1]),  #B, nf[0], 160, 72, 72
-            ConvBlock3D(nf[0], nf[1], [3, 3, 3], [1, 2, 2], [1, 0, 0]), #B, nf[1], 160, 35, 35
-            ConvBlock3D(nf[1], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0]), #B, nf[1], 160, 33, 33
+            ConvBlock3D(inCh, nf[0], [3, 3, 3], [1, 1, 1], [1, 1, 1], bias=False),  #B, nf[0], 160, 72, 72
+            ConvBlock3D(nf[0], nf[1], [3, 3, 3], [1, 2, 2], [1, 0, 0], bias=False), #B, nf[1], 160, 35, 35
+            ConvBlock3D(nf[1], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[1], 160, 33, 33
             nn.Dropout3d(p=dropout_rate),
 
-            ConvBlock3D(nf[1], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0]), #B, nf[1], 160, 31, 31
-            ConvBlock3D(nf[1], nf[2], [3, 3, 3], [1, 2, 2], [1, 0, 0]), #B, nf[2], 160, 15, 15
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0]), #B, nf[2], 160, 13, 13
+            ConvBlock3D(nf[1], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[1], 160, 31, 31
+            ConvBlock3D(nf[1], nf[2], [3, 3, 3], [1, 2, 2], [1, 0, 0], bias=False), #B, nf[2], 160, 15, 15
+            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 13, 13
             nn.Dropout3d(p=dropout_rate),
         )
 
@@ -109,9 +97,9 @@ class BVP_Head(nn.Module):
         self.residual = residual
 
         self.conv_block = nn.Sequential(
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0]), #B, nf[2], 160, 11, 11
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0]), #B, nf[2], 160, 9, 9
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0]), #B, nf[2], 160, 7, 7
+            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 11, 11
+            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 9, 9
+            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 7, 7
             nn.Dropout3d(p=dropout_rate),
         )
 
@@ -121,8 +109,8 @@ class BVP_Head(nn.Module):
             self.bias1 = nn.Parameter(torch.tensor(1.0))
 
         self.final_layer = nn.Sequential(
-            ConvBlock3D(nf[2], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0]),                        #B, nf[1], 160, 5, 5
-            ConvBlock3D(nf[1], nf[0], [3, 3, 3], [1, 1, 1], [1, 0, 0]),                        #B, nf[0], 160, 3, 3
+            ConvBlock3D(nf[2], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False),            #B, nf[1], 160, 5, 5
+            ConvBlock3D(nf[1], nf[0], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False),            #B, nf[0], 160, 3, 3
             nn.Conv3d(nf[0], 1, (3, 3, 3), stride=(1, 1, 1), padding=(1, 0, 0), bias=True),    #B, 1, 160, 1, 1
         )
 

@@ -102,7 +102,7 @@ clip for the same reason and also so the shift knows where each clip starts
 and ends. The shift itself is the shared `TSM` in
 [`neural_methods/model/shared.py`](../neural_methods/model/shared.py). That
 module is where every piece more than one backbone needs lives —
-`nearest_multiple`, `sum_spatial`, `dense_width`, `min_frame_message`,
+`nearest_multiple`, `dense_width`, `min_frame_message`,
 `require_min_frame`, `Attention_mask`, `TSM` — and it is where a new shared
 piece belongs.
 

@@ -35,6 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+from neural_methods.model.modules.conv_block_3d import ConvBlock3D
 from neural_methods.model.shared import nearest_multiple, require_min_frame
 
 #: The two spatial-only ``MaxPool3d`` stages in ``spatio_temporal_encoder``,
@@ -51,19 +52,6 @@ TEMPORAL_STRIDE = 4
 nf = [8, 16, 24, 40, 64]
 
 
-class ConvBlock3D(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, stride, padding):
-        super().__init__()
-        self.conv_block_3d = nn.Sequential(
-            nn.Conv3d(in_channel, out_channel, kernel_size, stride, padding),
-            nn.Tanh(),
-            nn.InstanceNorm3d(out_channel),
-        )
-
-    def forward(self, x):
-        return self.conv_block_3d(x)
-
-
 class DeConvBlock3D(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, stride, padding):
         super().__init__()
@@ -73,7 +61,6 @@ class DeConvBlock3D(nn.Module):
             nn.ConvTranspose3d(in_channel, in_channel, (k_t, 1, 1), (s_t, 1, 1), padding),
             nn.Tanh(),
             nn.InstanceNorm3d(in_channel),
-
             nn.Conv3d(in_channel, out_channel, (1, k_s1, k_s2), (1, s_s1, s_s2), padding),
             nn.Tanh(),
             nn.InstanceNorm3d(out_channel),
@@ -88,25 +75,25 @@ class encoder_block(nn.Module):
         super().__init__()
         # in_channel, out_channel, kernel_size, stride, padding
         self.spatio_temporal_encoder = nn.Sequential(
-            ConvBlock3D(in_channel, nf[0], [1, 3, 3], [1, 1, 1], [0, 1, 1]),
-            ConvBlock3D(nf[0], nf[1], [3, 3, 3], [1, 1, 1], [1, 1, 1]),
+            ConvBlock3D(in_channel, nf[0], [1, 3, 3], [1, 1, 1], [0, 1, 1], bias=True),
+            ConvBlock3D(nf[0], nf[1], [3, 3, 3], [1, 1, 1], [1, 1, 1], bias=True),
             nn.MaxPool3d((1, 2, 2), stride=(1, 2, 2)),
-            ConvBlock3D(nf[1], nf[2], [1, 3, 3], [1, 1, 1], [0, 1, 1]),
-            ConvBlock3D(nf[2], nf[3], [3, 3, 3], [1, 1, 1], [1, 1, 1]),
+            ConvBlock3D(nf[1], nf[2], [1, 3, 3], [1, 1, 1], [0, 1, 1], bias=True),
+            ConvBlock3D(nf[2], nf[3], [3, 3, 3], [1, 1, 1], [1, 1, 1], bias=True),
             nn.MaxPool3d((1, 2, 2), stride=(1, 2, 2)),
-            ConvBlock3D(nf[3], nf[4], [1, 3, 3], [1, 1, 1], [0, 1, 1]),
-            ConvBlock3D(nf[4], nf[4], [3, 3, 3], [1, 1, 1], [1, 1, 1]),
+            ConvBlock3D(nf[3], nf[4], [1, 3, 3], [1, 1, 1], [0, 1, 1], bias=True),
+            ConvBlock3D(nf[4], nf[4], [3, 3, 3], [1, 1, 1], [1, 1, 1], bias=True),
         )
 
         self.temporal_encoder = nn.Sequential(
-            ConvBlock3D(nf[4], nf[4], [11, 1, 1], [1, 1, 1], [5, 0, 0]),
-            ConvBlock3D(nf[4], nf[4], [11, 3, 3], [1, 1, 1], [5, 1, 1]),
+            ConvBlock3D(nf[4], nf[4], [11, 1, 1], [1, 1, 1], [5, 0, 0], bias=True),
+            ConvBlock3D(nf[4], nf[4], [11, 3, 3], [1, 1, 1], [5, 1, 1], bias=True),
             nn.MaxPool3d((2, 2, 2), stride=(2, 2, 2)),
-            ConvBlock3D(nf[4], nf[4], [11, 1, 1], [1, 1, 1], [5, 0, 0]),
-            ConvBlock3D(nf[4], nf[4], [11, 3, 3], [1, 1, 1], [5, 1, 1]),
+            ConvBlock3D(nf[4], nf[4], [11, 1, 1], [1, 1, 1], [5, 0, 0], bias=True),
+            ConvBlock3D(nf[4], nf[4], [11, 3, 3], [1, 1, 1], [5, 1, 1], bias=True),
             nn.MaxPool3d((2, 2, 2), stride=(2, 1, 1)),
-            ConvBlock3D(nf[4], nf[4], [7, 1, 1], [1, 1, 1], [3, 0, 0]),
-            ConvBlock3D(nf[4], nf[4], [7, 3, 3], [1, 1, 1], [3, 1, 1]),
+            ConvBlock3D(nf[4], nf[4], [7, 1, 1], [1, 1, 1], [3, 0, 0], bias=True),
+            ConvBlock3D(nf[4], nf[4], [7, 3, 3], [1, 1, 1], [3, 1, 1], bias=True),
         )
 
     def forward(self, x):
