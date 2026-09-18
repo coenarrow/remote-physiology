@@ -141,6 +141,32 @@ layer whose `bias` has exactly one element (an `nn.Linear(k, 1)` or an
 `nn.Conv1d(k, 1, ...)`). The trainer refuses a model whose readouts do not
 match its traces one to one.
 
+### `regularisers()` (only if the model has any)
+
+A regulariser is a scalar the backbone computes during `forward` from its
+own internals — an attention map's sparsity, say — that the loss cannot
+see. Most models have none. One that does declares the names and returns
+the values beside its readouts:
+
+```python
+class MyNet(nn.Module):
+    REGULARISERS = ("sparsity",)     # lower-case; the YAML keys of REGULARISATION
+
+    def forward(self, x):
+        ...
+        self._regularisers = {"sparsity": sparsity}     # () tensors, graph-attached
+        return out
+
+    def regularisers(self):
+        return self._regularisers
+```
+
+`forward` still returns the one tensor. The wrapper reads the terms back
+per copy, so each trace's copy has its own values and `losses.csv` logs
+them per trace (`ABP/sparsity`). The backbone computes every term it
+declares; which ones count is the config's `REGULARISATION` (step 2), and
+a term left out is off.
+
 ### Any frame size, any window length
 
 Every model must accept whatever `RESIZE` and `WINDOW_SECONDS` an interface
@@ -243,6 +269,16 @@ class MyNetConfig(ModelConfig):
 - `validate(interface, where)` is called at load, after the interface is
   loaded. `TemporalShiftConfig` (EfficientPhys, TS-CAN) and
   `FactorizePhysConfig` are the two that exist.
+
+Every `MODEL` section also accepts one optional key, `REGULARISATION`,
+without any class of its own: `{TERM: weight > 0}` naming which of the
+backbone's `REGULARISERS` count and how much. Absent or `{}` means none;
+a term left out is off, never zeroed, so an ablation is deleting a key.
+The builder refuses a name the backbone does not declare. The weights are
+the trainer's: they are merged beside the interface's `LOSS` weights per
+trace, and the total stays the mean over traces of each trace's weighted
+sum. A term may not share a loss component's name (MSE, CCC and the rest);
+config load refuses it.
 
 ### The builder
 
