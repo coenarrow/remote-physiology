@@ -9,15 +9,18 @@ dependencies = [
     # from docs/plans/platform-reports/; see the roadmap, Phase 3.5). ----
     # Builds from its PyPI sdist on Windows as-is; only mamba-ssm needs patching.
     "causal-conv1d>=1.7.0 ; sys_platform != 'darwin'",
-    # Pinned exact on every platform: 2.3.2+ hard-requires tilelang /
-    # quack-kernels / apache-tvm-ffi (Linux-only, for Mamba3 backends we do
-    # not use), which breaks Windows and bloats the HPC env.
-    "mamba-ssm==2.3.1 ; sys_platform == 'linux'",
+    # 2.3.2 is the first release with Mamba3. Its SISO path is pure Triton and
+    # runs everywhere CUDA does; the MIMO path (tilelang) and single-token
+    # decode (quack-kernels / CuTe DSL) are Linux-only, see
+    # override-dependencies below. Pinned exact on both platforms so Linux and
+    # the vendored Windows tree are the same release. It no longer compiles
+    # selective_scan_cuda for sm_70, so Mamba1's kernel is gone on the V100s.
+    "mamba-ssm==2.3.2.post1 ; sys_platform == 'linux'",
     "mamba-ssm-macos>=1.0.2 ; sys_platform == 'darwin'",
     # Windows builds the patched vendor/mamba-ssm tree instead (see
     # tool.uv.sources below and tools/vendor_mamba_windows.py). Pinned rather
     # than >=, because the vendored tree is one specific upstream release.
-    "mamba-ssm==2.3.1 ; sys_platform == 'win32'",
+    "mamba-ssm==2.3.2.post1 ; sys_platform == 'win32'",
     # cu126 is the newest wheel family the fleet can run: the V100 partition
     # is sm_70 (dropped from cu128+/cu130) and the cluster driver (575.57)
     # caps CUDA at 12.9. torch 2.12 is the newest torch with a triton-windows
@@ -62,6 +65,7 @@ dev = [
     "ipywidgets>=8.1.9",
     "isort>=6",
     "pytest>=8.4",
+    "ruff>=0.16.8",
 ]
 
 [tool.uv]
@@ -74,7 +78,19 @@ cache-dir = ".uv_cache"
 # The Windows replacement, triton-windows, is a normal dependency above.
 # The override REPLACES torch's own triton pin, so the pairing must be stated
 # here and moved together with torch (torch 2.12 <-> triton 3.8).
-override-dependencies = ["triton==3.8.0 ; sys_platform == 'linux'"]
+#
+# tilelang and quack-kernels are the same story: mamba-ssm 2.3.2 requires both
+# unconditionally, for Mamba3's MIMO kernels and its single-token decode step,
+# and neither installs on Windows (tilelang ships no Windows wheel and its
+# sdist is a TVM build; quack-kernels needs nvidia-cutlass-dsl, Linux wheels
+# only). mamba_ssm imports both inside try/except, so without them Windows
+# keeps Mamba, Mamba2 and SISO Mamba3, and `Mamba3(is_mimo=True)` refuses by
+# name. The specifiers restate mamba-ssm's own.
+override-dependencies = [
+    "triton==3.8.0 ; sys_platform == 'linux'",
+    "tilelang==0.1.8 ; sys_platform == 'linux'",
+    "quack-kernels>=0.3.4 ; sys_platform == 'linux'",
+]
 
 # mamba-ssm and causal-conv1d compile CUDA against whatever torch they import at
 # build time. An isolated build env resolves `torch` from PyPI, which on Windows
@@ -106,7 +122,7 @@ no-build-isolation-package = ["mamba-ssm", "causal-conv1d"]
 # resolution and undo all of the above.
 [tool.uv.sources]
 # Windows only: the published sdist does not compile with MSVC. vendor/mamba-ssm
-# is the same 2.3.1 release with three mechanical fixes, regenerated (and
+# is the same 2.3.2.post1 release with three mechanical fixes, regenerated (and
 # verifiable) by tools/vendor_mamba_windows.py. Linux and macOS are untouched.
 mamba-ssm = [
   { path = "vendor/mamba-ssm", marker = "sys_platform == 'win32'" },
@@ -144,6 +160,16 @@ norecursedirs = ["external", "*.egg", ".*", "_darcs", "build", "CVS", "dist",
 [tool.black]
 # A regex, and the leading ^/ anchors it to the project root.
 extend-exclude = "^/external/"
+
+[tool.ruff]
+extend-exclude = ["external", "vendor"]
+
+[tool.ruff.lint]
+# PEP 8 as a build check: pycodestyle (E, W) and pep8-naming (N). Line length
+# is black's business, and `import torch.nn.functional as F` is the torch
+# idiom, not a naming slip.
+select = ["E", "W", "N"]
+ignore = ["E501", "N812"]
 
 [tool.isort]
 # extend_skip_glob, not skip_glob, so isort's own defaults survive.

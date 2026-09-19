@@ -87,7 +87,7 @@ builds, so later syncs are fast. If the home directory quota is tight,
 put the cache on group storage first with
 `export UV_CACHE_DIR=/group/pgh004/carrow/.uv_cache`.
 
-The check line should print the torch version, `True`, and `2.3.1`. If
+The check line should print the torch version, `True`, and `2.3.2.post1`. If
 `mamba_ssm` fails to import, PhysMamba still runs on the pure-PyTorch
 fallback, but slowly; fix the build rather than accept that.
 
