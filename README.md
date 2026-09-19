@@ -111,7 +111,10 @@ one.
 
 **On the multi-signal contract today**, in name order: DeepPhys,
 EfficientPhys, FactorizePhys, PhysFormer, PhysMamba, PhysNet, RhythmFormer,
-TS-CAN, iBVPNet.
+TS-CAN, iBVPNet. Two more are this repo's own: PhysMamba2 and PhysMamba3,
+PhysMamba with its Mamba1 layers swapped for Mamba2
+(`neural_methods/model/physmamba2/`) and for the SISO Mamba3
+(`neural_methods/model/physmamba3/`), there to compare the three layers.
 
 Each one trains on the PURE dataset holding out its first participant, on
 the model's own paper interface and paper training recipe (the rPPG-Toolbox
@@ -158,6 +161,12 @@ uv run python scripts/run.py --datasets pure --test-participant-dataset pure --t
 
 # PhysMamba
 uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physmamba_FS30_W4.27S4.27_RGB_PPG_H128W128.yaml --epochs 20 --batch-size 4
+
+# PhysMamba2 (PhysMamba with Mamba2 layers, on PhysMamba's paper interface and recipe; CUDA only)
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physmamba2_FS30_W4.27S4.27_RGB_PPG_H128W128.yaml --epochs 20 --batch-size 4
+
+# PhysMamba3 (PhysMamba with SISO Mamba3 layers, on PhysMamba's paper interface and recipe; CUDA only)
+uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physmamba3_FS30_W4.27S4.27_RGB_PPG_H128W128.yaml --epochs 20 --batch-size 4
 
 # PhysNet
 uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/physnet_FS30_W4.27S4.27_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4

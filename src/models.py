@@ -24,6 +24,8 @@ from neural_methods.model.factorizephys import factorizephys
 from neural_methods.model.ibvpnet import ibvpnet
 from neural_methods.model.physformer import physformer
 from neural_methods.model.physmamba import physmamba
+from neural_methods.model.physmamba2 import physmamba2
+from neural_methods.model.physmamba3 import physmamba3
 from neural_methods.model.physnet import physnet
 from neural_methods.model.rhythmformer import rhythmformer
 from neural_methods.model.tscan import tscan
@@ -203,6 +205,18 @@ def _build_physmamba(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTrace
     return _multi_trace(lambda: physmamba.PhysMamba(in_channels=width), interface, cfg)
 
 
+def _build_physmamba2(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
+    _require_min_frame(interface, "PhysMamba2", physmamba2.MIN_FRAME)
+    width = len(interface.CHANNELS)
+    return _multi_trace(lambda: physmamba2.PhysMamba2(in_channels=width), interface, cfg)
+
+
+def _build_physmamba3(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
+    _require_min_frame(interface, "PhysMamba3", physmamba3.MIN_FRAME)
+    width = len(interface.CHANNELS)
+    return _multi_trace(lambda: physmamba3.PhysMamba3(in_channels=width), interface, cfg)
+
+
 def _build_physnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysNet", physnet.MIN_FRAME)
     width = len(interface.CHANNELS)
@@ -238,6 +252,8 @@ MODEL_BUILDERS = {
     "FactorizePhys": _build_factorizephys,
     "PhysFormer": _build_physformer,
     "PhysMamba": _build_physmamba,
+    "PhysMamba2": _build_physmamba2,
+    "PhysMamba3": _build_physmamba3,
     "PhysNet": _build_physnet,
     "RhythmFormer": _build_rhythmformer,
     "TSCAN": _build_tscan,

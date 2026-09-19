@@ -133,6 +133,8 @@ MODEL_CONFIGS = {
     "FactorizePhys": FactorizePhysConfig,
     "PhysFormer": ModelConfig,
     "PhysMamba": ModelConfig,
+    "PhysMamba2": ModelConfig,
+    "PhysMamba3": ModelConfig,
     "PhysNet": ModelConfig,
     "RhythmFormer": ModelConfig,
     "TSCAN": TemporalShiftConfig,
