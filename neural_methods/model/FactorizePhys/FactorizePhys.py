@@ -6,7 +6,7 @@ Multidimensional Attention in Remote Physiological Sensing", NeurIPS 2024.
 The architecture is the published ``FSAM_Res`` one: a 3-D convolutional
 feature extractor over the temporal difference of the clip, a head whose
 voxel embeddings are multiplied by the factorized attention mask of
-:mod:`neural_methods.model.FactorizePhys.FSAM` and added back to themselves,
+:mod:`neural_methods.model.factorizephys.features_factorization_module` and added back to themselves,
 and a single readout plane. At ``in_channels=3`` and the defaults it is that
 network layer for layer; the differences from the upstream file are the ones
 this contract asks of every model:
@@ -45,15 +45,13 @@ trainer. All reshaping is einops.
 
 import torch
 import torch.nn as nn
-from einops import rearrange
-from torch.nn import functional as F
 
-from neural_methods.model.FactorizePhys.FSAM import FeaturesFactorizationModule
-from neural_methods.model.modules.conv_block_3d import ConvBlock3D
-from neural_methods.model.shared import require_min_frame
+from neural_methods.model.factorizephys.bvp_head import BVPHead
+from neural_methods.model.factorizephys.rppg_feature_extractor import RPPGFeatureExtractor
+from neural_methods.model._shared_modules.utils import require_min_frame
 
 #: The published filter counts of the three stages.
-nf = [8, 12, 16]
+FILTERS = [8, 12, 16]
 
 #: What the head's chain of valid 3x3x3 convolutions consumes: three in the
 #: conv block and three in the final layer, two pixels each, ending at 1x1.
@@ -63,88 +61,6 @@ HEAD_SPATIAL = 13
 #: runs 72 -> 35 -> 33 -> 31 -> 15 -> 13, and 23 -> 11 -> 9 -> 7 -> 3 -> 1 is
 #: the smallest frame it leaves anything of.
 MIN_FRAME = 23
-
-
-class rPPG_FeatureExtractor(nn.Module):
-    """The 3-D convolutional stem. Shapes below are the paper's 72x72 frames."""
-
-    def __init__(self, inCh, dropout_rate=0.1):
-        super().__init__()
-        # inCh, out_channel, kernel_size, stride, padding, bias
-        #                                                                    Input: #B, inCh, 160, 72, 72
-        self.FeatureExtractor = nn.Sequential(
-            ConvBlock3D(inCh, nf[0], [3, 3, 3], [1, 1, 1], [1, 1, 1], bias=False),  #B, nf[0], 160, 72, 72
-            ConvBlock3D(nf[0], nf[1], [3, 3, 3], [1, 2, 2], [1, 0, 0], bias=False), #B, nf[1], 160, 35, 35
-            ConvBlock3D(nf[1], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[1], 160, 33, 33
-            nn.Dropout3d(p=dropout_rate),
-
-            ConvBlock3D(nf[1], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[1], 160, 31, 31
-            ConvBlock3D(nf[1], nf[2], [3, 3, 3], [1, 2, 2], [1, 0, 0], bias=False), #B, nf[2], 160, 15, 15
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 13, 13
-            nn.Dropout3d(p=dropout_rate),
-        )
-
-    def forward(self, x):
-        return self.FeatureExtractor(x)
-
-
-class BVP_Head(nn.Module):
-    """Voxel embeddings in, one trace out, factorized attention in between."""
-
-    def __init__(self, dropout_rate=0.1, use_fsam=True, residual=True):
-        super().__init__()
-        self.use_fsam = use_fsam
-        self.residual = residual
-
-        self.conv_block = nn.Sequential(
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 11, 11
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 9, 9
-            ConvBlock3D(nf[2], nf[2], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False), #B, nf[2], 160, 7, 7
-            nn.Dropout3d(p=dropout_rate),
-        )
-
-        if self.use_fsam:
-            self.fsam = FeaturesFactorizationModule(nf[2], align_channels=nf[2] // 2)
-            self.fsam_norm = nn.InstanceNorm3d(nf[2])
-            self.bias1 = nn.Parameter(torch.tensor(1.0))
-
-        self.final_layer = nn.Sequential(
-            ConvBlock3D(nf[2], nf[1], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False),            #B, nf[1], 160, 5, 5
-            ConvBlock3D(nf[1], nf[0], [3, 3, 3], [1, 1, 1], [1, 0, 0], bias=False),            #B, nf[0], 160, 3, 3
-            nn.Conv3d(nf[0], 1, (3, 3, 3), stride=(1, 1, 1), padding=(1, 0, 0), bias=True),    #B, 1, 160, 1, 1
-        )
-
-    def output_layers(self):
-        """The activation-free readout: the final layer's 1-plane conv."""
-        return (self.final_layer[-1],)
-
-    def forward(self, voxel_embeddings):
-        """``(B, nf[2], T, H', W')`` -> ``(B, 1, T)``."""
-        # Any frame size: the convolutions below are all valid and take
-        # HEAD_SPATIAL down to a point, so whatever the extractor hands over
-        # is resampled to that. At the paper's 72x72 frames it is already 13x13
-        # and this is skipped.
-        frames = voxel_embeddings.shape[2]
-        if tuple(voxel_embeddings.shape[3:]) != (HEAD_SPATIAL, HEAD_SPATIAL):
-            voxel_embeddings = F.adaptive_avg_pool3d(
-                voxel_embeddings, (frames, HEAD_SPATIAL, HEAD_SPATIAL))
-
-        voxel_embeddings = self.conv_block(voxel_embeddings)
-
-        if self.use_fsam:
-            # NMF factorises a non-negative matrix, so the embeddings are
-            # shifted before the mask is taken, and again before it is applied.
-            att_mask = self.fsam(voxel_embeddings - voxel_embeddings.min())
-            x = torch.mul(voxel_embeddings - voxel_embeddings.min() + self.bias1,
-                          att_mask - att_mask.min() + self.bias1)
-            factorized_embeddings = self.fsam_norm(x)
-            if self.residual:
-                factorized_embeddings = voxel_embeddings + factorized_embeddings
-            x = self.final_layer(factorized_embeddings)
-        else:
-            x = self.final_layer(voxel_embeddings)
-
-        return rearrange(x, "b 1 t 1 1 -> b 1 t")
 
 
 class FactorizePhys(nn.Module):
@@ -160,8 +76,8 @@ class FactorizePhys(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.norm = nn.InstanceNorm3d(in_channels)
-        self.rppg_feature_extractor = rPPG_FeatureExtractor(in_channels, dropout_rate=dropout)
-        self.rppg_head = BVP_Head(dropout_rate=dropout, use_fsam=use_fsam)
+        self.rppg_feature_extractor = RPPGFeatureExtractor(in_channels, FILTERS, dropout_rate=dropout)
+        self.rppg_head = BVPHead(FILTERS, HEAD_SPATIAL, dropout_rate=dropout, use_fsam=use_fsam)
 
     def output_layers(self):
         """The activation-free readout of this one copy."""

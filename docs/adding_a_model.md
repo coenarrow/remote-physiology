@@ -25,8 +25,8 @@ speaking the batch dict: frames in, predictions out, nothing else.
 - **The input is raw and the model normalises it.** The dataset resizes and
   nothing else; whatever the paper fed its network (standardised frames,
   frame differences) is the backbone's own first stage, taken from
-  [`neural_methods/model/modules/`](../neural_methods/model/modules/). There
-  is no input-preprocessing switch anywhere in config.
+  [`neural_methods/model/_shared_modules/`](../neural_methods/model/_shared_modules/).
+  There is no input-preprocessing switch anywhere in config.
 - **The loss is the trainer's, not the model's.** The interface's `LOSS` block
   states it per trace; a model that computes its own loss is wrong.
 - **The trainer reaches into the model in two places**: the readouts
@@ -38,16 +38,15 @@ speaking the batch dict: frames in, predictions out, nothing else.
 Because the wrapper owns channel order, trace order and the dict, an
 architecture never sees a dict at all. It sees a tensor and returns a tensor.
 
-## The six things you touch
+## The five things you touch
 
 | # | What | Where | Exists for DeepPhys as |
 | --- | ------ | ------- | ------------------------ |
-| 1 | The backbone, a plain `nn.Module` | `neural_methods/model/<Name>.py` | [`neural_methods/model/DeepPhys.py`](../neural_methods/model/DeepPhys.py) |
+| 1 | The backbone, a package of plain `nn.Module`s, one per file | `neural_methods/model/<name>/` | [`neural_methods/model/deepphys/`](../neural_methods/model/deepphys/) (one file); [`neural_methods/model/factorizephys/`](../neural_methods/model/factorizephys/) (several) |
 | 2 | One registry line (+ a config class only if the model has a switch) | `src/model_config.py` | the `"DeepPhys"` entry of `MODEL_CONFIGS`, mapped to the shared `ModelConfig` |
 | 3 | Builder + one registry line | `src/models.py` | `_build_deepphys`, the `"DeepPhys"` entry of `MODEL_BUILDERS` |
 | 4 | The paper config: `MODEL`, `INTERFACE` and `TRAIN` in one file | `configs/original_model_config/<name>_<interface>.yaml` | [`deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml`](../configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml) |
-| 5 | One smoke test | `tests/test_<name>.py` | (not yet written; see step 4) |
-| 6 | The PURE command that proves it runs | `README.md`, "Algorithms" | the DeepPhys line |
+| 5 | The PURE command that proves it runs | `README.md`, "Algorithms" | the DeepPhys line |
 
 Nothing else. No new trainer, loader, loss, dataset or plot. If your model
 needs something the shared pieces almost do, extend the shared piece for
@@ -55,22 +54,62 @@ every model rather than adding a parallel copy beside it.
 
 Copyable starting points:
 
-- [`neural_methods/model/_template.py`](../neural_methods/model/_template.py)
+- [`neural_methods/model/_model_template/_template.py`](../neural_methods/model/_model_template/_template.py)
   for the backbone (step 1);
 - [`configs/_model_config_template.yaml`](../configs/_model_config_template.yaml)
   for the paper config (step 3): every key with its type and the values
   the parser accepts; DeepPhys's
   [config file](../configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml)
   is the filled-in example;
-- the code blocks in steps 2 and 4 below for the registration and the test.
+- the code blocks in step 2 below for the registration.
 
 ## Step 1: the backbone
 
-**File:** `neural_methods/model/<Name>.py`, one architecture per file, named
-after the architecture as its paper names it.
+**Package:** `neural_methods/model/<name>/`, one directory per architecture,
+named after the architecture in lowercase (`factorizephys`, `ibvpnet`).
 
-The backbone is an `nn.Module` with no knowledge of dicts, traces or
-channels. Its whole contract is:
+### Layout: one `nn.Module` per file
+
+[`neural_methods/model/factorizephys/`](../neural_methods/model/factorizephys/)
+is the worked example of a network made of several modules:
+
+```text
+neural_methods/model/factorizephys/
+  __init__.py                        empty
+  factorizephys.py                   class FactorizePhys + the structural constants
+  rppg_feature_extractor.py          class RPPGFeatureExtractor
+  bvp_head.py                        class BVPHead
+  features_factorization_module.py   class FeaturesFactorizationModule
+  nmf.py                             class NMF
+  conv_relu_3d.py                    class ConvReLU3D
+```
+
+- **`<name>/<name>.py` is the model.** It holds the top-level class and
+  nothing else that is an `nn.Module`. It is the file `src/models.py`
+  imports, and the only file anything outside the package imports.
+- **Every other `nn.Module` has a file of its own**, named after its class in
+  snake_case (`BVPHead` in `bvp_head.py`). No file defines two. Each file is
+  self-contained: its own imports, its own docstring, siblings imported by
+  absolute path (`from neural_methods.model.factorizephys.nmf import NMF`).
+  A network that is a single module (DeepPhys) is a package of one file.
+- **Structural constants live in `<name>.py` and nowhere else.** The
+  module-level values that define the network's shape — FactorizePhys's
+  `FILTERS`, `HEAD_SPATIAL` and `MIN_FRAME` — are defined once, in the model
+  file. A sub-module that needs one takes it as a constructor argument with
+  no default (`BVPHead(filters, head_spatial, ...)`) and the model passes it
+  down; a sub-module never imports from `<name>.py`, so there is nothing
+  circular. A hyperparameter that belongs to one sub-module alone (`rank`,
+  `splits` and `steps` of `NMF`) stays a default in that sub-module's
+  signature.
+- **Functions that are not modules go in `<name>/utils.py`**: a layer
+  factory, a reshaping helper. One `utils.py` per package, only if needed.
+- **A piece two architectures need is not in either package.** It lives in
+  [`neural_methods/model/_shared_modules/`](../neural_methods/model/_shared_modules/),
+  under the same one-module-per-file rule, with the shared functions in its
+  `utils.py`.
+
+The backbone — the top-level class — is an `nn.Module` with no knowledge of
+dicts, traces or channels. Its whole contract is:
 
 ### Constructor
 
@@ -100,11 +139,13 @@ clip, folds `(b t)` into the batch axis for its 2D layers and unfolds the
 prediction back. The temporal-shift models (TS-CAN, EfficientPhys) need the
 clip for the same reason and also so the shift knows where each clip starts
 and ends. The shift itself is the shared `TSM` in
-[`neural_methods/model/shared.py`](../neural_methods/model/shared.py). That
-module is where every piece more than one backbone needs lives —
-`nearest_multiple`, `dense_width`, `min_frame_message`,
-`require_min_frame`, `Attention_mask`, `TSM` — and it is where a new shared
-piece belongs.
+[`neural_methods/model/_shared_modules/temporal_shift.py`](../neural_methods/model/_shared_modules/temporal_shift.py).
+That package is where every piece more than one backbone needs lives — the
+modules `TSM`, `AttentionMask`, `CDCT`, `ConvBlock3D`, `DiffNormalize` and
+`Standardize`, one file each, and the functions `nearest_multiple`,
+`dense_width`, `min_frame_message` and `require_min_frame` in its
+[`utils.py`](../neural_methods/model/_shared_modules/utils.py) — and it is
+where a new shared piece belongs.
 
 The output is one trace, width one. Never widen the readout to several
 signals and never add per-signal heads on a shared trunk: the wrapper makes
@@ -116,7 +157,7 @@ concatenates copies on axis 1.
 The input is raw. The dataset resizes to `RESIZE` and hands over pixel
 values; the backbone applies the paper's `DATA_TYPE` itself as its first
 stage, one `nn.Module` from
-[`neural_methods/model/modules/`](../neural_methods/model/modules/):
+[`neural_methods/model/_shared_modules/`](../neural_methods/model/_shared_modules/):
 
 | Paper `DATA_TYPE` | First stage | Who |
 | ------------------- | ------------- | ----- |
@@ -203,7 +244,8 @@ keeps one module serving every interface. What is never acceptable is a
 silent crop, truncation or reinterpretation.
 
 The one refusal that remains is a frame the stem pools to nothing. Each
-pooling backbone states its own floor as a module-level `MIN_FRAME`:
+pooling backbone states its own floor as a module-level `MIN_FRAME` in its
+`<name>.py`:
 
 | Model | `MIN_FRAME` | Why |
 | ------- | ------------- | ----- |
@@ -216,13 +258,13 @@ pooling backbone states its own floor as a module-level `MIN_FRAME`:
 
 The builder names it via `_require_min_frame` when the interface resizes;
 the module raises the same sentence at forward time, both taking it from
-`neural_methods.model.shared.min_frame_message`.
+`neural_methods.model._shared_modules.utils.min_frame_message`.
 
 The other refusal that stays is for a dense-layer model. DeepPhys, TS-CAN
 and EfficientPhys size their dense head from the frame, so they need an
 interface that states a `RESIZE`; a run with no resize cannot tell them how
 wide that layer is. The frame need not be square — the width is derived per
-axis by `neural_methods.model.shared.dense_width`.
+axis by `neural_methods.model._shared_modules.utils.dense_width`.
 
 Two interim class attributes exist for a migration that is not there yet:
 
@@ -239,6 +281,22 @@ rather than truncating.
 
 ### House rules
 
+- **Names follow PEP 8, everywhere, with no exemption for upstream
+  spellings.** Packages and module files are lowercase snake_case
+  (`factorizephys/bvp_head.py`); classes are CapWords with acronyms
+  capitalised whole (`BVPHead`, `RPPGFeatureExtractor`, `NMF`), the
+  top-level class included; functions, arguments, variables and attributes
+  are snake_case (`in_channels`, never `inCh`; `self.feature_extractor`,
+  never `self.FeatureExtractor`); module-level constants are
+  `UPPER_SNAKE_CASE` (`FILTERS`, `MIN_FRAME`). Renaming an attribute that
+  holds parameters renames its `state_dict` key, so a checkpoint published
+  for the upstream code does not load here; that is accepted, and no
+  docstring should promise otherwise. The one name that stays as the paper
+  spells it is the string in the registries and the YAML's `NAME:`.
+- **Ruff checks it.** `uv run ruff check neural_methods/model/<name>` must
+  pass: pycodestyle and pep8-naming, configured under `[tool.ruff]` in
+  `pyproject.toml`. `import torch.nn.functional as F` is exempt, as the
+  torch idiom.
 - Tensor reshaping uses einops (`rearrange`, `reduce`, `einsum`), not
   `view` / `permute` / `reshape`. This applies to migrated code too.
 - No `params` argument, no loss, no `get_config`, no device handling.
@@ -294,7 +352,7 @@ config load refuses it.
 ```python
 def _build_mynet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: MyNet(in_channels=width), interface)
+    return _multi_trace(lambda: mynet.MyNet(in_channels=width), interface, cfg)
 ```
 
 Inputs: the loaded config and the loaded interface. Output: a
@@ -329,12 +387,14 @@ MODEL_BUILDERS = {
 ```
 
 The key is what `NAME:` must say in the YAML. Use the architecture's proper
-name, matching the module's class.
+name as the paper spells it; it is a string, so PEP 8 has no say in it.
 
-Also add the import at the top of `src/models.py` beside `DeepPhys`'s:
+Also add the import at the top of `src/models.py` beside the others. Import
+the model *module*, so the builder reaches both the class and its constants
+(`mynet.MyNet`, `mynet.MIN_FRAME`):
 
 ```python
-from neural_methods.model.MyNet import MyNet
+from neural_methods.model.mynet import mynet
 ```
 
 ## Step 3: the paper config file
@@ -373,7 +433,7 @@ Set every key to the rPPG-Toolbox definition of the model:
 | Key | Upstream source |
 | ----- | ----------------- |
 | `FS` | the rate the published config trains at (30 for the UBFC recipes) |
-| `WINDOW_SECONDS` | `CHUNK_LENGTH / FS`, written to six decimals so it snaps to a whole frame |
+| `WINDOW_SECONDS` | `CHUNK_LENGTH / FS`; the loader rounds `WINDOW_SECONDS x FS` to the nearest whole frame |
 | `RESIZE` | the published `RESIZE.H` / `RESIZE.W` |
 | `TRACES` | `[PPG]`: the upstream models predict BVP and nothing else |
 | `LOSS` | the published criterion (`MSE` for DeepPhys, `NEGPEARSON` for PhysMamba and PhysFormer) |
@@ -431,37 +491,6 @@ the backbone's own first stage, not an interface key):
 | RhythmFormer | 128x128 | 160 frames | Standardized | negative Pearson | AdamW 9e-3, OneCycle, 30 epochs |
 | TS-CAN | 72x72 | 180 frames | DiffNormalized + Standardized | MSE | AdamW 9e-3, OneCycle, 30 epochs |
 | iBVPNet | 72x72 | 160 frames | Raw | negative Pearson | Adam 1e-3, OneCycle, 30 epochs |
-
-## Step 4: one smoke test
-
-**File:** `tests/test_<name>.py`. One test, and only one: build the model
-from its paper config and push one synthetic batch through. This is
-the ceiling for a migration; do not add tests opportunistically.
-
-```python
-import torch
-
-from src.model_config import load_config
-from src.models import build_model
-
-CONFIG = "configs/original_model_config/mynet_<interface>.yaml"
-
-
-def test_mynet_forward_matches_the_contract():
-    interface, model_config, _ = load_config(CONFIG)
-    model = build_model(model_config, interface)
-    B, T = 2, interface.window_frames
-    H, W = interface.RESIZE.H, interface.RESIZE.W
-    batch = {"frames": {ch: torch.rand(B, T, H, W) for ch in interface.CHANNELS}}
-    out = model(batch)
-    assert set(out["predictions"]) == set(interface.TRACES)
-    assert all(p.shape == (B, T) for p in out["predictions"].values())
-    assert len(model.output_layers()) == len(interface.TRACES)
-```
-
-Run it with `uv run pytest tests/test_mynet.py`. If the architecture cannot
-yet take the interface's window, the test is where the `temporal_divisor`
-refusal will surface first.
 
 ## Running it
 
@@ -521,8 +550,12 @@ dataset it came from and `all` on the rest):
 Nine upstream rPPG-Toolbox models are migrated and registered in
 `MODEL_CONFIGS` today (see the intro). One upstream model in
 `neural_methods/model/` remains unmigrated —
-[`PhysHydra.py`](../neural_methods/model/PhysHydra.py) — and it stays there
-deliberately, out of scope rather than pending. An upstream model, before
+[`physhydra/physhydra.py`](../neural_methods/model/physhydra/physhydra.py) —
+and it stays there deliberately, out of scope rather than pending. A tenth
+registered model is not upstream's:
+[`physmamba2/`](../neural_methods/model/physmamba2/) subclasses `PhysMamba`
+and overrides only `_build_ssm`, swapping Mamba1 for Mamba2 — the form a
+layer-swap variant of an existing model takes. An upstream model, before
 migration, predicts one BVP trace from RGB and carries conventions this
 contract drops. Migrating one is editing the module in place, not writing a
 new one beside it, and the diff is almost always these items:
@@ -538,7 +571,7 @@ new one beside it, and the diff is almost always these items:
    `(b t)` inside and unfolds its `(N, 1)` back to `(B, 1, T)`.
 4. **Own the input preprocessing, drop the loss.** The upstream `DATA_TYPE`
    becomes the network's first stage: `DiffNormalize()` and/or
-   `Standardize()` from `neural_methods/model/modules/`, applied to the raw
+   `Standardize()` from `neural_methods/model/_shared_modules/`, applied to the raw
    clip on the first line of `forward` (step 1, "Input normalisation"). Any
    loss lives in the interface's `LOSS` block.
 5. **Drop `params`, `get_config`, and dead imports** (`pdb`, `math` for
@@ -553,16 +586,28 @@ new one beside it, and the diff is almost always these items:
    paper fed single frames with `T` hidden in the batch axis, normalise the
    clip first, then fold `(b t)` for the 2D layers and unfold at the end, as
    DeepPhys does.
+9. **Split it and rename it.** One `nn.Module` per file under
+   `neural_methods/model/<name>/`, the structural constants in `<name>.py`
+   and passed down, every name PEP 8 (step 1, "Layout" and "House rules").
+   The split itself changes no arithmetic: check the split network against
+   the file you started from — same `state_dict` shapes, and, with the
+   weights copied across, `torch.equal` outputs at the paper's shape and at
+   an odd one — in a throwaway script, not a test.
 
-Then steps 2 to 4 above. DeepPhys shows the finished form: compare
-`neural_methods/model/DeepPhys.py` against the upstream file to see exactly
-how small the diff is.
+Then steps 2 and 3 above. FactorizePhys shows the finished form:
+[`neural_methods/model/factorizephys/`](../neural_methods/model/factorizephys/)
+against the upstream `FactorizePhys.py` and `FSAM.py`.
 
 ## Checklist
 
-- [ ] `neural_methods/model/<Name>.py`: `in_channels` argument, published
-      sizes as defaults, the paper's input normalisation as the first stage,
+- [ ] `neural_methods/model/<name>/`: an empty `__init__.py`, the model in
+      `<name>.py`, one `nn.Module` per file, structural constants in
+      `<name>.py` and passed down as constructor arguments, helper functions
+      in `utils.py`.
+- [ ] The top-level class: `in_channels` argument, published sizes as
+      defaults, the paper's input normalisation as the first stage,
       `(B, C_in, T, H, W) -> (B, 1, T)`, `output_layers()`, einops, no loss.
+- [ ] `uv run ruff check neural_methods/model/<name>` passes.
 - [ ] `src/model_config.py`: one line in `MODEL_CONFIGS`; a config class
       only if there is a switch.
 - [ ] `src/models.py`: import, `_build_<name>`, one line in `MODEL_BUILDERS`.
@@ -575,7 +620,6 @@ how small the diff is.
       batch size go in the README command).
 - [ ] The model builds and runs on the standard interface too; any size the
       paper did not use goes through an adaptive stage, not a refusal.
-- [ ] `tests/test_<name>.py`: one build-and-forward test, passing.
 - [ ] A smoke run with `--limit-windows` reaches `evaluate` and writes the
       run directory.
 - [ ] `README.md`, "Algorithms": add the model to the list on the contract,

@@ -2,7 +2,7 @@
 
 The cache holds raw pixel values; the dataset (``src.inputs``) resizes each
 window to the interface's ``RESIZE`` and hands the raw plane on. Normalising
-is the backbone's own first stage (``neural_methods.model.modules``), never
+is the backbone's own first stage (``neural_methods.model._shared_modules``), never
 the dataset's. Every reshape is einops.
 """
 

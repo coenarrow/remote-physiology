@@ -7,7 +7,7 @@ module, at its published values. Every width is derived from the interface
 (first layer from ``CHANNELS``, one copy of the network per entry of
 ``TRACES``), so nothing is said in two places. Input preprocessing is not a
 switch either: every backbone takes the raw clip and normalises it itself
-(``neural_methods.model.modules``).
+(``neural_methods.model._shared_modules``).
 
 The built model is a :class:`MultiTraceModel`: one complete copy of the
 architecture per trace, speaking the batch dict. A model is a function from
@@ -18,13 +18,16 @@ import torch
 import torch.nn as nn
 
 from src.config import ConfigError
-from neural_methods.model import (DeepPhys as deepphys, EfficientPhys as efficientphys,
-    PhysFormer as physformer, PhysMamba as physmamba, PhysNet as physnet,
-    RhythmFormer as rhythmformer, TS_CAN as tscan, iBVPNet as ibvpnet,
-)
-# The same idiom; FactorizePhys is a package, so its module needs its own line.
-from neural_methods.model.FactorizePhys import FactorizePhys as factorizephys
-from neural_methods.model.shared import min_frame_message
+from neural_methods.model.deepphys import deepphys
+from neural_methods.model.efficientphys import efficientphys
+from neural_methods.model.factorizephys import factorizephys
+from neural_methods.model.ibvpnet import ibvpnet
+from neural_methods.model.physformer import physformer
+from neural_methods.model.physmamba import physmamba
+from neural_methods.model.physnet import physnet
+from neural_methods.model.rhythmformer import rhythmformer
+from neural_methods.model.tscan import tscan
+from neural_methods.model._shared_modules.utils import min_frame_message
 from src.model_config import (
     FactorizePhysConfig, InterfaceConfig, ModelConfig, TemporalShiftConfig,
 )
@@ -37,7 +40,7 @@ def _require_min_frame(interface: InterfaceConfig, name: str, minimum: int) -> N
     """A backbone whose stem pools spatially needs a frame it leaves something of.
     Only checkable here when the interface resizes; otherwise the backbone
     refuses at forward time with the same sentence, which both sides take from
-    ``neural_methods.model.shared.min_frame_message``."""
+    ``neural_methods.model._shared_modules.utils.min_frame_message``."""
     if interface.resizes and min(interface.RESIZE.H, interface.RESIZE.W) < minimum:
         raise ConfigError(
             f"{min_frame_message(name, minimum)}; the interface RESIZE is "
@@ -224,7 +227,7 @@ def _build_tscan(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiT
 def _build_ibvpnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "iBVPNet", ibvpnet.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: ibvpnet.iBVPNet(in_channels=width), interface, cfg)
+    return _multi_trace(lambda: ibvpnet.IBVPNet(in_channels=width), interface, cfg)
 
 
 #: ``NAME`` -> builder. One line per architecture, matching its line in

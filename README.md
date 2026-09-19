@@ -103,7 +103,7 @@ set MSSdk=1
 ```
 
 Without `mamba-ssm` (no CUDA, or an unsupported platform), PhysMamba still
-runs: `mamba_compat.MambaRef` is a pure-PyTorch selective-SSM block that trains
+runs: `MambaRef` (`neural_methods/model/physmamba/mamba_ref.py`) is a pure-PyTorch selective-SSM block that trains
 and is parameter-compatible with the real one. A correctness path, not a speed
 one.
 
@@ -238,11 +238,11 @@ are the templates, and [docs/hpc_pure_physmamba.md](docs/hpc_pure_physmamba.md)
 walks a run through end to end.
 
 To put another architecture on the contract, new or migrated from upstream,
-follow [docs/adding_a_model.md](docs/adding_a_model.md): one backbone module,
+follow [docs/adding_a_model.md](docs/adding_a_model.md): one backbone package,
 one registry line and builder, one config YAML (the paper's model section,
-interface and training recipe), one smoke test, and the command above.
+interface and training recipe), and the command above.
 Starting points to copy are
-[`neural_methods/model/_template.py`](neural_methods/model/_template.py) and
+[`neural_methods/model/_model_template/_template.py`](neural_methods/model/_model_template/_template.py) and
 DeepPhys's [config file](configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml).
 
 The original papers are linked from the
