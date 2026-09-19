@@ -115,6 +115,13 @@ TS-CAN, iBVPNet. Two more are this repo's own: PhysMamba2 and PhysMamba3,
 PhysMamba with its Mamba1 layers swapped for Mamba2
 (`neural_methods/model/physmamba2/`) and for the SISO Mamba3
 (`neural_methods/model/physmamba3/`), there to compare the three layers.
+CardioConv (`neural_methods/model/cardioconv/`) is also this repo's own, and
+the one multi-trace architecture: built once for arterial and venous pressure
+from neck video, where every other model is copied per trace. Its own setup
+is Neckflix, so its command below runs there, not on PURE. For now it is
+handed the heart rate of the label, which is label leakage at test time; its
+numbers are not comparable with the others' until it estimates the rate from
+the video.
 
 Each one trains on the PURE dataset holding out its first participant, on
 the model's own paper interface and paper training recipe (the rPPG-Toolbox
@@ -147,6 +154,9 @@ after the paper interface it encodes; the epochs after `--epochs` are the
 paper's:
 
 ```bash
+# CardioConv (its own interface and recipe are Neckflix: ABP and CVP from RGB, infrared and depth; reads the label's heart rate)
+uv run python scripts/run.py --datasets neckflix --test-participant-dataset neckflix --test-participant-id 1 --config configs/original_model_config/cardioconv_FS30_W8.53S4.27_RGBID_ABP-CVP_H128W128.yaml --epochs 3 --batch-size 2
+
 # DeepPhys
 uv run python scripts/run.py --datasets pure --test-participant-dataset pure --test-participant-id 01 --config configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml --epochs 30 --batch-size 4
 

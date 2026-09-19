@@ -118,7 +118,8 @@ def main(argv=None) -> Path:
     except ValueError as err:          # ConfigError is a ValueError
         parser.error(str(err))
 
-    # The model: one copy of the architecture per trace, widths from the
+    # The model: one prediction per trace (a single-trace architecture is
+    # copied per trace, a multi-trace one built once), widths from the
     # interface, dict in and dict out. The loss is the trainer's, not its.
     model = build_model(model_config, interface)
     print_model(model_config, model)

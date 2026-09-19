@@ -54,6 +54,7 @@ dependencies = [
     "zarr>=3.3",
     "pillow>=12.3.0",
     "seaborn>=0.13.2",
+    "ptwt>=1.0.1",
 ]
 
 [dependency-groups]

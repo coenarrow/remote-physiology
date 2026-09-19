@@ -36,6 +36,15 @@ multi-signal contract.
   Every addition considers all three platforms: Windows dev, Linux HPC, macOS.
 - **All tensor reshaping uses einops** (`rearrange` / `reduce` / `einsum`),
   not `view` / `permute` / `reshape` — including migrated model code.
+- **A single-trace design is copied per trace; a multi-trace design is
+  built once.** An architecture designed to predict one trace (every
+  upstream rPPG-Toolbox model) gets one complete copy per entry of `TRACES`
+  and never a widened readout or per-signal heads on a shared trunk. An
+  architecture designed from the start to predict several traces
+  (CardioConv) is one network returning `(B, S, T)` in `TRACES` order. Which
+  one a model is follows from its design, not from convenience, and nothing
+  downstream of the model can tell them apart. `docs/adding_a_model.md`,
+  "What a model is here".
 - **A model is a package, one `nn.Module` per file, named by PEP 8.**
   `neural_methods/model/<name>/<name>.py` holds the top-level class and the
   structural constants, which sub-modules receive as constructor arguments;

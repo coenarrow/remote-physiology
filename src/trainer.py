@@ -106,10 +106,11 @@ def check_window(model: MultiTraceModel, interface: InterfaceConfig) -> None:
 
     A backbone that downsamples time internally declares ``temporal_divisor``;
     one built for exactly one length declares ``temporal_length``. Declared on
-    the backbone, read off the first copy — every copy is the same network.
+    the architecture and read off the model's backbone, which passes a copied
+    architecture's declaration through.
     """
-    backbone = next(iter(model.copies.values()))
-    name = type(backbone).__name__
+    backbone = model.backbone
+    name = model.architecture
     frames, fs = interface.window_frames, interface.FS
     fixed = getattr(backbone, "temporal_length", None)
     divisor = getattr(backbone, "temporal_divisor", 1) or 1
@@ -133,9 +134,9 @@ def init_output_bias(model: MultiTraceModel, interface: InterfaceConfig) -> None
         return
     if len(layers) != len(model.traces):
         raise ConfigError(
-            f"{type(model).__name__}.output_layers() returned {len(layers)} "
-            f"readouts for {len(model.traces)} traces; one copy per trace means "
-            f"one readout per trace.")
+            f"{model.architecture}.output_layers() returned {len(layers)} "
+            f"readouts for {len(model.traces)} traces; copied or built once, "
+            f"a model has one readout per trace.")
     with torch.no_grad():
         for trace, layer in zip(model.traces, layers):
             if layer.bias is None or layer.bias.numel() != 1:

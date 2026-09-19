@@ -10,6 +10,7 @@ and a line here, not a redesign.
 from functools import partial
 
 from neural_methods.loss.ccc import CCC
+from neural_methods.loss.lag_pearson import LagPearson
 from neural_methods.loss.mean_l1 import MeanL1
 from neural_methods.loss.mse import MSE
 from neural_methods.loss.neg_pearson import NegPearson
@@ -23,6 +24,7 @@ COMPONENTS = {
     'max': partial(SoftPeakL1, 'max'),
     'min': partial(SoftPeakL1, 'min'),
     'negpearson': NegPearson,
+    'lagpearson': LagPearson,
     'mse': MSE,
 }
 

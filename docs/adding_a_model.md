@@ -14,14 +14,40 @@ describes.
 
 ## What a model is here
 
-A model is **one complete copy of a single-trace architecture per predicted
-trace**, wrapped in `MultiTraceModel` ([`src/models.py`](../src/models.py)),
-speaking the batch dict: frames in, predictions out, nothing else.
+A model speaks the batch dict: frames in, one prediction per entry of the
+interface's `TRACES` out, nothing else. How it gets from one to the other
+depends on what the architecture was designed to predict:
+
+- **An architecture designed to predict a single trace is copied, one
+  complete copy per predicted trace**, by `MultiTraceModel`
+  ([`src/models.py`](../src/models.py)). Every upstream rPPG-Toolbox model
+  is one of these: it was published predicting BVP and nothing else, so its
+  readout is never widened and it never grows per-signal heads on a shared
+  trunk. Signals such as ABP and CVP come from different regions of the
+  frame, and a network that was not designed to tell them apart is not
+  asked to; the cost is parameters, by design.
+- **An architecture designed from the start to predict several traces is
+  built once** and predicts all of them. What it shares between traces, and
+  where they part, is its design (CardioConv's arterial, venous and
+  background masks compete in one softmax, which no pair of copies could
+  do). See "A multi-trace architecture" below for what differs.
+
+Which of the two a model is follows from its design, never from
+convenience: a single-trace network is not turned into a multi-trace one by
+widening its head, and a multi-trace network is not cut into per-trace
+copies to fit the wrapper. Everything downstream of the model — the trainer,
+the loss, the records, the evaluation — sees the same `predictions` dict
+either way and cannot tell the two apart.
+
+The rest of this guide describes the single-trace form, which is what all
+the models on the contract today are, and marks where the multi-trace form
+differs.
 
 - **Every width comes from the interface**, never from the model's YAML. The
   first layer takes the interface's channel count, and there is one copy of
-  the network per entry of `TRACES`. Layer sizes are defined once, in the
-  architecture's module, at their published values.
+  the network (or, for a multi-trace architecture, one output) per entry of
+  `TRACES`. Layer sizes are defined once, in the architecture's module, at
+  their published values.
 - **The input is raw and the model normalises it.** The dataset resizes and
   nothing else; whatever the paper fed its network (standardised frames,
   frame differences) is the backbone's own first stage, taken from
@@ -147,10 +173,12 @@ modules `TSM`, `AttentionMask`, `CDCT`, `ConvBlock3D`, `DiffNormalize` and
 [`utils.py`](../neural_methods/model/_shared_modules/utils.py) — and it is
 where a new shared piece belongs.
 
-The output is one trace, width one. Never widen the readout to several
-signals and never add per-signal heads on a shared trunk: the wrapper makes
-the copies. Return three dimensions, `(B, 1, T)`, not `(B, T)`; the wrapper
-concatenates copies on axis 1.
+The output of a single-trace architecture is one trace, width one. Never
+widen its readout to several signals and never add per-signal heads on its
+trunk: the wrapper makes the copies. Return three dimensions, `(B, 1, T)`,
+not `(B, T)`; the wrapper concatenates copies on axis 1. (An architecture
+designed for several traces returns `(B, S, T)` instead; see "A multi-trace
+architecture".)
 
 ### Input normalisation
 
@@ -276,8 +304,8 @@ temporal_length = 128    # the window length must be exactly this
 These are an interim stop for a migration in progress, not a destination, and
 none of the nine migrated models declares either any more — every one reached
 the adaptive stage described above. `src/trainer.py` still honours them: it
-reads them off the first copy and refuses a mismatched `WINDOW_SECONDS`
-rather than truncating.
+reads them off the backbone (`PerTraceCopies` passes its architecture's
+through) and refuses a mismatched `WINDOW_SECONDS` rather than truncating.
 
 ### House rules
 
@@ -300,8 +328,68 @@ rather than truncating.
 - Tensor reshaping uses einops (`rearrange`, `reduce`, `einsum`), not
   `view` / `permute` / `reshape`. This applies to migrated code too.
 - No `params` argument, no loss, no `get_config`, no device handling.
-- Nothing about traces or channels by name. A backbone cannot tell ABP from
-  CVP and must not try.
+- Nothing about traces or channels by name. A single-trace backbone cannot
+  tell ABP from CVP and must not try; a multi-trace one is told how many
+  traces there are and in what order, by the builder, and hard-codes none
+  of them.
+
+### A multi-trace architecture
+
+An architecture that was designed from the start to predict several traces
+(CardioConv is the first) is built once rather than copied. Everything above
+holds for it — the package layout, the raw clip in, the input normalisation
+as its own first stage, any frame size and window length, the house rules,
+no loss of its own — except where the text says "one trace":
+
+- **Constructor.** Beside `in_channels` it takes the traces from the
+  builder, read off `interface.TRACES`. It never hard-codes a trace list:
+  the interface says which traces a run predicts, and in what order.
+- **`forward`.** `(B, C_in, T, H, W)` in, `(B, S, T)` out, axis 1 in
+  `TRACES` order.
+- **`output_layers()`.** One activation-free, single-bias readout per trace,
+  in `TRACES` order, so the trainer seeds each with its own trace's prior
+  exactly as it does for copies.
+- **The loss is still the trainer's.** A multi-trace design usually arrives
+  with its own supervised losses; those become components of the interface's
+  `LOSS` block (added to the shared loss registry for every model if they
+  are missing), and only what the labels cannot see stays in the model, as
+  `regularisers()`.
+
+What makes an architecture multi-trace is that the traces interact inside
+it — a shared stage that separates them, a mixing step across them. A
+network whose traces never meet is a single-trace network and is copied.
+
+- **`regularisers()`** returns `{trace: {term: () tensor}}`, every declared
+  term under every trace. A term that belongs to one trace (a mask prior on
+  that trace's mask) goes under it; a term the traces share goes, identical,
+  under each — the total is the mean over traces, so it counts once.
+- **The builder** wraps the one network directly instead of making copies:
+
+  ```python
+  def _build_mynet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
+      width = len(interface.CHANNELS)
+      return _wrap(mynet.MyNet(in_channels=width, traces=interface.TRACES), interface, cfg)
+  ```
+
+- **The paper config is the model's own setup, whatever dataset that is.**
+  CardioConv was designed on Neckflix, so its
+  `configs/original_model_config/` file states the Neckflix channels and
+  pressure traces, and its README command runs on Neckflix: the "nothing
+  Neckflix-specific" rule is about the rPPG-Toolbox models, whose papers
+  never saw it.
+
+One thing in CardioConv is a stopgap and not part of the form: it declares
+`NEEDS_HEART_RATE`, and the wrapper then passes it `heart_rate`, read from
+the label by `label_heart_rate` in [`src/models.py`](../src/models.py). That
+is label leakage at test time, stated in the model, its configs and the
+README, and it goes when CardioConv estimates the rate from the video. Do
+not build on it.
+
+This is the contract `MultiTraceModel` holds every backbone to. A
+single-trace architecture meets it through `PerTraceCopies`
+([`src/models.py`](../src/models.py)), which is what `_multi_trace` builds:
+S copies presented as one backbone, their outputs concatenated, their
+readouts and regularisers gathered per trace.
 
 ## Step 2: registration in `src/model_config.py` and `src/models.py`
 
@@ -566,6 +654,8 @@ new one beside it, and the diff is almost always these items:
    single trace and return it from `output_layers()`. Delete any
    multi-signal head, `ParallelSignals` or `DictModel` wrapper from the
    legacy attempt; the wrapper in `src/models.py` replaces all of them.
+   Every upstream model was designed for one trace, so none of them is a
+   multi-trace architecture, whatever a legacy attempt bolted on.
 3. **Fix the output shape.** Clip models often emit `(B, T)`; return
    `(B, 1, T)` (`rearrange(x, "b t -> b 1 t")`). A per-frame network folds
    `(b t)` inside and unfolds its `(N, 1)` back to `(B, 1, T)`.
@@ -607,6 +697,8 @@ against the upstream `FactorizePhys.py` and `FSAM.py`.
 - [ ] The top-level class: `in_channels` argument, published sizes as
       defaults, the paper's input normalisation as the first stage,
       `(B, C_in, T, H, W) -> (B, 1, T)`, `output_layers()`, einops, no loss.
+      (An architecture designed for several traces: `-> (B, S, T)` and one
+      readout per trace, in `TRACES` order.)
 - [ ] `uv run ruff check neural_methods/model/<name>` passes.
 - [ ] `src/model_config.py`: one line in `MODEL_CONFIGS`; a config class
       only if there is a switch.

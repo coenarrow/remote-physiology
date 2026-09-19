@@ -6,7 +6,7 @@ their schema in the file's order:
 * ``MODEL`` — ``NAME``, the architecture, plus the switches an experiment may
   flip for it. Layer sizes are not config: an architecture is defined once,
   in its module, at its published values, and every width is derived from
-  the interface (first layer from ``CHANNELS``, one copy of the network per
+  the interface (first layer from ``CHANNELS``, one prediction per
   entry of ``TRACES``). Most architectures have no switch, so their section
   is ``NAME`` alone.
 * ``INTERFACE`` — the model's demand on the data pipeline: what every sample
@@ -51,7 +51,7 @@ from pathlib import Path
 
 from neural_methods.loss.registry import COMPONENTS, normalise_loss_weights
 from src.config import ConfigError, build, load_yaml
-from src.signal_transforms import validate_channels, validate_traces
+from src.signal_transforms import is_cardiac, validate_channels, validate_traces
 
 #: The sections of a config file, and the compiled-config key each becomes.
 CONFIG_SECTIONS = {"MODEL": "model", "INTERFACE": "interface", "TRAIN": "training"}
@@ -125,9 +125,27 @@ class FactorizePhysConfig(ModelConfig):
     FSAM: bool = True             # run the factorized attention module. For ablation testing
 
 
+@dataclass
+class CardioConvConfig(ModelConfig):
+    """CardioConv's ablations; every one is ``True`` in the model as designed."""
+    PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a mask of ones
+    PHASE_MASKER: bool = True         # learn the per-trace masks; false is masks of ones
+    TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
+    SUPERVISE_MASKS: bool = True      # the statistics head's pooled power trains the masks
+
+    def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
+        other = [t for t in interface.TRACES if not is_cardiac(t)]
+        if other:
+            raise ConfigError(
+                f"{where}: CardioConv reads the clip at the harmonics of the heart "
+                f"rate, so it predicts cardiac traces only; TRACES has {other}")
+
+
 #: ``NAME`` -> the dataclass its section is parsed into. One line per
 #: architecture; its builder is the matching line of ``src.models.MODEL_BUILDERS``.
 MODEL_CONFIGS = {
+    "CardioConv": CardioConvConfig,
     "DeepPhys": ModelConfig,
     "EfficientPhys": TemporalShiftConfig,
     "FactorizePhys": FactorizePhysConfig,
