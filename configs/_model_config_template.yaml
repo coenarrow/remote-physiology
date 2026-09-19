@@ -43,12 +43,11 @@ INTERFACE:
   UPSAMPLING: <string>           # refuse | interpolate: what to do with a store
                                  # slower than FS (interpolate blends frames
                                  # and labels linearly, never duplicates)
-  WINDOW_SECONDS: <number > 0>   # window length; WINDOW_SECONDS x FS must be a
-                                 # whole number of frames (within 0.01), so a
-                                 # frame count N is written as N / FS to six
-                                 # decimals (160 frames at 30 fps: 5.333333)
+  WINDOW_SECONDS: <number > 0>   # window length; WINDOW_SECONDS x FS is rounded
+                                 # to the nearest whole frame (4.27 s at 30 fps
+                                 # is 128 frames)
   WINDOW_STRIDE: <number >= 1/FS>  # seconds the test set steps between windows,
-                                 # a whole number of frames likewise; training
+                                 # rounded to whole frames likewise; training
                                  # draws one random window per sample and
                                  # ignores it
   CHANNELS: [<string>, ...]      # ordered camera channels, no repeats, from

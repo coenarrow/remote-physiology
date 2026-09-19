@@ -158,8 +158,6 @@ def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):
 # INTERFACE: the model's demand on the data pipeline
 # ---------------------------------------------------------------------------
 UPSAMPLING_MODES = ("refuse", "interpolate")
-#: How far off a whole frame a duration may land before it is refused.
-FRAME_SNAP_TOLERANCE = 0.01
 
 
 @dataclass
@@ -197,15 +195,6 @@ def _frames(seconds: float, fs: float) -> int:
     return int(round(seconds * fs))
 
 
-def _snapped(seconds: float, fs: float, key: str) -> None:
-    """Refuse a duration that is not a whole number of frames at ``fs``."""
-    frames = seconds * fs
-    if abs(frames - round(frames)) > FRAME_SNAP_TOLERANCE:
-        raise ConfigError(
-            f"{key} {seconds} s is {frames:.3f} frames at FS {fs}, not a whole "
-            f"number; pick a duration that is (or write it as N / FS)")
-
-
 def validate_interface(cfg: InterfaceConfig, where: str) -> InterfaceConfig:
     """Every rule the interface carries, applied in place; returns ``cfg``."""
     if cfg.FS <= 0:
@@ -218,12 +207,10 @@ def validate_interface(cfg: InterfaceConfig, where: str) -> InterfaceConfig:
         raise ConfigError(
             f"{where}: WINDOW_SECONDS must be a positive duration, got "
             f"{cfg.WINDOW_SECONDS}")
-    _snapped(cfg.WINDOW_SECONDS, cfg.FS, f"{where}: WINDOW_SECONDS")
-    if cfg.WINDOW_STRIDE * cfg.FS < 1 - FRAME_SNAP_TOLERANCE:
+    if cfg.stride_frames < 1:
         raise ConfigError(
             f"{where}: WINDOW_STRIDE must be at least one frame "
             f"(1 / FS = {1 / cfg.FS:.4f} s), got {cfg.WINDOW_STRIDE}")
-    _snapped(cfg.WINDOW_STRIDE, cfg.FS, f"{where}: WINDOW_STRIDE")
 
     try:
         cfg.CHANNELS = validate_channels(cfg.CHANNELS)
