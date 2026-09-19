@@ -55,7 +55,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, Subset
 from tqdm import tqdm
 
-from neural_methods.loss.PerSignalLoss import PerSignalLoss, weight_losses
+from neural_methods.loss.per_signal_loss import PerSignalLoss, weight_losses
 from src.config import ConfigError
 from src.distributed import Runtime, all_reduce_sum, gather_lists
 from src.memory import (
@@ -245,7 +245,7 @@ class Trainer:
         if runtime.distributed:
             ids = [self.device] if self.device.type == "cuda" else None
             self.net = DistributedDataParallel(model, device_ids=ids)
-        self.criterion = PerSignalLoss(interface.TRACES, interface.LOSS, fs=interface.FS)
+        self.criterion = PerSignalLoss(interface.TRACES, interface.LOSS)
         # Every weight, loss and regulariser, per trace: the interface's LOSS
         # block plus the model config's REGULARISATION. A term not named here
         # is not merged in _losses, so it is off.

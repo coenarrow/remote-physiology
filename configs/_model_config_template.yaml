@@ -76,9 +76,8 @@ INTERFACE:
                                  #   NEGPEARSON  negative Pearson (shape only)
                                  #   MSE         mean squared error
                                  #   MEAN        L1 on the window mean, in the label's units
-                                 #   MAX         L1 on the soft per-beat maximum (systolic)
-                                 #   MIN         L1 on the soft per-beat minimum (diastolic)
-                                 #   SPECTRAL    log-spectrum L1 up to 4 Hz (uses FS)
+                                 #   MAX         L1 on the soft window maximum (systolic)
+                                 #   MIN         L1 on the soft window minimum (diastolic)
                                  # The weights are where per-signal scale lives:
                                  # raw ABP error is O(10 mmHg), CVP O(1 mmHg),
                                  # CCC and NEGPEARSON O(1).

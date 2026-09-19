@@ -49,7 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from neural_methods.loss.PerSignalLoss import COMPONENTS, normalise_loss_weights
+from neural_methods.loss.registry import COMPONENTS, normalise_loss_weights
 from src.config import ConfigError, build, load_yaml
 from src.signal_transforms import validate_channels, validate_traces
 
