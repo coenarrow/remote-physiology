@@ -188,8 +188,8 @@ The evaluation then scores each recording's combined trace over the whole
 stretch the windows covered: it detects the beats of every cardiac trace
 on both the label and the prediction, and scores each absolute signal's
 levels (systolic / MAP / diastolic for ABP), the per-sample waveform
-agreement, and a heart rate from every cardiac trace, their fused spectrum
-and their median. The tables land beside the recording's trace tables as
+agreement, and a heart rate from every cardiac trace and from their fused
+spectrum. The tables land beside the recording's trace tables as
 one `<TRACE>_beats.csv` per cardiac trace, `signals.csv` (one row per
 signal) and `rates.csv`, with one `<TRACE>.png` per trace showing
 the label, the prediction with its spread across windows, and the beats.

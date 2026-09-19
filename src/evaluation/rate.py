@@ -5,28 +5,30 @@ CVP) that the recording labels, the estimate the upstream toolbox made: detrend,
 bandpass to the heart-rate band, periodogram, the largest in-band bin, in
 beats per minute. Run on the label and on the prediction, so every trace
 reports its own reference and predicted rate and is compared with itself.
-Two more *sources* join the per-trace ones whenever a recording carries at
+One more *source* joins the per-trace ones whenever a recording carries at
 least two cardiac traces:
 
 ``FUSED``
     The traces' power spectra, each normalised to unit power in the band,
-    combined as their geometric mean — a product of spectra, so the
-    frequency the traces agree on wins and a peak only one of them has
-    (CVP's respiratory harmonic, say) is suppressed. Power spectra rather
-    than complex ones: the traces are phase-shifted against each other by
-    transit time and morphology, and a complex sum would cancel at the very
-    fundamental it is after. Nothing goes back to a waveform, because a rate
-    needs no phase. The prediction side fuses exactly the traces the label
-    side has, so the fused prediction is compared with a fused label built
-    the same way.
+    combined as their weighted geometric mean — a product of spectra, so
+    the frequency the traces agree on wins and a peak only one of them has
+    (CVP's respiratory harmonic, say) is suppressed. A trace's weight is its
+    *auto-SNR*, the SNR around its own spectral peak rather than around a
+    reference rate, in dB and clipped at zero: a measure of how peaky the
+    spectrum is, so a trace that splits its power between the fundamental
+    and its harmonics (CVP, whose largest bin is often twice the heart
+    rate) counts for little and one whose peak holds less power than the
+    rest of the band counts for nothing. Power spectra rather than complex
+    ones: the traces are phase-shifted against each other by transit time
+    and morphology, and a complex sum would cancel at the very fundamental
+    it is after. Nothing goes back to a waveform, because a rate needs no
+    phase. The prediction side fuses exactly the traces the label side has,
+    each side weighted by its own auto-SNRs and blind to the other, so the
+    fused prediction is compared with a fused label built the same way.
 
-``MEDIAN``
-    The median of the per-trace rates: the cheap baseline the fusion has to
-    beat.
-
-No config. The band and the detrender are the upstream ones, and the trace
-tables are already in physical units, so nothing here needs to know how a
-trace's label was normalised.
+No config. The detrender is the upstream one, the band is wider than
+upstream's 36–198 bpm, and the trace tables are already in physical units,
+so nothing here needs to know how a trace's label was normalised.
 The three upstream helpers this needs (the smoothness-prior detrender, the
 FFT length and the maximum amplitude of cross-correlation) live at the top
 of this module; the rest of the toolbox's post-processing is gone.
@@ -39,8 +41,8 @@ from scipy.linalg import solveh_banded
 from scipy.signal import butter, filtfilt, periodogram
 from scipy.sparse import diags as sparse_diags
 
-#: The heart-rate band in Hz, upstream's 36–198 bpm.
-BAND = (0.6, 3.3)
+#: The heart-rate band in Hz, 30–240 bpm.
+BAND = (0.5, 4.0)
 DETREND_LAMBDA = 100
 #: Half-width of the harmonic bins counted as signal in the SNR, in bpm.
 SNR_DEVIATION_BPM = 6
@@ -51,7 +53,7 @@ MIN_FRAMES = 10
 #: cannot veto the frequency every other trace favours.
 SPECTRUM_FLOOR = 1e-12
 
-FUSED, MEDIAN = "FUSED", "MEDIAN"
+FUSED = "FUSED"
 RATE_METRICS = ("ref_hr", "pred_hr", "err_hr", "snr", "macc")
 _NAN = float("nan")
 
@@ -154,14 +156,24 @@ def normalised(freqs, power) -> np.ndarray:
 
 
 def fuse(freqs, powers) -> np.ndarray:
-    """Geometric mean of the traces' normalised spectra, bin by bin."""
+    """Geometric mean of the traces' normalised spectra, bin by bin, each
+    weighted by its auto-SNR in dB clipped at zero (a NaN counts as zero).
+    Uniform when no trace has a positive one."""
     stacked = np.stack([normalised(freqs, p) for p in powers])
-    return np.exp(np.log(np.maximum(stacked, SPECTRUM_FLOOR)).mean(axis=0))
+    weights = np.nan_to_num([max(snr(freqs, p), 0.0) for p in powers])
+    if weights.sum() <= 0:
+        weights = np.ones(len(powers))
+    weights = weights / weights.sum()
+    return np.exp(weights @ np.log(np.maximum(stacked, SPECTRUM_FLOOR)))
 
 
-def snr(freqs, power, hr_bpm: float) -> float:
+def snr(freqs, power, hr_bpm: float | None = None) -> float:
     """Power within +/- 6 bpm of the reference rate and its second harmonic,
-    over the rest of the band, in dB (upstream's definition)."""
+    over the rest of the band, in dB (upstream's definition). Without a
+    reference rate it is the *auto-SNR*, centred on the spectrum's own rate:
+    how peaky the spectrum is, whatever the peak is of."""
+    if hr_bpm is None:
+        hr_bpm = rate_of(freqs, power)
     deviation = SNR_DEVIATION_BPM / 60
     harmonic = np.zeros_like(freqs, dtype=bool)
     for centre in (hr_bpm / 60, 2 * hr_bpm / 60):
@@ -179,9 +191,9 @@ def snr(freqs, power, hr_bpm: float) -> float:
 def recording_rates(traces: dict, fs: float) -> list:
     """``[{source, ref_hr, pred_hr, err_hr, snr, macc}, ...]`` for one
     recording, given ``{signal: (label, prediction)}`` over the cardiac
-    traces it carries, both finite: one row per trace, then ``FUSED`` and
-    ``MEDIAN`` when there are two or more to combine. Empty for a stretch
-    too short to filter."""
+    traces it carries, both finite: one row per trace, then ``FUSED`` when
+    there are two or more to combine. Empty for a stretch too short to
+    filter."""
     rows, ref_powers, pred_powers = [], [], []
     freqs = None
     for sig, (ref, pred) in traces.items():
@@ -206,8 +218,4 @@ def recording_rates(traces: dict, fs: float) -> list:
     rows.append({"source": FUSED, "ref_hr": ref_hr, "pred_hr": pred_hr,
                  "err_hr": pred_hr - ref_hr, "snr": snr(freqs, pred_fused, ref_hr),
                  "macc": _NAN})
-    ref_hr = float(np.median([row["ref_hr"] for row in rows[:-1]]))
-    pred_hr = float(np.median([row["pred_hr"] for row in rows[:-1]]))
-    rows.append({"source": MEDIAN, "ref_hr": ref_hr, "pred_hr": pred_hr,
-                 "err_hr": pred_hr - ref_hr, "snr": _NAN, "macc": _NAN})
     return rows

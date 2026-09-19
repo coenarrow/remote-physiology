@@ -35,7 +35,7 @@ is over the whole covered stretch, from the first frame any window
 covered to the last, scored once per recording.
 
 **Beats** (`src/evaluation/beat_metrics.py`). One detector for every cardiac
-trace: detrend and bandpass to 0.6 to 3.3 Hz, `find_peaks` with the
+trace: detrend and bandpass to 0.5 to 4 Hz, `find_peaks` with the
 minimum beat distance from the top of the band and the prominence a
 registry fraction of the cleaned range (`beat` in
 `src/signal_transforms.py`), each candidate moved to the raw extremum
@@ -68,17 +68,22 @@ over the stretch's samples (IEEE 1708 equations (3) and (4), p. 28).
 `rates.csv` (`src/evaluation/rate.py`), one row per source: `ref_hr`,
 `pred_hr`, `err_hr`, `snr`, `macc`. Each cardiac trace is cleaned
 (smoothness-prior detrend, then a zero-phase first-order bandpass to
-0.6 to 3.3 Hz), its plain periodogram taken, zero-padded to a power of
-two, and the largest in-band bin read as the rate, on the label and on
-the prediction. `snr` is the power within 6 bpm of the reference rate
-and its second harmonic over the rest of the band, in dB; `macc` the
-maximum amplitude of cross-correlation over every lag. When the recording
-carries two or more cardiac traces two sources join them: `FUSED`, the
-rate of the geometric mean of the traces' spectra, each normalised to
-unit in-band power (so the frequency every trace agrees on wins, and a
-peak only one trace has is suppressed), and `MEDIAN`, the median of the
-per-trace rates. SNR and MACC are on the combined trace and are not
-comparable with the upstream toolbox's per-window numbers.
+0.5 to 4 Hz, 30 to 240 bpm), its plain periodogram taken, zero-padded to
+a power of two, and the largest in-band bin read as the rate, on the
+label and on the prediction. `snr` is the power within 6 bpm of the
+reference rate and its second harmonic over the rest of the band, in dB;
+`macc` the maximum amplitude of cross-correlation over every lag. When
+the recording carries two or more cardiac traces one source joins them:
+`FUSED`, the rate of the weighted geometric mean of the traces' spectra,
+each normalised to unit in-band power (so the frequency every trace
+agrees on wins, and a peak only one trace has is suppressed). A trace's
+weight is its auto-SNR, the same SNR centred on the spectrum's own peak
+instead of the reference rate, in dB and clipped at zero, so a trace
+whose power is split between the fundamental and its harmonics (CVP)
+counts for little; the label side and the prediction side are each
+weighted by their own spectra, and the weights are uniform when no trace
+has a positive auto-SNR. SNR and MACC are on the combined trace and are
+not comparable with the upstream toolbox's per-window numbers.
 
 `<TRACE>.png` (`src/evaluation/plots.py`), one per trace: the whole
 recording with the label, the combined prediction (the `mean` column)
