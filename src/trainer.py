@@ -246,7 +246,7 @@ class Trainer:
         if runtime.distributed:
             ids = [self.device] if self.device.type == "cuda" else None
             self.net = DistributedDataParallel(model, device_ids=ids)
-        self.criterion = PerSignalLoss(interface.TRACES, interface.LOSS)
+        self.criterion = PerSignalLoss(interface.TRACES, interface.LOSS, interface.FS)
         # Every weight, loss and regulariser, per trace: the interface's LOSS
         # block plus the model config's REGULARISATION. A term not named here
         # is not merged in _losses, so it is off.

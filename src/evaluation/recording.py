@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from neural_methods.loss.ccc import MAX_LAG_SECONDS, lag_frames, lagged_pair
 from src.evaluation.beat_metrics import BEAT_COLUMNS, LEVELS, analyse, beat_rows
 from src.evaluation.plots import recording_figure
 from src.evaluation.rate import MIN_FRAMES, RATE_METRICS, recording_rates
@@ -37,7 +38,7 @@ SIGNALS_NAME, RATES_NAME = "signals.csv", "rates.csv"
 FIGURE_DPI = 150
 #: The beat times the figure marks, as ``Beats`` attributes.
 MARKS = ("ref_peaks", "ref_troughs", "pred_peaks", "pred_troughs")
-WAVEFORM_METRICS = ("mad", "rmse", "r", "ccc")
+WAVEFORM_METRICS = ("mad", "rmse", "r", "ccc", "lag")
 SIGNAL_COLUMNS = (
     "signal", "t_start", "t_end",
     "n_ref_beats", "n_pred_beats", "n_matched",
@@ -73,11 +74,35 @@ def ccc(a, b) -> float:
     return float(2 * r * np.sqrt(va * vb) / denominator) if denominator > 0 else _NAN
 
 
-def _waveform(ref: np.ndarray, pred: np.ndarray) -> dict:
-    error = pred - ref
+def lagged_ccc(ref: np.ndarray, pred: np.ndarray, fs: float) -> tuple:
+    """``(ccc, lag)``: Lin's concordance at the best lag within
+    ``MAX_LAG_SECONDS``, and that lag in seconds, positive when the
+    prediction is delayed against the reference. The training loss's
+    counterpart (``neural_methods.loss.ccc``): the label is measured at a
+    different site from the one the camera sees, and the transit delay
+    between them is not the model's error. Non-finite pairs are dropped after
+    the shift, so the search sees the traces contiguous."""
+    max_lag = min(lag_frames(MAX_LAG_SECONDS, fs), ref.size - 2)
+    best, best_lag = _NAN, _NAN
+    for lag in range(-max_lag, max_lag + 1):
+        p, r = lagged_pair(pred, ref, lag)
+        ok = np.isfinite(p) & np.isfinite(r)
+        value = ccc(p[ok], r[ok])
+        if np.isfinite(value) and not value <= best:
+            best, best_lag = value, lag / fs
+    return best, best_lag
+
+
+def _waveform(ref: np.ndarray, pred: np.ndarray, fs: float) -> dict:
+    """The sample-wise agreement over the stretch, on the finite pairs; the
+    concordance at its best lag, the rest at lag zero."""
+    ok = np.isfinite(ref) & np.isfinite(pred)
+    error = pred[ok] - ref[ok]
+    concordance, lag = lagged_ccc(ref, pred, fs)
     return {"waveform_mad": float(np.abs(error).mean()),
             "waveform_rmse": float(np.sqrt((error ** 2).mean())),
-            "waveform_r": pearson(pred, ref), "waveform_ccc": ccc(pred, ref)}
+            "waveform_r": pearson(pred[ok], ref[ok]),
+            "waveform_ccc": concordance, "waveform_lag": lag}
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +203,7 @@ def score_recording(folder, meta: dict) -> dict:
             row = {"signal": sig, "t_start": t0, "t_end": t_end}
             ok = np.isfinite(label) & np.isfinite(pred)
             if ok.sum() >= MIN_FRAMES:
-                row.update(_waveform(label[ok], pred[ok]))
+                row.update(_waveform(label, pred, fs))
                 if is_cardiac(sig):
                     label_f, pred_f = _filled(label), _filled(pred)
                     cardiac[sig] = (label_f, pred_f)

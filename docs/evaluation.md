@@ -64,6 +64,11 @@ min), `err_<s>` and `err_<s>_deadband` (ISO 81060-2 clause 6.2.5, p. 22:
 zero inside the reference mean ± SD, else the distance to the nearer
 limit); `waveform_mad`, `waveform_rmse`, `waveform_r`, `waveform_ccc`
 over the stretch's samples (IEEE 1708 equations (3) and (4), p. 28).
+`waveform_ccc` is taken at the best lag within half a second, as the
+training loss is, because the reference is measured at a different site
+from the one the camera sees and the transit delay between them is not the
+model's error; `waveform_lag` is that lag in seconds, positive when the
+prediction is delayed against the reference.
 
 `rates.csv` (`src/evaluation/rate.py`), one row per source: `ref_hr`,
 `pred_hr`, `err_hr`, `snr`, `macc`. Each cardiac trace is cleaned

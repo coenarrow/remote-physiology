@@ -77,10 +77,9 @@ INTERFACE:
                                  # one component. A component that should not
                                  # count is left out, not zeroed. Components:
                                  #   CCC         concordance correlation (shape and level)
+                                 #               at the best lag within half a second,
+                                 #               tolerant of a pulse transit delay
                                  #   NEGPEARSON  negative Pearson (shape only)
-                                 #   LAGPEARSON  negative Pearson at the best lag within
-                                 #               half a second (shape only, tolerant of
-                                 #               a pulse transit delay)
                                  #   MSE         mean squared error
                                  #   MEAN        L1 on the window mean, in the label's units
                                  #   MAX         L1 on the soft window maximum (systolic)

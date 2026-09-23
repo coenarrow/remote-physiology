@@ -35,15 +35,17 @@ INTERFACE:
   TRACES: [ABP, CVP]
   RESIZE: {H: 128, W: 128}       # no resize was configured there; 128 is this cache's own size
   LOSS:
-    # The mixer's lag-tolerant Pearson, at its weight of 1.2. The original's
+    # The mixer's lag-tolerant Pearson, at its weight of 1.2, as the lag-aware
+    # CCC (the standard interface's shape-and-level term; the original scored
+    # shape alone, and a shape-only lagged component no longer exists). The original's
     # per-stage supervised losses do not carry over: the channel predictor's
     # per-channel spectral loss is dropped (it supervised an intermediate),
     # the variance anchor is unnecessary (the output is rescaled from a
     # z-scored waveform), and the statistics head's squared-error regression of
     # the label's mean / std / min / max is replaced by the standard
     # interface's L1 on the output waveform's own mean and soft extremes.
-    ABP: {LAGPEARSON: 1.2, MEAN: 0.05, MAX: 0.05, MIN: 0.05}
-    CVP: {LAGPEARSON: 1.2, MEAN: 0.20, MAX: 0.20, MIN: 0.20}
+    ABP: {CCC: 1.2, MEAN: 0.05, MAX: 0.05, MIN: 0.05}
+    CVP: {CCC: 1.2, MEAN: 0.20, MAX: 0.20, MIN: 0.20}
 
 # train_config.yaml and src/trainers/trainer.py there: Adam(lr) with no decay
 # and no schedule, full precision. Its epochs: 3 and batch_size: 2 were

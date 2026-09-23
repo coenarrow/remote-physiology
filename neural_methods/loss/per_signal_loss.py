@@ -8,6 +8,10 @@ Two things vary per signal, and they vary together (migration contract §3):
 * a **shape-class** signal (PPG, ECG, RESP) arrives per-window z-scored and
   only its waveform means anything, so it is scored with negpearson.
 
+CCC searches a lag range before scoring, because the label is measured at a
+different site from the one the camera sees and the transit delay between
+them is not the model's error (``neural_methods.loss.ccc``).
+
 So the loss is stated per trace, outright: which components, at what weight
 (``INTERFACE.LOSS``, ``{ABP: {CCC: 1.0, MEAN: 0.05, ...}}``). There are no
 presets and no class-implied defaults — the weights *are* the loss. That is
@@ -53,14 +57,17 @@ class PerSignalLoss(nn.Module):
     scalar to backpropagate, is :func:`weight_losses`'s job.
     """
 
-    def __init__(self, traces, weights):
+    def __init__(self, traces, weights, fs: float):
+        """``fs`` is the interface's frame rate: every window in a batch sits
+        on that one time base, and it is what lets a component state a bound
+        in seconds."""
         super().__init__()
         self.traces = validate_traces(traces)
         self.weights = normalise_loss_weights(self.traces, weights)
         # The components carry no state, so the signals share one of each.
         named = {c for components in self.weights.values() for c in components}
         self.components = nn.ModuleDict(
-            {name: build() for name, build in COMPONENTS.items() if name in named})
+            {name: build(fs) for name, build in COMPONENTS.items() if name in named})
 
     def forward(self, preds, labels, label_mask):
         """Unweighted masked components per signal — contract v2's raw_losses.

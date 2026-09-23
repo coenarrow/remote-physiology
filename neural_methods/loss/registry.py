@@ -3,29 +3,28 @@
 Every component is one ``nn.Module`` in its own file whose ``forward`` maps a
 ``(B, T)`` prediction and a ``(B, T)`` label to a ``(B,)`` per-sample loss.
 That per-sample reduction is the whole contract: it is what lets
-``PerSignalLoss`` mask every component the same way. A new component is a file
-and a line here, not a redesign.
+``PerSignalLoss`` mask every component the same way. Each entry builds its
+module from the interface's frame rate, which only a component that reasons
+in seconds (CCC's lag bound) uses. A new component is a file and a line here,
+not a redesign.
 """
 
-from functools import partial
-
 from neural_methods.loss.ccc import CCC
-from neural_methods.loss.lag_pearson import LagPearson
 from neural_methods.loss.mean_l1 import MeanL1
 from neural_methods.loss.mse import MSE
 from neural_methods.loss.neg_pearson import NegPearson
 from neural_methods.loss.soft_peak_l1 import SoftPeakL1
 from src.signal_transforms import canonical_signal, validate_traces
 
-#: Component name (the config's key, lower-cased) -> what builds its module.
+#: Component name (the config's key, lower-cased) -> its module, from the
+#: interface's frame rate.
 COMPONENTS = {
-    'ccc': CCC,
-    'mean': MeanL1,
-    'max': partial(SoftPeakL1, 'max'),
-    'min': partial(SoftPeakL1, 'min'),
-    'negpearson': NegPearson,
-    'lagpearson': LagPearson,
-    'mse': MSE,
+    'ccc': lambda fs: CCC(fs),
+    'mean': lambda fs: MeanL1(),
+    'max': lambda fs: SoftPeakL1('max'),
+    'min': lambda fs: SoftPeakL1('min'),
+    'negpearson': lambda fs: NegPearson(),
+    'mse': lambda fs: MSE(),
 }
 
 
