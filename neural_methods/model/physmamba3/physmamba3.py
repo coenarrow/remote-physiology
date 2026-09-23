@@ -19,6 +19,8 @@ which puts rotary angles on half of the 16 state channels.
 CUDA only: see ``BiMamba3``.
 """
 
+import math
+
 from neural_methods.model.physmamba.physmamba import MIN_FRAME, PhysMamba
 from neural_methods.model.physmamba3.bi_mamba3 import BiMamba3
 
@@ -32,7 +34,16 @@ EXPAND = 2
 #: both streams.
 HEADDIM = 16
 
+#: The time step every head starts at. PhysMamba's ``MambaLayer`` re-initialises
+#: its ``nn.Linear`` layers and zeroes their biases, Mamba1's ``dt_proj`` bias
+#: among them, so the published network starts at softplus(0) = ln 2, a
+#: short-memory SSM. Mamba3's ``dt_bias`` is a bare parameter that re-init never
+#: reaches, and mamba_ssm's own draw from [0.001, 0.1] starts it 7 to 700 times
+#: slower; this puts it where PhysMamba is.
+DT_INIT = math.log(2)
+
 
 class PhysMamba3(PhysMamba):
     def _build_ssm(self, channels):
-        return BiMamba3(channels, d_state=D_STATE, expand=EXPAND, headdim=HEADDIM)
+        return BiMamba3(channels, d_state=D_STATE, expand=EXPAND, headdim=HEADDIM,
+                        dt_init=DT_INIT)

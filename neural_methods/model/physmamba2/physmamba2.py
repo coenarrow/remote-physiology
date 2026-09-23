@@ -17,6 +17,8 @@ heads and the fast stream (dim 32) four.
 CUDA only: see ``BiMamba2``.
 """
 
+import math
+
 from neural_methods.model.physmamba.physmamba import MIN_FRAME, PhysMamba
 from neural_methods.model.physmamba2.bi_mamba2 import BiMamba2
 
@@ -30,8 +32,16 @@ EXPAND = 2
 #: Channels per Mamba2 head; must divide ``EXPAND * dim`` of both streams.
 HEADDIM = 16
 
+#: The time step every head starts at. PhysMamba's ``MambaLayer`` re-initialises
+#: its ``nn.Linear`` layers and zeroes their biases, Mamba1's ``dt_proj`` bias
+#: among them, so the published network starts at softplus(0) = ln 2, a
+#: short-memory SSM. Mamba2's ``dt_bias`` is a bare parameter that re-init never
+#: reaches, and mamba_ssm's own draw from [0.001, 0.1] starts it 7 to 700 times
+#: slower; this puts it where PhysMamba is.
+DT_INIT = math.log(2)
+
 
 class PhysMamba2(PhysMamba):
     def _build_ssm(self, channels):
         return BiMamba2(channels, d_state=D_STATE, d_conv=D_CONV, expand=EXPAND,
-                        headdim=HEADDIM)
+                        headdim=HEADDIM, dt_init=DT_INIT)

@@ -27,9 +27,21 @@ class BiMamba2(nn.Module):
     pure-PyTorch stand-in as ``MambaRef`` is for Mamba1. The fused
     conv-and-scan path needs ``causal_conv1d``; without it each block takes
     mamba_ssm's unfused path, the same arithmetic, slower.
+
+    Two departures from mamba_ssm's defaults put the block where PhysMamba's
+    Mamba1 is, so the SSD layer is the only difference between the models:
+
+    - ``dt_init`` is the time step every head starts at, in place of the draw
+      from [0.001, 0.1].
+    - ``rmsnorm=False``: Mamba1 has no norm inside the block. Mamba2's gated
+      RMSNorm rescales the branch to full size however small its weights are,
+      so at ``MambaLayer``'s 0.02 re-init it starts at about 0.3 of its input
+      where Mamba1 starts at about 0.003, and weight decay cannot shrink it.
+      With the norm in, PhysMamba2 never learned ABP on the Neckflix
+      interface; without it, it follows PhysMamba epoch for epoch.
     """
 
-    def __init__(self, d_model, d_state, d_conv, expand, headdim):
+    def __init__(self, d_model, d_state, d_conv, expand, headdim, dt_init):
         super().__init__()
         if Mamba2 is None:
             raise ImportError(
@@ -39,13 +51,14 @@ class BiMamba2(nn.Module):
             raise ValueError(
                 f"Mamba2 splits expand * d_model = {expand * d_model} channels into "
                 f"heads of {headdim}, which does not divide it.")
-        self.fwd = self._block(d_model, d_state, d_conv, expand, headdim)
-        self.bwd = self._block(d_model, d_state, d_conv, expand, headdim)
+        self.fwd = self._block(d_model, d_state, d_conv, expand, headdim, dt_init)
+        self.bwd = self._block(d_model, d_state, d_conv, expand, headdim, dt_init)
 
     @staticmethod
-    def _block(d_model, d_state, d_conv, expand, headdim):
+    def _block(d_model, d_state, d_conv, expand, headdim, dt_init):
         return Mamba2(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand,
-                      headdim=headdim, use_mem_eff_path=HAS_CAUSAL_CONV1D)
+                      headdim=headdim, dt_min=dt_init, dt_max=dt_init, rmsnorm=False,
+                      use_mem_eff_path=HAS_CAUSAL_CONV1D)
 
     def forward(self, x):
         if not x.is_cuda:
