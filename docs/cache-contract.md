@@ -106,10 +106,14 @@ early). Each modality is internally consistent — `timestamps_us`, `video`
 and every trace agree on `T` — and the reader truncates every modality and
 its traces to the shortest at read time.
 
-`ev` is unpinned: the validator accepts any `C` for it and prints a note, so
-a PASS never silently means "not looked at". Its frame representation, and
-what its `video` and trace groups are, is fixed when the first event cache
-exists.
+`ev` is an event list, not frames. It holds `timestamps_us/data` and
+`x`/`y`/`p` `data`, all `(N,)`, with time non-decreasing because events can
+share a timestamp. It has no `video/data`. Each of its traces keeps its
+native rate: `data` `(M,)` with its own `timestamps_us/data` `(M,)`, a
+floating dtype and a `units` attr. How events become model input is still
+unpinned, so the reader skips any perspective with no `video` modality, and
+the validator prints a note for `ev` so a PASS never silently means "not
+looked at".
 
 ## Trace
 
@@ -142,7 +146,8 @@ write time.
 | store       | opens as a zarr group; at least one perspective group |
 | root        | `participant` present and a string |
 | perspective | `fps` present, and null/NaN or a positive finite number; child groups in the modality vocabulary; identical trace sets across modalities; first-frame spread under `1/fps` (numeric `fps` only) |
-| modality    | no bare array children; `timestamps_us/data` and `video/data` present; video 4-D with `T > 0` and `C` per the vocabulary (`ev` exempt); timestamps shape `(T,)` and strictly increasing |
+| modality    | no bare array children; `timestamps_us/data` and `video/data` present; video 4-D with `T > 0` and `C` per the vocabulary; timestamps shape `(T,)` and strictly increasing |
+| `ev`        | `timestamps_us/data` `(N,)` and non-decreasing; `x`/`y`/`p` `data` `(N,)`; each trace's `data` matches its own `timestamps_us/data`, floating dtype, `units` attr |
 | trace       | key in the trace vocabulary; `data` present, shape `(T,)`, floating dtype; `units` attr present |
 
 Not checked, by design: frame dtype, `H` and `W`, chunking or compression,
@@ -166,9 +171,9 @@ What `src/inputs.py` does with a conformant store:
 
 ## Open items
 
-- `ev`: representation unpinned. The preprocessor's `ev` perspective
-  currently carries `x`/`y`/`p` groups and no `video/data`, which fails
-  today's modality clauses. Pinning it is the next contract change.
+- `ev`: its storage is fixed (above) but its model input is not. Until
+  events have a frame representation, the reader skips the `ev`
+  perspective, so no run trains on it.
 - `units` is required on every trace and the validator checks it, but the
   reader does not yet carry it into the batch. When it does, it lands beside
   `label_stats` as `label_units` (`{signal: str}`), and a signal whose units
@@ -176,4 +181,4 @@ What `src/inputs.py` does with a conformant store:
 
 ---
 
-Last updated: 2026-09-07
+Last updated: 2026-09-28

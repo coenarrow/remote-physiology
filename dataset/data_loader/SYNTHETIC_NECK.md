@@ -12,9 +12,10 @@ The validator is the acceptance test. Generator design:
 ## Building
 
 ```bash
+# data/synthetic_neck_zarr is what configs/datasets/synthetic_neck.yaml reads; data/ is gitignored
 uv run --project tools/synthetic_datasets/synthetic_neck synthetic-neck generate --zarr \
-    --preset neckflix --n 200 --jobs 8 --out <cache dir>
-uv run python tools/validate_cache.py <cache dir>
+    --preset neckflix --n 200 --jobs 8 --out data/synthetic_neck_zarr
+uv run python tools/validate_cache.py data/synthetic_neck_zarr
 ```
 
 Presets: `lesson` (large pulse, flat lighting), `benchmark` (moderate pulse,

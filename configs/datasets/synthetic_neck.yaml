@@ -31,5 +31,5 @@
 #                      plus rgbid_streams, depth_units_mm and vessel_ids —
 #                      folder-layout fields kept verbatim, describing the
 #                      generator's folder output rather than this store
-CACHED_PATH: "D:/synthetic_neck_zarr"
+CACHED_PATH: "data/synthetic_neck_zarr"   # rendered in-repo (data/ is gitignored); relative to the repo root
 FILTERS: {}

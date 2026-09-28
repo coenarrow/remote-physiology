@@ -267,6 +267,72 @@ DeepPhys's [config file](configs/original_model_config/deepphys_FS30_W6S6_RGB_PP
 The original papers are linked from the
 [upstream README](https://github.com/ubicomplab/rPPG-Toolbox#notebook-algorithms).
 
+## Synthetic neck
+
+A rendered stand-in for Neckflix: neck videos with a propagating carotid and
+jugular pulse and exact ABP, CVP, ECG, PPG and respiration ground truth,
+from the `synthetic-neck` generator carried as the submodule at
+[`tools/synthetic_datasets/synthetic_neck`](tools/synthetic_datasets/synthetic_neck)
+(its README documents the presets, the traces and what the frames carry).
+There is no raw dataset and no cacher: the generator writes cache-contract
+stores directly, so the result is a dataset like PURE or Neckflix, named by
+[`configs/datasets/synthetic_neck.yaml`](configs/datasets/synthetic_neck.yaml)
+and specified by
+[`dataset/data_loader/SYNTHETIC_NECK.md`](dataset/data_loader/SYNTHETIC_NECK.md).
+The cache lives in the repo at `data/synthetic_neck_zarr` (gitignored), which
+is where the dataset config points; every command below runs from the repo
+root.
+
+The generator has its own environment (Python 3.13, `numpy`, `zarr`), kept
+out of this project's dependency graph like the preprocessor; `uv run
+--project` syncs it on first use.
+
+```bash
+# the submodule, if the clone skipped it
+git submodule update --init tools/synthetic_datasets/synthetic_neck
+
+# render the cache: one {i}.zarr per sample, sample i seeded with --seed + i (2026 + i by default)
+uv run --project tools/synthetic_datasets/synthetic_neck synthetic-neck generate --zarr --preset neckflix --n 200 --jobs 8 --out data/synthetic_neck_zarr
+uv run python tools/validate_cache.py data/synthetic_neck_zarr
+
+# one fold on the standard Neckflix interface, sample 1 held out; writes runs/synthetic_deepphys/DEEPPHYS_SYNTHETIC_NECK.1_<YYYYMMDDHHMM>/
+uv run python scripts/run.py --datasets synthetic_neck --test-participant-dataset synthetic_neck --test-participant-id 1 --config configs/experiment_configs/deepphys_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 30 --batch-size 2 --num-workers 4 --runs-dir runs/synthetic_deepphys
+
+# the same fold for every model: swap the config's model stem
+# (cardioconv, deepphys, efficientphys, factorizephys, ibvpnet, physformer, physmamba, physmamba2, physmamba3, physnet, rhythmformer, tscan)
+
+# every sample held out in turn (one fold per sample, see below)
+uv run python main.py --datasets synthetic_neck --test-participant-dataset synthetic_neck --config configs/experiment_configs/deepphys_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 30 --batch-size 2
+```
+
+What to know before choosing `--n` and the clip length:
+
+- **The `neckflix` preset** draws its ranges from
+  `priors/neckflix.json` in the submodule, calibrated on Neckflix. About
+  half of its samples draw infrared and depth streams beside RGB; the
+  loader zero-pads the channels a store lacks and masks them, so the
+  `RGBID` configs run on every sample. Synthetic IR is uint8 and depth is
+  float32 millimetres, neither on Neckflix's sensor scale.
+- **Every sample is its own participant** (`participant` is the sample
+  index, `"1"`, `"2"`, ...). A held-out participant is one clip, and a
+  `main.py` sweep with no `--test-participant-id` runs one fold per sample.
+  The ids collide with other datasets', which is why the held-out
+  participant is always named with `--test-participant-dataset synthetic_neck`.
+- **The default clip is 10 s** (`video.duration_s`), exactly one window of
+  the 10 s standard interface: each sample is one fixed crop, and the test
+  stride does nothing. `--set video.duration_s=30` matches Neckflix's
+  recording length and gives window variety, at about three times the
+  render time and store size. A window longer than the clip skips every
+  store, with a warning.
+- **Cost.** A 10 s sample with all three streams is about 100 MB and takes
+  on the order of a minute of one CPU core to render (a sample is redrawn,
+  up to 20 times, until its green-channel pulse is visible; `--jobs`
+  renders samples in parallel). Rendering does not use the GPU.
+- **Filtering** is on the stores' root attrs
+  (`posture`, `abp_site`, `monk_tone`, `preset`, `seed`, and the drawn
+  parameters under `synthetic_neck.*`), through `FILTERS` in the dataset
+  config, exactly as for Neckflix.
+
 ## Citation, license, acknowledgement
 
 This fork exists because rPPG-Toolbox was an excellent starting point. If you

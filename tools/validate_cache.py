@@ -106,6 +106,56 @@ def _check_modality(out, where, modality, group):
     return float(stamps[0]) if stamps is not None and stamps.size else None
 
 
+#: Per-event arrays of the ``ev`` modality, each ``(N,)`` beside its timestamps.
+EVENT_KEYS = ("x", "y", "p")
+
+
+def _check_events(out, where, group):
+    """The ``ev`` modality: an event list, not frames (docs/cache-contract.md).
+
+    ``timestamps_us`` and every event array are ``(N,)``; events may share a
+    timestamp, so time only has to be non-decreasing. Each trace keeps its
+    native rate on its own ``timestamps_us`` clock, so it is checked against
+    that clock, not against ``N``.
+    """
+    stamps_array = _array_at(group, "timestamps_us")
+    if stamps_array is None:
+        out.append(Violation(where, "missing timestamps_us/data"))
+        return
+    stamps = stamps_array[:]
+    if stamps.ndim != 1:
+        out.append(Violation(where, f"timestamps_us is {stamps.ndim}-D, want (N,)"))
+        return
+    if stamps.size > 1 and not np.all(np.diff(stamps) >= 0):
+        out.append(Violation(where, "event timestamps_us decrease"))
+    for key in EVENT_KEYS:
+        array = _array_at(group, key)
+        if array is None:
+            out.append(Violation(where, f"missing {key}/data"))
+        elif array.shape != stamps.shape:
+            out.append(Violation(
+                f"{where}/{key}", f"shape {array.shape} vs timestamps {stamps.shape}"))
+    for key in group.group_keys():
+        if key in ("timestamps_us",) + EVENT_KEYS:
+            continue
+        sub = f"{where}/{key}"
+        if key not in TRACE_KEYS:
+            out.append(Violation(
+                sub, f"unknown trace group; vocabulary: {sorted(TRACE_KEYS)}"))
+            continue
+        trace, clock = _array_at(group, key), _array_at(group[key], "timestamps_us")
+        if trace is None or clock is None:
+            out.append(Violation(sub, "missing data or timestamps_us/data array"))
+            continue
+        if trace.ndim != 1 or clock.shape != trace.shape:
+            out.append(Violation(
+                sub, f"trace {trace.shape} vs its timestamps_us {clock.shape}"))
+        if not np.issubdtype(trace.dtype, np.floating):
+            out.append(Violation(sub, f"trace dtype {trace.dtype}, want float"))
+        if "units" not in group[key].attrs:
+            out.append(Violation(sub, "missing required 'units' attr"))
+
+
 def _nominal_fps(out, where, attrs):
     """The perspective's nominal frame rate, or None when it has none.
 
@@ -161,6 +211,9 @@ def validate_store(path) -> list:
                 out.append(Violation(
                     sub, f"unknown modality; vocabulary: "
                          f"{sorted(MODALITY_CHANNELS)}"))
+                continue
+            if modality == "ev":
+                _check_events(out, sub, cam[modality])
                 continue
             first = _check_modality(out, sub, modality, cam[modality])
             trace_sets[modality] = frozenset(

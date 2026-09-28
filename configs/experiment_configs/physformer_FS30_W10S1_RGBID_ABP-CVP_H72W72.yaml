@@ -21,7 +21,7 @@ INTERFACE:
 # The paper's 10 epochs and batch 4 are the launcher's flags: --epochs 10 --batch-size 4
 TRAIN:
   OPTIMIZER: Adam              # upstream: optim.Adam(lr, weight_decay=0.00005)
-  LR: 1e-4
+  LR: 1e-3                     # 10x the paper's 1e-4: at 1e-4 the 48-weight readout never reaches mmHg amplitude on a raw ABP target (2026-09-28 diagnosis)
   WEIGHT_DECAY: 5e-5
   SCHEDULER: Constant          # upstream: StepLR(50, 0.5), never reached in 10 epochs
   PRECISION: float32           # upstream trains in full precision

@@ -193,6 +193,9 @@ class WindowedDataset(torch.utils.data.Dataset):
         for store, attrs in stores.items():
             root = zarr.open_group(str(store), mode="r")
             for perspective in sorted(root.group_keys()):
+                group = root[perspective]
+                if not any("video" in group[m] for m in group.group_keys()):
+                    continue  # the event camera: no frames until the contract pins ev
                 sample = inspect_sample(store, attrs, str(perspective), interface)
                 if sample.frame_count < sample.plan.span:
                     warnings.warn(

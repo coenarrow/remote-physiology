@@ -1,0 +1,14 @@
+# Neckflix, participant 33 only: the held-out participant of the model
+# comparison, with nobody else admitted. Load it beside another dataset and
+# name it as --test-participant-dataset to train on that other dataset alone
+# and test on P033, e.g.
+#   --datasets synthetic_neck neckflix_p033 --test-participant-dataset neckflix_p033 --test-participant-id 33
+# Same cache and attrs as neckflix.yaml, which documents FILTERS.
+CACHED_PATH: "D:/neckflix_zarr/rgbid128"
+FILTERS:
+  posture:
+    include: [supine, recumbent, sitting]
+    exclude: []
+  participant:
+    include: ['33']
+    exclude: []
