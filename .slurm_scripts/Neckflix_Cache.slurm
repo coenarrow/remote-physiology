@@ -22,7 +22,9 @@
 # its first run and skips the build once dataset/cachers/neckflix/hdf5_plugin
 # holds it. The hdf5 module's shared library is unreadable and its CMake
 # config is broken, so the build bypasses the config and links the static
-# library; the plugin then needs no module at runtime.
+# library; the plugin then needs no module at runtime. Its RPATH is $ORIGIN
+# so it finds libhdf5_ecf_codec.so.1 beside it; without that every recording
+# fails with EcfPluginError.
 #
 # Memory: the cacher peaks near 12 GB per worker on the largest event
 # recordings, so --mem is at least 12G times --num-workers.
@@ -59,6 +61,7 @@ if [ ! -f "${PLUGIN_DIR}/libH5Zecf.so" ]; then
     cmake -S "${CACHER}/plugin" -B "${BUILD_DIR}" \
         -DCMAKE_INSTALL_PREFIX="${PLUGIN_DIR}" \
         -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+        -DCMAKE_INSTALL_RPATH='$ORIGIN' \
         -DHDF5_NO_FIND_PACKAGE_CONFIG_FILE=ON \
         -DHDF5_ROOT=/uwahpc/rocky9/devel/gcc/14.3.0/hdf5/1.14.6 || exit 1
     cmake --build "${BUILD_DIR}" -j "${SLURM_CPUS_PER_TASK}" || exit 1
