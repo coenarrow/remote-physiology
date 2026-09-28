@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/%j_Neckflix_Cache.out
 #SBATCH --error=logs/%j_Neckflix_Cache.err
 
@@ -75,7 +75,7 @@ fi
 export HDF5_PLUGIN_PATH="${PLUGIN_DIR}"
 echo "ECF plugin: ${HDF5_PLUGIN_PATH}"
 
-uv run --project "${CACHER}" neckflix-preprocess --input-dir "${RAW_DIR}" --output-dir "${CACHE_DIR}" --num-workers 4
+uv run --project "${CACHER}" neckflix-preprocess --input-dir "${RAW_DIR}" --output-dir "${CACHE_DIR}" --num-workers 8
 
 echo "stores written: $(ls -d "${CACHE_DIR}"/*.zarr | wc -l)"
 
