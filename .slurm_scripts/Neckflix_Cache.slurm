@@ -78,7 +78,8 @@ fi
 export HDF5_PLUGIN_PATH="${PLUGIN_DIR}"
 echo "ECF plugin: ${HDF5_PLUGIN_PATH}"
 
-uv run --project "${CACHER}" neckflix-preprocess --input-dir "${RAW_DIR}" --output-dir "${CACHE_DIR}" --num-workers 4
+# Temporary --add-events: the video is already cached, only ev/ is missing.
+uv run --project "${CACHER}" neckflix-preprocess --input-dir "${RAW_DIR}" --output-dir "${CACHE_DIR}" --num-workers 4 --add-events
 
 echo "stores written: $(ls -d "${CACHE_DIR}"/*.zarr | wc -l)"
 
