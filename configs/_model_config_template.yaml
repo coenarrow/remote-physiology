@@ -14,15 +14,28 @@
 # The architecture, plus the switches an experiment may flip for it. Layer
 # sizes are never here: an architecture is defined once, in its module under
 # neural_methods/model/, at its published values, and every width comes from
-# the interface (first layer from CHANNELS, one copy of the network per entry
+# the interface (first layer from CHANNELS, one prediction per entry
 # of TRACES). Most architectures have no switch, so their section is NAME
 # alone. The switches that exist, per NAME:
 #   EfficientPhys, TSCAN   FRAME_DEPTH: <int > 0>   segment length the temporal
 #                                                   shift shifts within (paper: 10)
+#   CardioConv             PULSATILITY_MASKER, PHASE_MASKER, TRACE_INDEPENDENT,
+#                          SUPERVISE_MASKS: <bool>   its ablations; all true is
+#                                                   the model as designed
 #   FactorizePhys          FSAM: <bool>              the factorized attention
 #                                                   module; false is the paper's ablation
+# One key is optional for every NAME and is normally left out:
+#   REGULARISATION: {<TERM>: <number > 0>, ...}   the backbone's own loss terms
+#                                                 (penalties on its internals, not
+#                                                 on the prediction) that count,
+#                                                 and their weights; absent or {}
+#                                                 means none. A term left out is
+#                                                 off, never zeroed. The terms a
+#                                                 backbone has are its REGULARISERS
+#                                                 (CardioConv's mask priors; no
+#                                                 other model has any).
 MODEL:
-  NAME: <string>                 # DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
+  NAME: <string>                 # CardioConv | DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
                                  # PhysMamba | PhysNet | RhythmFormer | TSCAN | iBVPNet
 
 # What every sample looks like when it reaches the model, and the loss. Every
@@ -34,12 +47,11 @@ INTERFACE:
   UPSAMPLING: <string>           # refuse | interpolate: what to do with a store
                                  # slower than FS (interpolate blends frames
                                  # and labels linearly, never duplicates)
-  WINDOW_SECONDS: <number > 0>   # window length; WINDOW_SECONDS x FS must be a
-                                 # whole number of frames (within 0.01), so a
-                                 # frame count N is written as N / FS to six
-                                 # decimals (160 frames at 30 fps: 5.333333)
+  WINDOW_SECONDS: <number > 0>   # window length; WINDOW_SECONDS x FS is rounded
+                                 # to the nearest whole frame (4.27 s at 30 fps
+                                 # is 128 frames)
   WINDOW_STRIDE: <number >= 1/FS>  # seconds the test set steps between windows,
-                                 # a whole number of frames likewise; training
+                                 # rounded to whole frames likewise; training
                                  # draws one random window per sample and
                                  # ignores it
   CHANNELS: [<string>, ...]      # ordered camera channels, no repeats, from
@@ -48,8 +60,8 @@ INTERFACE:
                                  # first layer is this wide, in this order
   TRACES: [<string>, ...]        # ordered signals to predict, no repeats, from
                                  # PPG | ECG | ABP | CVP | RESP | EDA | SPO2
-                                 # (BVP is accepted as PPG); one copy of the
-                                 # network per entry. PPG, ECG, RESP and EDA are
+                                 # (BVP is accepted as PPG); one prediction
+                                 # per entry. PPG, ECG, RESP and EDA are
                                  # shape signals, z-scored per window; ABP, CVP
                                  # and SPO2 are absolute, predicted in their
                                  # physical units
@@ -65,12 +77,13 @@ INTERFACE:
                                  # one component. A component that should not
                                  # count is left out, not zeroed. Components:
                                  #   CCC         concordance correlation (shape and level)
+                                 #               at the best lag within half a second,
+                                 #               tolerant of a pulse transit delay
                                  #   NEGPEARSON  negative Pearson (shape only)
                                  #   MSE         mean squared error
                                  #   MEAN        L1 on the window mean, in the label's units
-                                 #   MAX         L1 on the soft per-beat maximum (systolic)
-                                 #   MIN         L1 on the soft per-beat minimum (diastolic)
-                                 #   SPECTRAL    log-spectrum L1 up to 4 Hz (uses FS)
+                                 #   MAX         L1 on the soft window maximum (systolic)
+                                 #   MIN         L1 on the soft window minimum (diastolic)
                                  # The weights are where per-signal scale lives:
                                  # raw ABP error is O(10 mmHg), CVP O(1 mmHg),
                                  # CCC and NEGPEARSON O(1).

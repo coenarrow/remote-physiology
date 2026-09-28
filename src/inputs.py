@@ -26,7 +26,7 @@ Per sample, in this order — preprocess what the store has, then pad:
    False mask.
 
 Frames are emitted raw: every backbone normalises its own input
-(``neural_methods.model.modules``), so the dataset never standardises or
+(``neural_methods.model._shared_modules``), so the dataset never standardises or
 differences a frame.
 
 Emitted (``default_collate`` prepends the batch axis)::

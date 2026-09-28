@@ -101,7 +101,7 @@ def report(args) -> dict:
     state = {}
 
     def probe():
-        trainer = Trainer(model, interface, training, run, runtime,
+        trainer = Trainer(model, interface, model_config, training, run, runtime,
                           Path(tempfile.gettempdir()) / "memory_report")
         state["loss"], _ = trainer.step(batch)
         state["optimiser"] = trainer.optimizer

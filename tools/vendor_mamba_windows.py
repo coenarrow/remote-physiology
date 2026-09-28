@@ -39,7 +39,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-DEFAULT_VERSION = "2.3.1"
+DEFAULT_VERSION = "2.3.2.post1"
 VENDOR_DIR = Path(__file__).resolve().parent.parent / "vendor" / "mamba-ssm"
 
 # Everything the build backend needs, and nothing else: upstream's tests/ and

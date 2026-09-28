@@ -1,8 +1,0 @@
-{
-    "python-envs.pythonProjects": [],
-    "python.terminal.activateEnvironment": true,
-    "python.REPL.enableREPLSmartSend": true,
-    "python.REPL.provideVariables": true,
-    "python.REPL.sendToNativeREPL": false,
-    "python.terminal.shellIntegration.enabled": false
-}

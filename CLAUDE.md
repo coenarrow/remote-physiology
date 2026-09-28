@@ -15,8 +15,8 @@ ESH 2023) and large-scale LOSO sweeps on an HPC cluster.
 once.** A new dataset is a `channel_map` subclass plus a markdown cache spec;
 a new model is a backbone `nn.Module`, a registry line in
 `src/model_config.py` (plus a config class only if it has a switch), a
-builder in `src/models.py`, one config YAML under
-`configs/original_model_config/` and one smoke test
+builder in `src/models.py` and one config YAML under
+`configs/original_model_config/`
 (`docs/adding_a_model.md` is the recipe) — never a new trainer, loader, loss
 module, or plot set. When new work needs something a
 shared piece almost does, extend the shared piece for everyone rather than
@@ -36,12 +36,31 @@ multi-signal contract.
   Every addition considers all three platforms: Windows dev, Linux HPC, macOS.
 - **All tensor reshaping uses einops** (`rearrange` / `reduce` / `einsum`),
   not `view` / `permute` / `reshape` — including migrated model code.
+- **A single-trace design is copied per trace; a multi-trace design is
+  built once.** An architecture designed to predict one trace (every
+  upstream rPPG-Toolbox model) gets one complete copy per entry of `TRACES`
+  and never a widened readout or per-signal heads on a shared trunk. An
+  architecture designed from the start to predict several traces
+  (CardioConv) is one network returning `(B, S, T)` in `TRACES` order. Which
+  one a model is follows from its design, not from convenience, and nothing
+  downstream of the model can tell them apart. `docs/adding_a_model.md`,
+  "What a model is here".
+- **A model is a package, one `nn.Module` per file, named by PEP 8.**
+  `neural_methods/model/<name>/<name>.py` holds the top-level class and the
+  structural constants, which sub-modules receive as constructor arguments;
+  every other module has its own snake_case file, helper functions go in
+  `<name>/utils.py`, and anything two models need lives in
+  `neural_methods/model/_shared_modules/`. Names are PEP 8 with no exemption
+  for upstream spellings (CapWords classes, snake_case attributes and
+  arguments, `UPPER_CASE` constants), even where that renames a `state_dict`
+  key; `uv run ruff check` is the check. `neural_methods/model/factorizephys/`
+  is the reference.
 - **Tests are a cost, not a safety net.** This is research code; the suite
   exists to catch a broken build, not to specify behaviour. Write a test only
-  when it is (a) the one build-and-forward smoke test a model migration
-  requires, or (b) a unit test of a pure function that fits in a dozen lines
-  with no fixtures. Never add tests to a refactor or a design change, never
-  test a test helper, and never add a test "for coverage". The verification
+  when it is a unit test of a pure function that fits in a dozen lines with
+  no fixtures; a model migration does not get one. Never add tests to a
+  refactor or a design change, never test a test helper, and never add a
+  test "for coverage". The verification
   for a change is the run command in `README.md`, not a new test. This
   overrides the test-driven-development and verification skills' defaults.
 - **Stale tests are deleted in the same change that stales them.** A test

@@ -6,7 +6,7 @@ their schema in the file's order:
 * ``MODEL`` — ``NAME``, the architecture, plus the switches an experiment may
   flip for it. Layer sizes are not config: an architecture is defined once,
   in its module, at its published values, and every width is derived from
-  the interface (first layer from ``CHANNELS``, one copy of the network per
+  the interface (first layer from ``CHANNELS``, one prediction per
   entry of ``TRACES``). Most architectures have no switch, so their section
   is ``NAME`` alone.
 * ``INTERFACE`` — the model's demand on the data pipeline: what every sample
@@ -49,9 +49,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from neural_methods.loss.PerSignalLoss import normalise_loss_weights
+from neural_methods.loss.registry import COMPONENTS, normalise_loss_weights
 from src.config import ConfigError, build, load_yaml
-from src.signal_transforms import validate_channels, validate_traces
+from src.signal_transforms import is_cardiac, validate_channels, validate_traces
 
 #: The sections of a config file, and the compiled-config key each becomes.
 CONFIG_SECTIONS = {"MODEL": "model", "INTERFACE": "interface", "TRAIN": "training"}
@@ -62,11 +62,50 @@ CONFIG_SECTIONS = {"MODEL": "model", "INTERFACE": "interface", "TRAIN": "trainin
 # ---------------------------------------------------------------------------
 @dataclass
 class ModelConfig:
-    """An architecture with no switch: the section is ``NAME`` and nothing else."""
+    """An architecture's section: ``NAME`` plus the switches an experiment may
+    flip. ``REGULARISATION`` is the one optional key: the terms of the
+    backbone's own regularisers that count and their weights, ``{}`` or
+    absent for none (a term left out is off, never zeroed)."""
     NAME: str = ""
+    REGULARISATION: dict = field(default_factory=dict)   # {TERM: weight > 0}
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
-        pass
+        self.REGULARISATION = normalise_regularisation(self.REGULARISATION, where)
+
+
+#: The one key of the MODEL section a file may leave out.
+OPTIONAL_MODEL_KEYS = ("REGULARISATION",)
+
+
+def normalise_regularisation(weights, where: str) -> dict:
+    """``{TERM: weight}`` (YAML spelling) -> ``{term: float}``, lower-case keys,
+    every weight a positive number. Which terms exist is the backbone's to
+    say; ``src.models`` checks the names when it builds the model. A
+    regulariser name may not be a loss component name, because the trainer
+    merges both into one per-trace dict and a collision would silently
+    overwrite the loss component's tensor."""
+    if weights is None:
+        weights = {}
+    if not isinstance(weights, dict):
+        raise ConfigError(
+            f"{where}: REGULARISATION must be a mapping of term to weight, got "
+            f"{weights!r}")
+    out = {}
+    for term, weight in weights.items():
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) \
+                or weight <= 0:
+            raise ConfigError(
+                f"{where}: REGULARISATION.{term} must be a positive number "
+                f"(a term that should not count is left out, not zeroed), got "
+                f"{weight!r}")
+        key = str(term).lower()
+        if key in COMPONENTS:
+            raise ConfigError(
+                f"{where}: REGULARISATION.{term} is a loss component name; a "
+                f"regulariser must not share a name with "
+                f"{sorted(c.upper() for c in COMPONENTS)}")
+        out[key] = float(weight)
+    return out
 
 
 @dataclass
@@ -75,6 +114,7 @@ class TemporalShiftConfig(ModelConfig):
     FRAME_DEPTH: int = 0
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
         if self.FRAME_DEPTH <= 0:
             raise ConfigError(
                 f"{where}: FRAME_DEPTH must be positive, got {self.FRAME_DEPTH}")
@@ -85,14 +125,34 @@ class FactorizePhysConfig(ModelConfig):
     FSAM: bool = True             # run the factorized attention module. For ablation testing
 
 
+@dataclass
+class CardioConvConfig(ModelConfig):
+    """CardioConv's ablations; every one is ``True`` in the model as designed."""
+    PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a mask of ones
+    PHASE_MASKER: bool = True         # learn the per-trace masks; false is masks of ones
+    TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
+    SUPERVISE_MASKS: bool = True      # the statistics head's pooled power trains the masks
+
+    def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
+        other = [t for t in interface.TRACES if not is_cardiac(t)]
+        if other:
+            raise ConfigError(
+                f"{where}: CardioConv reads the clip at the harmonics of the heart "
+                f"rate, so it predicts cardiac traces only; TRACES has {other}")
+
+
 #: ``NAME`` -> the dataclass its section is parsed into. One line per
 #: architecture; its builder is the matching line of ``src.models.MODEL_BUILDERS``.
 MODEL_CONFIGS = {
+    "CardioConv": CardioConvConfig,
     "DeepPhys": ModelConfig,
     "EfficientPhys": TemporalShiftConfig,
     "FactorizePhys": FactorizePhysConfig,
     "PhysFormer": ModelConfig,
     "PhysMamba": ModelConfig,
+    "PhysMamba2": ModelConfig,
+    "PhysMamba3": ModelConfig,
     "PhysNet": ModelConfig,
     "RhythmFormer": ModelConfig,
     "TSCAN": TemporalShiftConfig,
@@ -109,7 +169,7 @@ def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):
     if arch not in MODEL_CONFIGS:
         raise ConfigError(
             f"{where}: NAME must be one of {sorted(MODEL_CONFIGS)}, got {arch!r}")
-    cfg = build(MODEL_CONFIGS[arch], mapping, where)
+    cfg = build(MODEL_CONFIGS[arch], mapping, where, optional=OPTIONAL_MODEL_KEYS)
     cfg.validate(interface, where)
     return cfg
 
@@ -118,8 +178,6 @@ def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):
 # INTERFACE: the model's demand on the data pipeline
 # ---------------------------------------------------------------------------
 UPSAMPLING_MODES = ("refuse", "interpolate")
-#: How far off a whole frame a duration may land before it is refused.
-FRAME_SNAP_TOLERANCE = 0.01
 
 
 @dataclass
@@ -157,15 +215,6 @@ def _frames(seconds: float, fs: float) -> int:
     return int(round(seconds * fs))
 
 
-def _snapped(seconds: float, fs: float, key: str) -> None:
-    """Refuse a duration that is not a whole number of frames at ``fs``."""
-    frames = seconds * fs
-    if abs(frames - round(frames)) > FRAME_SNAP_TOLERANCE:
-        raise ConfigError(
-            f"{key} {seconds} s is {frames:.3f} frames at FS {fs}, not a whole "
-            f"number; pick a duration that is (or write it as N / FS)")
-
-
 def validate_interface(cfg: InterfaceConfig, where: str) -> InterfaceConfig:
     """Every rule the interface carries, applied in place; returns ``cfg``."""
     if cfg.FS <= 0:
@@ -178,12 +227,10 @@ def validate_interface(cfg: InterfaceConfig, where: str) -> InterfaceConfig:
         raise ConfigError(
             f"{where}: WINDOW_SECONDS must be a positive duration, got "
             f"{cfg.WINDOW_SECONDS}")
-    _snapped(cfg.WINDOW_SECONDS, cfg.FS, f"{where}: WINDOW_SECONDS")
-    if cfg.WINDOW_STRIDE * cfg.FS < 1 - FRAME_SNAP_TOLERANCE:
+    if cfg.stride_frames < 1:
         raise ConfigError(
             f"{where}: WINDOW_STRIDE must be at least one frame "
             f"(1 / FS = {1 / cfg.FS:.4f} s), got {cfg.WINDOW_STRIDE}")
-    _snapped(cfg.WINDOW_STRIDE, cfg.FS, f"{where}: WINDOW_STRIDE")
 
     try:
         cfg.CHANNELS = validate_channels(cfg.CHANNELS)

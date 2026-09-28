@@ -1,0 +1,27 @@
+MODEL:
+  NAME: PhysMamba
+
+# Neckflix blood-pressure interface, shared by every model in this directory so
+# the runs compare like for like. It is the interface of the 30-epoch PhysMamba
+# run in runs/neckflix_physmamba (interface_neckflix_bp.yaml before the
+# consolidation), loss weights included.
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 10.0           # 300 frames
+  WINDOW_STRIDE: 1.0             # seconds the test set steps between windows
+  CHANNELS: [R, G, B, I, D]      # colour, infrared and depth, stacked in this order
+  TRACES: [ABP, CVP]             # arterial and central venous pressure, in mmHg
+  RESIZE: {H: 72, W: 72}         # the cache is 128 px; every model runs at 72
+  LOSS:                          # CCC for shape and level, L1 on the window
+    ABP: {CCC: 1.0, MEAN: 0.05, MAX: 0.05, MIN: 0.05}   # mean and the soft
+    CVP: {CCC: 1.0, MEAN: 0.20, MAX: 0.20, MIN: 0.20}   # systolic / diastolic
+
+# PhysMamba paper recipe (PURE_PURE_UBFC-rPPG_PHYSMAMBA_BASIC.yaml and PhysMambaTrainer).
+# The paper's 20 epochs and batch 4 are the launcher's flags: --epochs 20 --batch-size 4
+TRAIN:
+  OPTIMIZER: Adam              # upstream: optim.Adam(lr, weight_decay=0.0005)
+  LR: 3e-3
+  WEIGHT_DECAY: 5e-4
+  SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
+  PRECISION: float32           # upstream trains in full precision

@@ -3,3 +3,8 @@
 	url = https://github.com/coenarrow/Neckflix.git
 	branch = main
 	update = merge
+[submodule "tools/synthetic_datasets/synthetic_neck"]
+	path = tools/synthetic_datasets/synthetic_neck
+	url = https://github.com/coenarrow/synethic_neck.git
+	branch = main
+	update = merge
