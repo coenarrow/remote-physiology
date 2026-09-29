@@ -1,5 +1,6 @@
 MODEL:
   NAME: PhysMamba3
+  MAMBA_LR_SCALE: 1.0            # the Mamba layers' rate as a multiple of TRAIN.LR; 1 is the paper
 
 # There is no PhysMamba3 paper: the model is PhysMamba with Mamba3 layers, and this
 # file is PhysMamba's paper interface and recipe unchanged

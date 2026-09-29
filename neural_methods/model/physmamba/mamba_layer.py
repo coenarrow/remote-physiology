@@ -22,7 +22,8 @@ class MambaLayer(nn.Module):
     out, it is the published bidirectional Mamba1. PhysMamba2 passes its own.
     """
 
-    def __init__(self, dim, d_state=16, d_conv=4, expand=2, channel_token=False, mamba=None):
+    def __init__(self, dim, d_state=16, d_conv=4, expand=2, channel_token=False, mamba=None,
+                 lr_scale=1.0):
         super().__init__()
         self.dim = dim
         self.norm1 = nn.LayerNorm(dim)
@@ -37,6 +38,13 @@ class MambaLayer(nn.Module):
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.apply(self._init_weights)
+        # The SSM's gradient is too small to hold its weights against weight
+        # decay: under the paper recipe every Mamba but one decayed to zero by
+        # epoch 5 on the Neckflix interface. ``lr_scale`` is its learning rate
+        # as a multiple of the recipe's. The trainer reads both flags.
+        for parameter in self.mamba.parameters():
+            parameter._no_weight_decay = True
+            parameter._lr_scale = lr_scale
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

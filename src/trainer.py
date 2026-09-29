@@ -43,6 +43,8 @@ physiological prior (a raw-mmHg model otherwise spends its first epochs
 learning that pressure is ~90, not ~0), and the readouts are exempt from
 weight decay (decay on a raw-mmHg readout is a systematic bias dressed up as
 regularisation). Both find the readouts through ``model.output_layers()``.
+A parameter a model flags ``_no_weight_decay`` is exempt from decay too, and
+one it flags ``_lr_scale`` trains at that multiple of the recipe's rate.
 """
 
 import csv
@@ -92,7 +94,8 @@ OPTIMIZERS = {
 #: the run's epochs amounts to).
 SCHEDULERS = {
     "OneCycle": lambda optimizer, cfg, total_steps: torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=cfg.LR, total_steps=total_steps),
+        optimizer, max_lr=[group["lr"] for group in optimizer.param_groups],
+        total_steps=total_steps),
     "Constant": lambda optimizer, cfg, total_steps: torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda step: 1.0),
 }
@@ -147,15 +150,19 @@ def init_output_bias(model: MultiTraceModel, interface: InterfaceConfig) -> None
             layer.bias.fill_(signal_prior(trace) if is_absolute(trace) else 0.0)
 
 
-def parameter_groups(model: MultiTraceModel, weight_decay: float) -> list:
-    """Every parameter decays except the readouts', which decay at zero."""
-    exempt = {id(p) for layer in model.output_layers() for p in layer.parameters()}
-    decayed = [p for p in model.parameters() if id(p) not in exempt]
-    undecayed = [p for p in model.parameters() if id(p) in exempt]
-    groups = [{"params": decayed, "weight_decay": weight_decay}]
-    if undecayed:
-        groups.append({"params": undecayed, "weight_decay": 0.0})
-    return groups
+def parameter_groups(model: MultiTraceModel, weight_decay: float, lr: float) -> list:
+    """Every parameter decays except the readouts' and any a model flags with
+    ``_no_weight_decay`` (mamba_ssm's own flag), which decay at zero. Every
+    parameter trains at ``lr`` times its ``_lr_scale`` flag, 1 unless a model
+    sets it; the scheduler scales each group from its own rate."""
+    readouts = {id(p) for layer in model.output_layers() for p in layer.parameters()}
+    groups = {}
+    for p in model.parameters():
+        exempt = id(p) in readouts or getattr(p, "_no_weight_decay", False)
+        key = (0.0 if exempt else weight_decay, getattr(p, "_lr_scale", 1.0))
+        groups.setdefault(key, []).append(p)
+    return [{"params": params, "weight_decay": decay, "lr": lr * scale}
+            for (decay, scale), params in groups.items()]
 
 
 def to_physical(record: dict) -> dict:
@@ -253,7 +260,7 @@ class Trainer:
         self.weights = {trace: {**components, **model_config.REGULARISATION}
                         for trace, components in self.criterion.weights.items()}
         self.optimizer = OPTIMIZERS[training.OPTIMIZER](
-            parameter_groups(model, training.WEIGHT_DECAY), training)
+            parameter_groups(model, training.WEIGHT_DECAY, training.LR), training)
         # Loss scaling is only a float16 concern; bfloat16 has float32's range.
         self.scaler = torch.amp.GradScaler(
             self.device.type, enabled=self.dtype is torch.float16)

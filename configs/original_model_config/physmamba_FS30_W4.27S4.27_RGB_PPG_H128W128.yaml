@@ -1,5 +1,6 @@
 MODEL:
   NAME: PhysMamba
+  MAMBA_LR_SCALE: 1.0            # the Mamba layers' rate as a multiple of TRAIN.LR; 1 is the paper
 
 # PhysMamba paper interface. This is the rPPG-Toolbox configuration of PhysMamba
 INTERFACE:

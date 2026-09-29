@@ -50,16 +50,20 @@ TEMPORAL_STRIDE = 4
 
 
 class PhysMamba(nn.Module):
-    def __init__(self, in_channels=3, theta=0.5, drop_rate1=0.25, drop_rate2=0.5):
+    def __init__(self, in_channels=3, theta=0.5, drop_rate1=0.25, drop_rate2=0.5,
+                 mamba_lr_scale=1.0):
         """Definition of PhysMamba.
 
         Args:
           in_channels: the number of input channels. Default: 3.
           theta: the central-difference weight of every CDCT conv.
           drop_rate1, drop_rate2: dropout after the first and later blocks.
+          mamba_lr_scale: the Mamba layers' learning rate as a multiple of
+            the recipe's, flagged on their parameters for the trainer.
         """
         super().__init__()
         self.in_channels = in_channels
+        self.mamba_lr_scale = mamba_lr_scale
 
         # Input preprocessing: raw clip -> difference-normalised clip
         self.input_norm = DiffNormalize()
@@ -121,7 +125,8 @@ class PhysMamba(nn.Module):
             CDCT(channels, channels, theta=theta),
             nn.BatchNorm3d(channels),
             nn.ReLU(),
-            MambaLayer(dim=channels, mamba=self._build_ssm(channels)),
+            MambaLayer(dim=channels, mamba=self._build_ssm(channels),
+                       lr_scale=self.mamba_lr_scale),
             ChannelAttention3D(in_channels=channels, reduction=2),
         )
 

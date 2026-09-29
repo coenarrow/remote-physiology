@@ -35,7 +35,8 @@ from neural_methods.model.rhythmformer import rhythmformer
 from neural_methods.model.tscan import tscan
 from neural_methods.model._shared_modules.utils import min_frame_message
 from src.model_config import (
-    CardioConvConfig, FactorizePhysConfig, InterfaceConfig, ModelConfig, TemporalShiftConfig,
+    CardioConvConfig, FactorizePhysConfig, InterfaceConfig, ModelConfig, PhysMambaConfig,
+    TemporalShiftConfig,
 )
 
 
@@ -303,22 +304,28 @@ def _build_physformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTrac
     return _multi_trace(lambda: physformer.PhysFormer(in_channels=width), interface, cfg)
 
 
-def _build_physmamba(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_physmamba(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysMamba", physmamba.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physmamba.PhysMamba(in_channels=width), interface, cfg)
+    return _multi_trace(
+        lambda: physmamba.PhysMamba(in_channels=width, mamba_lr_scale=cfg.MAMBA_LR_SCALE),
+        interface, cfg)
 
 
-def _build_physmamba2(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_physmamba2(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysMamba2", physmamba2.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physmamba2.PhysMamba2(in_channels=width), interface, cfg)
+    return _multi_trace(
+        lambda: physmamba2.PhysMamba2(in_channels=width, mamba_lr_scale=cfg.MAMBA_LR_SCALE),
+        interface, cfg)
 
 
-def _build_physmamba3(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
+def _build_physmamba3(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "PhysMamba3", physmamba3.MIN_FRAME)
     width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physmamba3.PhysMamba3(in_channels=width), interface, cfg)
+    return _multi_trace(
+        lambda: physmamba3.PhysMamba3(in_channels=width, mamba_lr_scale=cfg.MAMBA_LR_SCALE),
+        interface, cfg)
 
 
 def _build_physnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:

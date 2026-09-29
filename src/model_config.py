@@ -121,6 +121,19 @@ class TemporalShiftConfig(ModelConfig):
 
 
 @dataclass
+class PhysMambaConfig(ModelConfig):
+    """PhysMamba, PhysMamba2 and PhysMamba3: the Mamba layers' learning rate as
+    a multiple of the recipe's; 1 is the paper."""
+    MAMBA_LR_SCALE: float = 0.0
+
+    def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
+        if self.MAMBA_LR_SCALE <= 0:
+            raise ConfigError(
+                f"{where}: MAMBA_LR_SCALE must be positive, got {self.MAMBA_LR_SCALE}")
+
+
+@dataclass
 class FactorizePhysConfig(ModelConfig):
     FSAM: bool = True             # run the factorized attention module. For ablation testing
 
@@ -150,9 +163,9 @@ MODEL_CONFIGS = {
     "EfficientPhys": TemporalShiftConfig,
     "FactorizePhys": FactorizePhysConfig,
     "PhysFormer": ModelConfig,
-    "PhysMamba": ModelConfig,
-    "PhysMamba2": ModelConfig,
-    "PhysMamba3": ModelConfig,
+    "PhysMamba": PhysMambaConfig,
+    "PhysMamba2": PhysMambaConfig,
+    "PhysMamba3": PhysMambaConfig,
     "PhysNet": ModelConfig,
     "RhythmFormer": ModelConfig,
     "TSCAN": TemporalShiftConfig,
