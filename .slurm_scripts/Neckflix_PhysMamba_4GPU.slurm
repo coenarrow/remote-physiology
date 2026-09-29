@@ -4,6 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --exclusive
+#SBATCH --cpus-per-task=48
 #SBATCH --mem=128G
 #SBATCH --gres=gpu:a100:4
 #SBATCH --time=3-00:00:00
@@ -21,7 +22,8 @@
 # More cards do not add memory per card; a model that runs a 40 GB A100 out
 # of memory at batch 1 needs PRECISION: bfloat16 in its config, or H100s.
 #
-# The job takes the whole node (--exclusive), so every CPU on it is dealt to
+# The job takes the whole node (--exclusive, and all 48 CPUs by name so the
+# task is bound to every one of them), so every CPU on it is dealt to
 # the four processes: one for the process itself, the rest its DataLoader
 # workers.
 #

@@ -4,6 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --exclusive
+#SBATCH --cpus-per-task=48
 #SBATCH --mem=128G
 #SBATCH --gres=gpu:a100:4
 #SBATCH --time=3-00:00:00
@@ -16,13 +17,13 @@
 #
 #   sbatch .slurm_scripts/Neckflix_FactorizePhys_4GPU.slurm
 #
-# One fold at a time across all four A100s (--parallel 1 --nproc-per-node 4).
-# --batch-size is per process, so 1 on each card is a global batch of 4.
-# More cards do not add memory per card; a model that runs a 40 GB A100 out
-# of memory at batch 1 needs PRECISION: bfloat16 in its config, or H100s.
+# Four folds at a time, one on each A100 (--parallel 4 --nproc-per-node 1),
+# each at the paper's batch of 4. In bfloat16 at batch 1 a card peaked at
+# 8.3 GB of 39.5 GB (job 41489), so four windows a card is about 25 GB.
 #
-# The job takes the whole node (--exclusive), so every CPU on it is dealt to
-# the four processes: one for the process itself, the rest its DataLoader
+# The job takes the whole node (--exclusive, and all 48 CPUs by name so the
+# task is bound to every one of them), so every CPU on it is dealt to
+# the four folds: one for the process itself, the rest its DataLoader
 # workers.
 #
 # Each fold writes its own log.txt under runs/${EXPERIMENT}/.
@@ -42,9 +43,9 @@ if [ "${WORKERS}" -lt 1 ]; then
 fi
 
 echo "Job ID: ${SLURM_JOB_ID}, node ${SLURMD_NODENAME}"
-echo "CPUs on node: ${SLURM_CPUS_ON_NODE}, ${WORKERS} workers for each of ${GPUS} processes"
+echo "CPUs on node: ${SLURM_CPUS_ON_NODE}, ${WORKERS} workers for each of ${GPUS} folds"
 
 uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc \
     --config configs/hpc_configs/factorizephys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml \
     --experiment "${EXPERIMENT}" \
-    --epochs 30 --batch-size 1 --num-workers "${WORKERS}" --parallel 1 --nproc-per-node "${GPUS}"
+    --epochs 30 --batch-size 4 --num-workers "${WORKERS}" --parallel "${GPUS}" --nproc-per-node 1
