@@ -14,3 +14,6 @@ deepphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
   DeepPhys batch 4: out of memory
 efficientphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
   EfficientPhys batch 1: peak 23.4 GB, step 0.89 s, forward 0.11 s, load 0.96 s/window
+  EfficientPhys batch 2: peak 36.8 GB, step 1.75 s, forward 0.22 s, load 1.10 s/window
+  EfficientPhys batch 4: out of memory
+factorizephys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
