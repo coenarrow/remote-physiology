@@ -24,4 +24,4 @@ TRAIN:
   LR: 1e-3                     # 10x the paper's 1e-4: at 1e-4 the 48-weight readout never reaches mmHg amplitude on a raw ABP target (2026-09-28 diagnosis)
   WEIGHT_DECAY: 5e-5
   SCHEDULER: Constant          # upstream: StepLR(50, 0.5), never reached in 10 epochs
-  PRECISION: float32           # upstream trains in full precision
+  PRECISION: bfloat16          # upstream is float32; bfloat16 so 300 px fits in GPU memory

@@ -1,6 +1,6 @@
 MODEL:
   NAME: PhysMamba3
-  MAMBA_LR_SCALE: 1.0            # the Mamba layers' rate as a multiple of TRAIN.LR; 1 is the paper
+  MAMBA_LR_SCALE: 0.1           # the Mamba layers' rate as a multiple of TRAIN.LR; 1 is the paper
 
 # Neckflix blood-pressure interface, shared by every model in this directory so
 # the runs compare like for like. It is the interface of the 30-epoch PhysMamba
@@ -25,4 +25,4 @@ TRAIN:
   LR: 3e-3
   WEIGHT_DECAY: 5e-4
   SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
-  PRECISION: float32           # upstream trains in full precision
+  PRECISION: bfloat16          # upstream is float32; bfloat16 so 300 px fits in GPU memory

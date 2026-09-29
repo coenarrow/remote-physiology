@@ -24,4 +24,4 @@ TRAIN:
   LR: 9e-3
   WEIGHT_DECAY: 0.0
   SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
-  PRECISION: float32           # upstream trains in full precision
+  PRECISION: bfloat16          # upstream is float32; bfloat16 so 300 px fits in GPU memory

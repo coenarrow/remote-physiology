@@ -39,4 +39,4 @@ TRAIN:
   LR: 1e-3
   WEIGHT_DECAY: 0.0
   SCHEDULER: Constant
-  PRECISION: float32
+  PRECISION: bfloat16
