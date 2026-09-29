@@ -41,3 +41,7 @@ FILTERS:
   arterial_line.site:         # nested attr, dotted; no constraint as written
     include: []
     exclude: []
+
+# Root attrs scripts/evaluate.py reports beside the core five (age_years, sex,
+# skin_tone, posture, neck_circumference_cm); dotted when nested.
+ADDITIONAL_PARAMS: []

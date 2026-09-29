@@ -9,7 +9,7 @@ vendor/.mamba-ssm-check/
 *.mat
 PreprocessedData
 PreTrainedModels
-# caches rendered in-repo (synthetic-neck writes data/synthetic_neck_zarr)
+# caches rendered in-repo (synthetic-neck writes data/synthetic_neck)
 data/
 runs
 temp

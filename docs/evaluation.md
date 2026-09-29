@@ -1,7 +1,8 @@
 # Evaluation
 
-`scripts/run.py` scores each epoch's `epoch_NN/test_records/` the moment
-it has written them. The evaluation reads
+`scripts/run.py` scores each epoch's `epoch_NN/test_records/<dataset>/`
+the moment it has written them, and `scripts/test.py` does the same for a
+dataset tested afterwards. The evaluation reads
 `meta.json` and the per-recording trace tables and nothing else: no
 config file, no checkpoint. It is not yet torch-free, though — a known
 limitation, not the design's goal: no file under `src/evaluation/`
@@ -11,7 +12,7 @@ normalisation, reached transitively through `src/outputs.py` ->
 `src/model_config.py`. Importing `src.evaluation` still
 pulls in torch and `src.model_config`, so a laptop with no
 torch install cannot run it yet. Every `<recording>/<perspective>/`
-folder under an epoch's `test_records/` is scored afresh, and its
+folder under an epoch's `test_records/<dataset>/` is scored afresh, and its
 tables are written beside its trace tables. Clause and page numbers
 below are the printed ones in `standards/`.
 
@@ -98,16 +99,64 @@ trough (down triangle) on both curves. Every predicted beat is marked,
 matched or not, so a spurious predicted beat is visible here even though
 it has no row in `<TRACE>_beats.csv`.
 
+## Per run
+
+`scripts/evaluate.py RUN_DIR` pools the tables above over every fold of a
+run into `RUN_DIR/evaluation/`. It is run by hand after the run has
+finished, reads the run directory and nothing else, and re-scores nothing.
+
+**The paired measurement** (`src/evaluation/pooling.py`). One recording and
+camera, over its whole covered stretch. It is eligible when that stretch is
+within `--segment-min` and `--segment-max` seconds (20 and 30, both
+inclusive); the rest are listed in `exclusions.csv` and enter no statistic.
+The subject is the dataset and participant together. The epoch is each
+fold's last, or `--epoch`; it is never chosen by test error.
+
+`measurements.csv`, one row per fold, recording, camera and signal: `fold`,
+`dataset`, `participant`, `recording`, `perspective`, `epoch`, `subject`,
+`signal`, the columns of `signals.csv`, the rate columns of `rates.csv` for
+that source (`FUSED` has a row of its own), `duration`, then the columns of
+`recordings.csv` and the five core attributes.
+
+**Demographics** (`src/evaluation/demographics.py`). `recordings.csv`,
+written beside `meta.json` by `src/outputs.py`, carries each recording's
+root attrs. Five are core: `age_years`, `sex`, `skin_tone`, `posture`,
+`neck_circumference_cm`; several measurements of one are reported as their
+median. Further attrs come from a dataset's `ADDITIONAL_PARAMS` and from
+`--additional-params`. The sex and age shares are checked against ISO
+81060-3 clauses 4.3.2.2 and 4.3.2.3.2 (p. 6), the reference pressures
+against the bands of clause 4.3.3 (pp. 7-8). An attr the run does not carry
+reads "not recorded".
+
+**Accuracy** (`src/evaluation/agreement.py`). Per parameter (a rate per
+source; systolic, diastolic and mean ABP; mean CVP): the mean error, the
+corrected standard deviation, the intra-class correlation and the number of
+independent measurements of ISO 81060-3 Formulas (5), (6) and (8) to (12)
+(pp. 12 and 15), in the general form the standard prints for unequal counts
+per subject, with `f_BA` standing for `r` in Formula (6). Limits of
+agreement are the mean error ± 1.96 `s_corr`. For pressures, the percent of
+absolute errors within 5, 10 and 15 mmHg. The criteria of clause 5.1.4
+(p. 16) are applied to arterial pressure only.
+
+**Deep-learning metrics.** Waveform MAD, RMSE, r, CCC and lag as mean ± SD
+over measurements; rate MAE, RMSE, MAPE and r per source; beat precision
+and recall; the model beside a constant predictor, and the ratio of the
+predictions' SD to the references'; training loss and test error against
+the epoch.
+
+The report's "Departures from ISO 81060-3" section lists where this differs
+from the clinical investigation the standard describes.
+
 ## Not covered
 
 Cutting a recording into standard-length readings and scoring each: the
 ISO 81060-2 invasive reference interval of 30 s (clause 6.2.4 b), p. 21),
 the ISO 81060-3 device segment of 5 to 10 s (clause 5.1.3, p. 14, and
 A.2, p. 27), the IEEE 1708 60 s recordings (clause 4.4.2, p. 24).
-Pooling recordings into per-participant or per-dataset summaries, the
-clinical standards' criteria and coverage tables, figures and the
-report: to be rebuilt on top of the tables above. ESH 2023 and ISO
-81060-1. Calibration and time-since-initialisation. CVP beats are
+The methods for stability and for blood pressure changes of ISO 81060-3
+(clauses 5.2 and 5.3), which need hours and half-hours of recording. The
+criteria of IEEE 1708. Comparison across runs. A respiratory rate. ESH
+2023 and ISO 81060-1. Calibration and time-since-initialisation. CVP beats are
 detected with the shared detector and are expected to be unreliable;
 `signals.csv`'s `n_ref_beats`, `n_pred_beats` and `n_matched` say
 whether they are.

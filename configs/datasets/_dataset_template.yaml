@@ -37,3 +37,7 @@ FILTERS:
   participant:                # nobody dropped; list ids here to drop them
     include: []
     exclude: []
+
+# Root attrs scripts/evaluate.py reports beside the core five (age_years, sex,
+# skin_tone, posture, neck_circumference_cm); dotted when nested.
+ADDITIONAL_PARAMS: []

@@ -80,7 +80,7 @@
 # Most of these are continuous draws. Since values compare as strings, the
 # keys that filter usefully are the categorical and integer ones: participant,
 # posture, abp_site, skin_tone, seed, output_px, n_frames, device, clevel.
-CACHED_PATH: "data/synthetic_neck"   # rendered in-repo (data/ is gitignored); relative to the repo root
+CACHED_PATH: "data/synthetic_neck_high_snr"   # rendered in-repo (data/ is gitignored); relative to the repo root
 FILTERS:                       # every key the generator writes; all empty, so every store is admitted
   # root attrs
   participant: {include: [], exclude: []}

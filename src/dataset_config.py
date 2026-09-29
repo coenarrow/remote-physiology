@@ -8,8 +8,10 @@ model config file's ``INTERFACE`` section (``src.model_config``), a
 different kind of file. Enumerating and filtering the stores a loaded
 config names is ``src.datasets``.
 
-Both keys are required (``FILTERS: {}`` admits every store) and unknown
-keys are refused.
+``CACHED_PATH`` and ``FILTERS`` are required (``FILTERS: {}`` admits every
+store); ``ADDITIONAL_PARAMS`` is optional, a list of root attrs (dotted when
+nested) that ``scripts/evaluate.py`` reports beside the five core ones.
+Unknown keys are refused.
 """
 
 from dataclasses import dataclass, field
@@ -25,6 +27,7 @@ DATASET_CONFIG_DIR = REPO_ROOT / "configs" / "datasets"
 class DatasetConfig:
     CACHED_PATH: str = ""
     FILTERS: dict = field(default_factory=dict)   # {attr: {include, exclude}}
+    ADDITIONAL_PARAMS: list = field(default_factory=list)   # root attrs the evaluation also reports
 
 
 def normalise_filters(filters: dict, where: str) -> dict:
@@ -79,7 +82,7 @@ def parse_dataset_config(mapping: dict, where: str) -> DatasetConfig:
     """One dataset mapping — a loaded file, or an entry of the ``datasets``
     section a run's compiled config carries — typed and checked. ``where``
     names the source in errors."""
-    cfg = build(DatasetConfig, mapping, where)
+    cfg = build(DatasetConfig, mapping, where, optional=("ADDITIONAL_PARAMS",))
     if not cfg.CACHED_PATH:
         raise ConfigError(f"{where}: CACHED_PATH must name the cache directory")
     cfg.FILTERS = normalise_filters(cfg.FILTERS, where)

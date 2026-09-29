@@ -16,15 +16,19 @@ module is written once for both:
   model, recipe and datasets — through the same parsers the files go
   through (``src.model_config``, ``src.dataset_config``), so a run rebuilt
   from its checkpoint is checked exactly as a loaded one is;
+* ``load_start``, the checkpoint a run starts from (``--init-from``): its
+  weights, and the setup ``rebuild`` reads out of it in place of a config
+  file;
 * the windowed datasets each side of the split becomes, and the progress
   lines the script prints on the way.
 """
 
 import argparse
+import json
 import shlex
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -41,37 +45,73 @@ from src.model_config import (
     InterfaceConfig, RunSettings, TrainingConfig, parse_interface,
     parse_model_config, parse_training,
 )
+from src.evaluation.recording import score_recording
+from src.outputs import META_NAME, RECORDS_DIR
 from src.trainer import CHECKPOINT_NAME, CONFIG_NAME
 from src.inputs import WindowedDataset
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+#: One directory per epoch under the run directory, 1-based like ``losses.csv``.
+EPOCH_DIR = "epoch_{:02d}"
 
 
 # ---------------------------------------------------------------------------
 # Arguments
 # ---------------------------------------------------------------------------
-def add_config_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+def add_config_arguments(parser: argparse.ArgumentParser,
+                         init_from: bool = False) -> argparse.ArgumentParser:
     """The config files every run is made of: the datasets, and the one file
     that holds the model, its interface and its training recipe. Shared with
     the tools that take a run's setup without running it
-    (``tools/memory_report.py``)."""
+    (``tools/memory_report.py``).
+
+    ``init_from`` adds ``--init-from`` and ``--lr`` for a script that can
+    start from a checkpoint: the checkpoint then stands in for ``--config``
+    and, unless named, for ``--datasets`` (``check_config_arguments``)."""
     parser.add_argument(
-        "--datasets", nargs="+", required=True, metavar="NAME",
+        "--datasets", nargs="+", required=not init_from, metavar="NAME",
         help="dataset config name(s), each resolved to "
-             "configs/datasets/<NAME>.yaml (e.g. --datasets neckflix pure)")
+             "configs/datasets/<NAME>.yaml (e.g. --datasets neckflix pure)"
+             + ("; with --init-from, default: the datasets that run trained on"
+                if init_from else ""))
     parser.add_argument(
-        "--config", required=True, metavar="PATH",
+        "--config", required=not init_from, metavar="PATH",
         help="the config file: MODEL, INTERFACE and TRAIN sections "
              "(e.g. configs/original_model_config/deepphys_FS30_W6S6_RGB_PPG_H72W72.yaml)")
+    if init_from:
+        parser.add_argument(
+            "--init-from", metavar="PATH",
+            help="start from a trained model instead of --config: a run "
+                 "directory, one of its epoch_NN folders, or a model.pt. The "
+                 "interface, model and recipe are the checkpoint's")
+        parser.add_argument(
+            "--lr", type=float, metavar="RATE",
+            help="with --init-from: the learning rate, in place of the "
+                 "checkpoint's recipe (default: inherit it)")
     return parser
 
 
-def add_run_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """The run settings (:class:`RunSettings`), defaults from the dataclass."""
+def check_config_arguments(parser: argparse.ArgumentParser, args) -> None:
+    """Exactly one of ``--config`` and ``--init-from``; a config file needs
+    its datasets named, and ``--lr`` overrides only a checkpoint's recipe."""
+    if (args.config is None) == (args.init_from is None):
+        parser.error("give exactly one of --config and --init-from")
+    if args.config is not None and not args.datasets:
+        parser.error("--config needs --datasets")
+    if args.lr is not None and args.init_from is None:
+        parser.error("--lr goes with --init-from; a config file states its own LR")
+
+
+def add_run_arguments(parser: argparse.ArgumentParser,
+                      epochs: bool = True) -> argparse.ArgumentParser:
+    """The run settings (:class:`RunSettings`), defaults from the dataclass.
+    A script that does not train (``scripts/test.py``) leaves ``--epochs``
+    out."""
     d = RunSettings()
-    parser.add_argument(
-        "--epochs", type=int, default=d.epochs, metavar="N",
-        help=f"training epochs (default: {d.epochs})")
+    if epochs:
+        parser.add_argument(
+            "--epochs", type=int, default=d.epochs, metavar="N",
+            help=f"training epochs (default: {d.epochs})")
     parser.add_argument(
         "--batch-size", type=int, default=d.batch_size, metavar="N",
         help=f"windows per batch, per process, train and test alike "
@@ -88,11 +128,12 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParse
 
 def run_settings(parser: argparse.ArgumentParser, args) -> RunSettings:
     """The parsed run flags as one :class:`RunSettings`, checked."""
-    if args.epochs < 1 or args.batch_size < 1:
+    epochs = getattr(args, "epochs", 0)          # 0: a script that does not train
+    if (hasattr(args, "epochs") and epochs < 1) or args.batch_size < 1:
         parser.error("--epochs and --batch-size are at least 1")
     if args.num_workers < 0:
         parser.error("--num-workers is at least 0")
-    return RunSettings(epochs=args.epochs, batch_size=args.batch_size,
+    return RunSettings(epochs=epochs, batch_size=args.batch_size,
                        num_workers=args.num_workers, gpu=not args.no_gpu)
 
 
@@ -205,7 +246,8 @@ def run_name(args, model_config, training: TrainingConfig,
 
 def compile_config(script: str, argv, args, interface: InterfaceConfig, model_config,
                    training: TrainingConfig, run: RunSettings, runtime: Runtime,
-                   datasets: dict, split: Split, run_dir: Path) -> dict:
+                   datasets: dict, split: Split, run_dir: Path,
+                   start: "Start | None" = None) -> dict:
     """Everything this run ran on, as one plain mapping.
 
     The four config sections (``datasets``, ``interface``, ``model``,
@@ -218,16 +260,26 @@ def compile_config(script: str, argv, args, interface: InterfaceConfig, model_co
     ``runtime`` the device and precision actually used (after any
     downgrade), ``git`` the code the run executed. Written to the run
     directory as ``config.yaml`` and carried inside the checkpoint.
+
+    A run started from a checkpoint (``start``) names that checkpoint as the
+    source of whatever it took from it. ``history`` is what the model had
+    been trained on before this run, one entry per earlier run, oldest
+    first (``stage``); empty for a model trained from scratch.
     """
+    origin = str(start.path) if start else None
+    named = resolve_dataset_configs(
+        [name for name in datasets if not (start and name in start.inherited)])
     return {
         "command": shlex.join([script, *(sys.argv[1:] if argv is None else argv)]),
         "git": git_state(),
         "run_dir": str(run_dir),
         "sources": {
-            "datasets": {name: str(path.resolve())
-                         for name, path in resolve_dataset_configs(args.datasets).items()},
-            "config": str(Path(args.config).resolve()),
+            "datasets": {name: str(named[name].resolve()) if name in named else origin
+                         for name in datasets},
+            "config": origin or str(Path(args.config).resolve()),
         },
+        "history": ([*start.checkpoint["config"].get("history", []), stage(start)]
+                    if start else []),
         "datasets": {name: asdict(cfg) for name, cfg in datasets.items()},
         "split": {
             "test_participant_dataset": args.test_participant_dataset,
@@ -245,6 +297,22 @@ def compile_config(script: str, argv, args, interface: InterfaceConfig, model_co
             "world_size": runtime.world_size,
         },
         "limit_windows": args.limit_windows,
+    }
+
+
+def stage(start: "Start") -> dict:
+    """One ``history`` entry: the run a checkpoint came out of. Which
+    checkpoint and after how many of that run's epochs, then what that run
+    trained on and how, as its own compiled config has it. The interface and
+    the model are not repeated: a run started from a checkpoint has the
+    checkpoint's."""
+    source = start.checkpoint["config"]
+    return {
+        "run_dir": source.get("run_dir"),
+        "checkpoint": str(start.path),
+        "epoch": start.checkpoint.get("epoch"),
+        **{key: source.get(key)
+           for key in ("command", "git", "datasets", "split", "training", "run")},
     }
 
 
@@ -279,17 +347,110 @@ def rebuild(config: dict, where: str = CONFIG_NAME) -> Setup:
                  split.get("test_participant_dataset"), split.get("test_participant_id"))
 
 
-def load_checkpoint(run_dir: Path) -> dict:
-    """``{"model_state", "config"}`` from a run directory's ``model.pt``."""
-    path = Path(run_dir) / CHECKPOINT_NAME
+def checkpoint_path(path) -> Path:
+    """The ``model.pt`` a path names: the file itself, or the one inside a
+    run directory (the latest epoch) or inside one of its ``epoch_NN``
+    folders."""
+    path = Path(path)
+    if path.is_dir():
+        path = path / CHECKPOINT_NAME
     if not path.is_file():
-        raise ConfigError(f"{run_dir} has no {CHECKPOINT_NAME}; is it a run "
-                          f"directory written by scripts/run.py?")
+        raise ConfigError(f"No checkpoint at {path}; name a run directory "
+                          f"written by scripts/run.py, one of its epoch_NN "
+                          f"folders, or a {CHECKPOINT_NAME}")
+    return path.resolve()
+
+
+def epoch_checkpoint(path, epoch: int | None = None) -> Path:
+    """The ``model.pt`` a test runs: weights that no later epoch overwrites.
+
+    A run directory gives its latest ``epoch_NN/model.pt``, or epoch
+    ``epoch``'s. An ``epoch_NN`` folder or a ``model.pt`` is itself, and
+    takes no ``epoch``.
+    """
+    path = Path(path)
+    found = sorted(path.glob(f"epoch_*/{CHECKPOINT_NAME}"),
+                   key=lambda p: int(p.parent.name.split("_")[1])) if path.is_dir() else []
+    if not found:
+        if epoch is not None:
+            raise ConfigError(f"--epoch picks among a run directory's epoch_NN "
+                              f"folders, and {path} has none")
+        return checkpoint_path(path)
+    if epoch is None:
+        return found[-1].resolve()
+    wanted = path / EPOCH_DIR.format(epoch) / CHECKPOINT_NAME
+    if not wanted.is_file():
+        raise ConfigError(f"{path} has no epoch {epoch}; it has "
+                          f"{[p.parent.name for p in found]}")
+    return wanted.resolve()
+
+
+def trained_stores(config: dict) -> set:
+    """Every store a model has trained on, as resolved paths: the training
+    side of its run's split and of every run in its ``history``."""
+    seen = set()
+    for run in [*config.get("history", []), config]:
+        for name, stores in ((run.get("split") or {}).get("train") or {}).items():
+            root = Path(run["datasets"][name]["CACHED_PATH"])
+            seen.update((root / store).resolve() for store in stores)
+    return seen
+
+
+def records_dir(epoch_dir: Path, dataset: str) -> Path:
+    """Where one dataset's test records land beside an epoch's weights:
+    ``epoch_NN/test_records/<dataset>/``."""
+    return Path(epoch_dir) / RECORDS_DIR / dataset
+
+
+def score_records(out_dir: Path) -> list:
+    """Score every ``<recording>/<perspective>/`` folder under one dataset's
+    records directory from its files alone, found by the first trace's
+    table; returns the folders scored, in order."""
+    meta = json.loads((out_dir / META_NAME).read_text(encoding="utf-8"))
+    first = str(meta["traces"][0])
+    folders = sorted(path.parent for path in out_dir.glob(f"*/*/{first}.csv"))
+    for folder in folders:
+        score_recording(folder, meta)
+    return folders
+
+
+def load_checkpoint(path) -> dict:
+    """``{"model_state", "config", "epoch"}`` from the ``model.pt`` a path
+    names (``checkpoint_path``)."""
+    path = checkpoint_path(path)
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     if not checkpoint.get("config"):
         raise ConfigError(f"{path} carries no compiled config; nothing to rebuild "
                           f"the run from")
     return checkpoint
+
+
+@dataclass
+class Start:
+    """The checkpoint a run starts from, and what the run takes from it."""
+
+    path: Path                           # the model.pt
+    checkpoint: dict
+    setup: Setup                         # typed from the checkpoint's config
+    inherited: tuple = ()                # the dataset names taken from it
+
+
+def load_start(path, datasets: list[str] | None, lr: float | None) -> Start:
+    """The checkpoint ``--init-from`` names, its setup typed again, with the
+    launcher's overrides applied: ``lr`` replaces the recipe's rate (checked
+    as a config's is), and ``datasets``, when given, replaces the datasets
+    the checkpoint's run trained on. The recipe's run name is dropped: a run
+    started from a checkpoint is a new run and gets a name of its own."""
+    path = checkpoint_path(path)
+    checkpoint = load_checkpoint(path)
+    setup = rebuild(checkpoint["config"], str(path))
+    training = asdict(setup.training)
+    training["MODEL_FILE_NAME"] = ""
+    if lr is not None:
+        training["LR"] = lr
+    setup = replace(setup, training=parse_training(training, "--init-from recipe"))
+    return Start(path, checkpoint, setup,
+                 inherited=() if datasets else tuple(setup.datasets))
 
 
 # ---------------------------------------------------------------------------

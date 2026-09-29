@@ -6,6 +6,8 @@
       meta.json                        what was run, on what, at what rate
       windows.csv                      one row per window: where it sits and
                                        which channels / traces it carried
+      recordings.csv                   one row per recording: the cache's root
+                                       attrs (posture, sex, age, ...)
       <recording>/<perspective>/<TRACE>.csv   one wide table per trace
 
 Windows never cross a recording or a camera, so each (recording, perspective)
@@ -32,6 +34,7 @@ from src.signal_transforms import label_mode
 RECORDS_DIR = "test_records"
 META_NAME = "meta.json"
 WINDOWS_NAME = "windows.csv"
+RECORDINGS_NAME = "recordings.csv"
 FLOAT_FORMAT = "%.6g"
 #: The columns every trace table starts with; the ``w<start_frame>`` columns follow.
 FIXED_COLUMNS = ("frame", "t", "label", "mean", "std", "n")
@@ -61,6 +64,32 @@ def window_rows(records, interface: InterfaceConfig) -> pd.DataFrame:
         row.update({f"label_{sig}": bool(record["label_mask"][sig])
                     for sig in interface.TRACES})
         rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _flatten(attrs: dict, prefix: str = "") -> dict:
+    """Scalar attrs keyed by dotted path (``skin_tone.clinician``); lists and
+    other containers are left out."""
+    out = {}
+    for key, value in attrs.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten(value, f"{name}."))
+        elif value is None or isinstance(value, (str, bool, int, float)):
+            out[name] = value
+    return out
+
+
+def recording_rows(stores: dict) -> pd.DataFrame:
+    """``recordings.csv``: one row per store with every scalar root attr, as
+    the cache wrote it. Nothing is selected or renamed here."""
+    rows = []
+    for store, attrs in stores.items():
+        flat = _flatten(attrs)
+        flat.pop("recording", None)
+        flat.pop("participant", None)
+        rows.append({"recording": str(attrs.get("recording", Path(store).stem)),
+                     "participant": str(attrs.get("participant", "")), **flat})
     return pd.DataFrame(rows)
 
 
@@ -96,18 +125,25 @@ def trace_table(records, sig: str, fs: float) -> pd.DataFrame:
                          "mean": mean, "std": std, "n": n, **columns})
 
 
-def write_records(records, out_dir, interface: InterfaceConfig, meta: dict) -> Path:
+def write_records(records, out_dir, interface: InterfaceConfig, meta: dict,
+                  stores: dict) -> Path:
     """Write the directory described in the module docstring; returns it.
 
     ``meta`` is what the caller knows and the records do not (the dataset and
     participant, the checkpoint's run directory, the command, the git state);
     the interface's rate, window, channels and traces are added here.
+    ``stores`` is ``{store path: root attrs}`` of the dataset tested; the
+    rows of the recordings the records cover go to ``recordings.csv``.
     """
     if not records:
         raise ValueError("no records to write")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     window_rows(records, interface).to_csv(out_dir / WINDOWS_NAME, index=False)
+    covered = {str(record["metadata"]["recording"]) for record in records}
+    recordings = recording_rows(stores)
+    recordings[recordings["recording"].isin(covered)].to_csv(
+        out_dir / RECORDINGS_NAME, index=False)
 
     groups: dict[tuple, list] = {}
     for record in records:

@@ -49,6 +49,26 @@ array) is a violation.
   `DATA.FILTERS` surface (`posture`, `light`, `session`, ...). Their value
   vocabularies are per-dataset conventions, again documented in the cache
   spec.
+- Five attrs are **core**: optional, but where a dataset has the fact it
+  goes under this name, in this unit and vocabulary. They describe who was
+  recorded, and `scripts/evaluate.py` reports them for every run
+  (`docs/evaluation.md`, "Per run").
+
+  | Attr | Value |
+  |---|---|
+  | `age_years` | integer |
+  | `sex` | `"M"` or `"F"` |
+  | `skin_tone` | integer 1 to 10, Monk scale |
+  | `posture` | `"supine"`, `"recumbent"` or `"sitting"` |
+  | `neck_circumference_cm` | float |
+
+  A core attr is a single value, or a mapping of several measurements of it
+  (`skin_tone: {self: 4, recorder: 5, clinician: 5}`,
+  `neck_circumference_cm: {lower: 42.0, mid: 41.5, upper: 45.0}`), whose
+  value is then the median of its numeric members; non-numeric members
+  (`scale: "monk"`) are ignored. A dataset without the fact omits the attr
+  or writes null. Anything else a dataset wants reported goes in its
+  config's `ADDITIONAL_PARAMS`.
 - At least one perspective group.
 
 ## Perspective

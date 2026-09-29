@@ -264,6 +264,7 @@ class Trainer:
         # Loss scaling is only a float16 concern; bfloat16 has float32's range.
         self.scaler = torch.amp.GradScaler(
             self.device.type, enabled=self.dtype is torch.float16)
+        self.epoch = 0                   # epochs finished; ``fit`` advances it
 
     # -- helpers ------------------------------------------------------------
     def _loader(self, dataset: Dataset, sampler=None, shuffle: bool = False) -> DataLoader:
@@ -298,8 +299,10 @@ class Trainer:
 
     def checkpoint(self) -> dict:
         """The model plus the compiled run config, so ``src.experiment.rebuild`` can
-        rebuild the run from this file alone."""
-        return {"model_state": self.model.state_dict(), "config": self.config}
+        rebuild the run from this file alone, and the epochs this run had
+        finished when it was taken (1-based; 0 before the first)."""
+        return {"model_state": self.model.state_dict(), "config": self.config,
+                "epoch": self.epoch}
 
     def _prepare_run_dir(self) -> None:
         """Main rank only: create the run directory and write ``config.yaml``
@@ -378,6 +381,7 @@ class Trainer:
             row = {"epoch": epoch + 1, **{k: v / n for k, v in sums.items()},
                    "seconds": time.time() - started}
             log.append(row)
+            self.epoch = epoch + 1
             if runtime.is_main:
                 self._print_epoch(row)
                 self._write_loss_log(log)

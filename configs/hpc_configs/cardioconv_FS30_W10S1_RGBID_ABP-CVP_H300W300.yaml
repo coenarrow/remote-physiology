@@ -1,0 +1,42 @@
+# LABEL LEAKAGE: CardioConv is handed the heart rate of the label
+# (src.models.label_heart_rate), at test time too, until it estimates the rate
+# from the video itself; its numbers here are not like for like with the rest.
+MODEL:
+  NAME: CardioConv
+  PULSATILITY_MASKER: true
+  PHASE_MASKER: true
+  TRACE_INDEPENDENT: true
+  SUPERVISE_MASKS: true
+  REGULARISATION:                # the mask priors, as in its original_model_config file
+    SPARSITY: 0.022
+    PULSATILITY_TV: 0.44
+    PULSATILITY_SMOOTHNESS: 1.0
+    HARMONIC_COHERENCE: 0.058
+    SPATIAL_COHERENCE: 0.018
+    TEMPORAL_CONSISTENCY: 0.031
+    PHASE_TV: 0.50
+    PHASE_SMOOTHNESS: 1.0
+
+# Neckflix blood-pressure interface, shared by every model in this directory so
+# the runs compare like for like. It is the interface of the 30-epoch PhysMamba
+# run in runs/neckflix_physmamba (interface_neckflix_bp.yaml before the
+# consolidation), loss weights included.
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 10.0           # 300 frames
+  WINDOW_STRIDE: 1.0             # seconds the test set steps between windows
+  CHANNELS: [R, G, B, I, D]      # colour, infrared and depth, stacked in this order
+  TRACES: [ABP, CVP]             # arterial and central venous pressure, in mmHg
+  RESIZE: {H: 300, W: 300}       # the HPC cache is native resolution; every model runs at 300
+  LOSS:                          # CCC for shape and level, L1 on the window
+    ABP: {CCC: 1.0, MEAN: 0.05, MAX: 0.05, MIN: 0.05}   # mean and the soft
+    CVP: {CCC: 1.0, MEAN: 0.20, MAX: 0.20, MIN: 0.20}   # systolic / diastolic
+
+# CardioConv's own recipe (its original_model_config file): --epochs 3 --batch-size 2
+TRAIN:
+  OPTIMIZER: Adam
+  LR: 1e-3
+  WEIGHT_DECAY: 0.0
+  SCHEDULER: Constant
+  PRECISION: float32

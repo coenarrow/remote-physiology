@@ -612,10 +612,11 @@ What happens, in order:
    `src/experiment.py`.
 2. Inference, after every epoch: `test` on the same trainer records the
    held-out participant's strided windows with that epoch's weights, and
-   `src/outputs.py` writes them as `epoch_NN/test_records/` beside a copy
-   of the weights.
+   `src/outputs.py` writes them as `epoch_NN/test_records/<dataset>/`
+   beside a copy of the weights. `scripts/test.py` writes the same
+   directory for any other dataset, from a finished epoch.
 3. Evaluation, straight after: `src/evaluation/recording.py` reads that
-   `test_records/` alone
+   `test_records/<dataset>/` alone
    and writes one `<TRACE>_beats.csv` per cardiac trace, `signals.csv`,
    `rates.csv` and one `<TRACE>.png` per trace beside each recording's
    trace tables (`docs/evaluation.md`).
@@ -630,8 +631,8 @@ dataset it came from and `all` on the rest):
 | `model.pt` | every epoch, overwritten | the latest epoch's state dict plus the same compiled config (`src.experiment.rebuild` reads a run back from it) |
 | `losses.csv` | every epoch | per-epoch loss, per trace and component; `epoch` is 1-based like the directories below |
 | `epoch_NN/model.pt` | after epoch NN | that epoch's state dict, in the same form |
-| `epoch_NN/test_records/` | after epoch NN | `meta.json` (with the epoch), `windows.csv` (one row per window with its position and presence flags), and per recording and camera one `<TRACE>.csv`: frame, time, label, mean / std / n over the overlapping windows, then one column per window, all in physical units |
-| `epoch_NN/test_records/<recording>/<camera>/<TRACE>_beats.csv`, `signals.csv`, `rates.csv`, `<TRACE>.png` | after the records | per reference beat its peak and trough times, its matched predicted beat's and both beats' levels; per signal, over the whole covered stretch, the beat counts, the level means / SDs / errors and the waveform agreement; a heart rate per source; per trace the figure of label, prediction with its spread, and beats |
+| `epoch_NN/test_records/<dataset>/` | after epoch NN | `meta.json` (with the epoch), `windows.csv` (one row per window with its position and presence flags), `recordings.csv` (one row per recording with the cache's root attributes), and per recording and camera one `<TRACE>.csv`: frame, time, label, mean / std / n over the overlapping windows, then one column per window, all in physical units |
+| `epoch_NN/test_records/<dataset>/<recording>/<camera>/<TRACE>_beats.csv`, `signals.csv`, `rates.csv`, `<TRACE>.png` | after the records | per reference beat its peak and trough times, its matched predicted beat's and both beats' levels; per signal, over the whole covered stretch, the beat counts, the level means / SDs / errors and the waveform agreement; a heart rate per source; per trace the figure of label, prediction with its spread, and beats |
 
 ## Migrating an upstream rPPG-Toolbox model
 
