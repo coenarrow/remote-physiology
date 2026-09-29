@@ -17,3 +17,57 @@ efficientphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
   EfficientPhys batch 2: peak 36.8 GB, step 1.75 s, forward 0.22 s, load 1.10 s/window
   EfficientPhys batch 4: out of memory
 factorizephys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  FactorizePhys batch 1: peak 3.7 GB, step 0.39 s, forward 0.21 s, load 1.03 s/window
+  FactorizePhys batch 2: peak 7.3 GB, step 0.50 s, forward 0.27 s, load 1.23 s/window
+  FactorizePhys batch 4: peak 14.7 GB, step 0.75 s, forward 0.41 s, load 1.00 s/window
+  FactorizePhys batch 8: peak 29.2 GB, step 1.20 s, forward 0.66 s, load 1.05 s/window
+  FactorizePhys batch 16: out of memory
+ibvpnet_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  iBVPNet batch 1: peak 9.3 GB, step 0.59 s, forward 0.30 s, load 1.05 s/window
+  iBVPNet batch 2: peak 18.7 GB, step 0.81 s, forward 0.41 s, load 1.19 s/window
+  iBVPNet batch 4: peak 37.1 GB, step 1.24 s, forward 0.64 s, load 0.98 s/window
+  iBVPNet batch 8: out of memory
+physformer_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysFormer batch 1: peak 16.8 GB, step 0.40 s, forward 0.14 s, load 1.07 s/window
+  PhysFormer batch 2: peak 33.2 GB, step 0.71 s, forward 0.24 s, load 1.19 s/window
+  PhysFormer batch 4: out of memory
+physmamba2_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysMamba2 batch 1: peak 11.3 GB, step 0.59 s, forward 0.25 s, load 1.28 s/window
+  PhysMamba2 batch 2: peak 22.1 GB, step 0.97 s, forward 0.36 s, load 1.21 s/window
+  PhysMamba2 batch 4: out of memory
+physmamba3_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysMamba3 batch 1: peak 13.3 GB, step 1.01 s, forward 0.44 s, load 1.18 s/window
+  PhysMamba3 batch 2: peak 26.0 GB, step 1.34 s, forward 0.55 s, load 1.33 s/window
+  PhysMamba3 batch 4: out of memory
+physmamba_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysMamba batch 1: peak 10.8 GB, step 0.66 s, forward 0.27 s, load 1.30 s/window
+  PhysMamba batch 2: peak 21.5 GB, step 1.00 s, forward 0.37 s, load 1.07 s/window
+  PhysMamba batch 4: out of memory
+physnet_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysNet batch 1: peak 7.7 GB, step 0.32 s, forward 0.11 s, load 1.02 s/window
+  PhysNet batch 2: peak 15.2 GB, step 0.57 s, forward 0.19 s, load 1.08 s/window
+  PhysNet batch 4: peak 30.0 GB, step 1.07 s, forward 0.33 s, load 0.80 s/window
+  PhysNet batch 8: out of memory
+rhythmformer_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  RhythmFormer batch 1: peak 16.5 GB, step 0.35 s, forward 0.10 s, load 1.14 s/window
+  RhythmFormer batch 2: peak 32.9 GB, step 0.64 s, forward 0.19 s, load 1.21 s/window
+  RhythmFormer batch 4: out of memory
+tscan_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  TSCAN batch 1: peak 26.6 GB, step 0.89 s, forward 0.16 s, load 1.14 s/window
+  TSCAN batch 2: out of memory
+
+the launcher's numbers, fastest sweep first:
+        model  fits precision  --batch-size  --parallel  --nproc-per-node  --num-workers  global batch  card GB  card %  largest batch paced by  workers wanted  epoch min  fold h  sweep h
+   CardioConv  True  bfloat16             4           4                 1              9             4     25.7    65.2              4    cards               9       1.97   0.655     8.19
+FactorizePhys  True  bfloat16             4           4                 1              7             4     15.2    38.4              8    cards               7       2.57   0.856     10.7
+      PhysNet  True  bfloat16             4           4                 1              5             4     30.5    77.3              4    cards               5       3.61     1.2     15.1
+ RhythmFormer  True  bfloat16             2           2                 2              5             4     33.3    84.4              2    cards               5       2.15   0.715     17.9
+   PhysFormer  True  bfloat16             2           2                 2              4             4     33.7    85.3              2    cards               4       2.41   0.802       20
+      iBVPNet  True  bfloat16             2           2                 2              4             4     19.1    48.5              4    cards               4       2.63   0.878       22
+     DeepPhys  True  bfloat16             1           1                 4              3             4     25.2    63.7              2    cards               3       1.37   0.457     22.9
+    PhysMamba  True  bfloat16             2           2                 2              3             4       22    55.6              2    cards               3       3.36    1.12       28
+   PhysMamba2  True  bfloat16             2           2                 2              3             4     22.6    57.2              2    cards               3       3.37    1.12     28.1
+   PhysMamba3  True  bfloat16             2           2                 2              3             4     26.5    67.1              2    cards               3       4.33    1.44     36.1
+EfficientPhys  True  bfloat16             1           1                 4              2             4     23.9    60.5              2    cards               2       2.82   0.941     47.1
+        TSCAN  True  bfloat16             1           1                 4              2             4     27.1    68.6              1    cards               2       2.87   0.958     47.9
+written: logs/42216_tuning_200.csv and logs/42216_tuning_200_measured.csv
