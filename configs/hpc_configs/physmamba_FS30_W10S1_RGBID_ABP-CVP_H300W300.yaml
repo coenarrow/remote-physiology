@@ -25,4 +25,4 @@ TRAIN:
   LR: 3e-3
   WEIGHT_DECAY: 5e-4
   SCHEDULER: OneCycle          # upstream: OneCycleLR(max_lr=LR) over every step
-  PRECISION: float32           # upstream trains in full precision
+  PRECISION: bfloat16          # upstream is float32; at 300 px float32 batch 2 ran a 40 GB A100 out of memory
