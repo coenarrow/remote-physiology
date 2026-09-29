@@ -1,0 +1,57 @@
+Job ID: 42033, node k177
+CPUs on node: 12, CPUs per task: 12, usable here: 12
+this process may run on 12 core(s); 1 card(s) visible
+planning for 4 card(s), 48 core(s), global batch 4, 20 epochs, 50 folds of about 628 training and 248 test windows (from cardioconv_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml)
+cardioconv_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  CardioConv batch 1: peak 20.5 GB, step 0.39 s, forward 0.31 s, load 1.38 s/window
+  CardioConv batch 2: peak 31.3 GB, step 0.67 s, forward 0.55 s, load 1.43 s/window
+  CardioConv batch 4: out of memory
+deepphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  DeepPhys batch 1: out of memory
+efficientphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  EfficientPhys batch 1: peak 38.9 GB, step 2.01 s, forward 0.33 s, load 1.17 s/window
+  EfficientPhys batch 2: out of memory
+factorizephys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  FactorizePhys batch 1: peak 8.5 GB, step 0.88 s, forward 0.64 s, load 1.42 s/window
+  FactorizePhys batch 2: peak 16.8 GB, step 1.14 s, forward 0.65 s, load 1.15 s/window
+  FactorizePhys batch 4: peak 33.4 GB, step 1.73 s, forward 1.08 s, load 1.14 s/window
+  FactorizePhys batch 8: out of memory
+ibvpnet_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  iBVPNet batch 1: peak 21.1 GB, step 1.31 s, forward 0.76 s, load 1.40 s/window
+  iBVPNet batch 2: peak 37.1 GB, step 1.84 s, forward 0.97 s, load 1.26 s/window
+  iBVPNet batch 4: out of memory
+physformer_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysFormer batch 1: out of memory
+physmamba2_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysMamba2 batch 1: peak 24.9 GB, step 1.27 s, forward 0.72 s, load 1.22 s/window
+  PhysMamba2 batch 2: out of memory
+physmamba3_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysMamba3 batch 1: peak 29.3 GB, step 2.25 s, forward 1.01 s, load 1.17 s/window
+  PhysMamba3 batch 2: out of memory
+physmamba_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysMamba batch 1: peak 24.1 GB, step 1.47 s, forward 0.69 s, load 1.20 s/window
+  PhysMamba batch 2: out of memory
+physnet_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  PhysNet batch 1: peak 17.1 GB, step 0.70 s, forward 0.32 s, load 1.10 s/window
+  PhysNet batch 2: peak 34.0 GB, step 1.27 s, forward 0.44 s, load 1.24 s/window
+  PhysNet batch 4: out of memory
+rhythmformer_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  RhythmFormer batch 1: out of memory
+tscan_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  TSCAN batch 1: out of memory
+
+the launcher's numbers, fastest sweep first:
+        model  fits precision  --batch-size  --parallel  --nproc-per-node  --num-workers  global batch  card GB  card %  largest batch paced by  workers wanted  epoch min  fold h  sweep h
+   CardioConv  True  bfloat16             2           2                 2              5             4     31.8    80.6              2    cards               5       2.33   0.776     19.4
+FactorizePhys  True  bfloat16             4           4                 1              4             4     33.9    85.9              4    cards               4       5.71     1.9     23.8
+      PhysNet  True  bfloat16             2           2                 2              3             4     34.5    87.3              2    cards               3       4.07    1.36     33.9
+   PhysMamba2  True  bfloat16             1           1                 4              2             4     25.3    64.2              1    cards               2       4.08    1.36     67.9
+      iBVPNet  True  bfloat16             1           1                 4              2             4     21.6    54.6              2    cards               2       4.21     1.4     70.2
+    PhysMamba  True  bfloat16             1           1                 4              1             4     24.6    62.3              1    cards               1       5.05    1.68     84.1
+   PhysMamba3  True  bfloat16             1           1                 4              1             4     29.8    75.3              1    cards               1       7.13    2.38      119
+     DeepPhys False       NaN           NaN         NaN               NaN            NaN           NaN      NaN     NaN            NaN      NaN             NaN        NaN     NaN      NaN
+EfficientPhys False       NaN           NaN         NaN               NaN            NaN           NaN      NaN     NaN            NaN      NaN             NaN        NaN     NaN      NaN
+   PhysFormer False       NaN           NaN         NaN               NaN            NaN           NaN      NaN     NaN            NaN      NaN             NaN        NaN     NaN      NaN
+ RhythmFormer False       NaN           NaN         NaN               NaN            NaN           NaN      NaN     NaN            NaN      NaN             NaN        NaN     NaN      NaN
+        TSCAN False       NaN           NaN         NaN               NaN            NaN           NaN      NaN     NaN            NaN      NaN             NaN        NaN     NaN      NaN
+written: logs/42033_tuning.csv and logs/42033_tuning_measured.csv

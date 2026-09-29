@@ -1,0 +1,16 @@
+Job ID: 42216, node k177
+CPUs on node: 12, CPUs per task: 12, usable here: 12
+frame size: 200
+this process may run on 12 core(s); 1 card(s) visible
+planning for 4 card(s), 48 core(s), global batch 4, 20 epochs, 50 folds of about 628 training and 248 test windows of 200x200 frames (from cardioconv_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml)
+cardioconv_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  CardioConv batch 1: peak 9.1 GB, step 0.18 s, forward 0.13 s, load 1.03 s/window
+  CardioConv batch 2: peak 13.8 GB, step 0.31 s, forward 0.24 s, load 1.17 s/window
+  CardioConv batch 4: peak 25.3 GB, step 0.57 s, forward 0.46 s, load 1.03 s/window
+  CardioConv batch 8: out of memory
+deepphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  DeepPhys batch 1: peak 24.7 GB, step 0.40 s, forward 0.14 s, load 0.94 s/window
+  DeepPhys batch 2: peak 38.1 GB, step 0.76 s, forward 0.28 s, load 1.23 s/window
+  DeepPhys batch 4: out of memory
+efficientphys_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml
+  EfficientPhys batch 1: peak 23.4 GB, step 0.89 s, forward 0.11 s, load 0.96 s/window

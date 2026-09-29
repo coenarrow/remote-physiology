@@ -1,0 +1,28 @@
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P025_S01_R2_0_N.zarr/1 has 158 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P032_S01_R8_90_D.zarr/1 has 222 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P033_S01_R6_90_N.zarr/1 has 189 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P033_S01_R8_90_N.zarr/1 has 112 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P037_S01_R1_45_D.zarr/2 has 105 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P038_S01_R1_0_D.zarr/2 has 67 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P041_S01_R4_45_N.zarr/2 has 62 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P041_S01_R6_45_N.zarr/1 has 285 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P041_S01_R6_45_N.zarr/2 has 286 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P044_S01_R1_0_D.zarr/2 has 113 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P054_S01_R3_90_D.zarr/1 has 296 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P056_S01_R7_90_N.zarr/2 has 67 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P057_S01_R3_45_D.zarr/1 has 257 frames, shorter than one window (300); skipped
+  warnings.warn(
+/mmfs1/data/group/pgh004/carrow/repo/remote-physiology/src/inputs.py:201: UserWarning: neckflix_hpc: P057_S01_R3_45_D.zarr/2 has 256 frames, shorter than one window (300); skipped
+  warnings.warn(

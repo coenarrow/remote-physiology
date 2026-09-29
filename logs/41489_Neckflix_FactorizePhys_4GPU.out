@@ -1,0 +1,5 @@
+Job ID: 41489, node k177
+CPUs on node: 48, 11 workers for each of 4 processes
+experiment: factorizephys on ['neckflix_hpc'], 50 fold(s) holding out neckflix_hpc ['1', '2', '3', '4', '5', '7', '8', '9', '10', '11', '12', '13', '14', '15', '17', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '43', '44', '45', '46', '47', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58'], 1 at a time, 4 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H300W300
+fold 1/50: holding out neckflix_hpc 1 on GPU(s) 0,1,2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H300W300/FACTORIZEPHYS_NECKFLIX_HPC.1_202609291959
+fold 1/50: failed with exit status 1 after 256s; see /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H300W300/FACTORIZEPHYS_NECKFLIX_HPC.1_202609291959/log.txt
