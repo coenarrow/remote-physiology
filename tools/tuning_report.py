@@ -25,6 +25,10 @@ would use (``.slurm_scripts/Neckflix_Tuning.slurm``).
     uv run tools/tuning_report.py probe --datasets neckflix_hpc \\
         --configs configs/hpc_configs --gpus 4 --cpus 48 --epochs 20
 
+``--resize H W`` measures the same configs at another frame size, in place of
+the one their ``INTERFACE`` states, so a size can be costed before a
+directory of configs is written for it.
+
 The hours leave out what happens after each epoch's test pass (writing the
 records, scoring them, the plots), which no single step can measure, and the
 cost of synchronising gradients between cards.
@@ -51,7 +55,7 @@ from src.datasets import load_stores, participants           # noqa: E402
 from src.distributed import init_runtime, shutdown           # noqa: E402
 from src.inputs import WindowedDataset                       # noqa: E402
 from src.memory import device_memory, human, peak_memory, reset_peak  # noqa: E402
-from src.model_config import RunSettings, load_config        # noqa: E402
+from src.model_config import ResizeConfig, RunSettings, load_config  # noqa: E402
 from src.models import build_model                           # noqa: E402
 from src.trainer import LOSS_LOG_NAME, Trainer, move_to_device  # noqa: E402
 from tools.memory_report import CUDA_CONTEXT_BYTES           # noqa: E402
@@ -138,6 +142,15 @@ def config_files(paths: list[str]) -> list[Path]:
     return files
 
 
+def load_setup(path: Path, resize) -> tuple:
+    """``(interface, model, training)`` of the config at ``path``, its frame
+    size replaced by ``resize = (H, W)`` when one is given."""
+    interface, model_config, training = load_config(path)
+    if resize:
+        interface.RESIZE = ResizeConfig(*resize)
+    return interface, model_config, training
+
+
 def timed_batch(dataset, batch_size: int, offset: int):
     """One collated batch of ``batch_size`` windows spread over the dataset,
     loaded in this process on one thread as a DataLoader worker loads them,
@@ -202,7 +215,7 @@ def release(device: torch.device) -> None:
 def probe_config(path: Path, stores: dict, args) -> list[dict]:
     """One row per batch size that was tried for the config at ``path``; the
     last row says ``fits`` False when the card ran out."""
-    setup = load_config(path)
+    setup = load_setup(path, args.resize)
     interface, model_config, training = setup
     runtime = init_runtime(training, True)
     dataset = ConcatDataset([WindowedDataset(name, kept, interface, mode="random")
@@ -214,6 +227,7 @@ def probe_config(path: Path, stores: dict, args) -> list[dict]:
                                        if size <= args.max_batch):
             batch, load_seconds = timed_batch(dataset, batch_size, offset=n)
             row = {"config": path.name, "model": model_config.NAME,
+                   "frame": f"{interface.RESIZE.H}x{interface.RESIZE.W}",
                    "precision": runtime.precision, "batch": batch_size,
                    "load_seconds": load_seconds,
                    "card_total": memory["total"] if memory else 0, "fits": True}
@@ -295,7 +309,7 @@ def probe(args) -> pd.DataFrame:
     configs = load_dataset_configs(args.datasets)
     stores = load_stores(configs)
     files = config_files(args.configs)
-    interface = load_config(files[0])[0]
+    interface = load_setup(files[0], args.resize)[0]
     folds = args.folds or len(participants(stores, args.datasets[0]))
     windows = sum(len(WindowedDataset(name, kept, interface, mode="random"))
                   for name, kept in stores.items() if kept)
@@ -311,7 +325,8 @@ def probe(args) -> pd.DataFrame:
     print(f"planning for {node['gpus']} card(s), {node['cpus']} core(s), global batch "
           f"{node['batch']}, {node['epochs']} epochs, {folds} folds of about "
           f"{node['train_windows']:.0f} training and {node['test_windows']:.0f} test "
-          f"windows (from {files[0].name})")
+          f"windows of {interface.RESIZE.H}x{interface.RESIZE.W} frames "
+          f"(from {files[0].name})")
 
     measured, plans = [], []
     for path in files:
@@ -349,6 +364,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="dataset config name(s); folds are the first one's participants")
     p.add_argument("--configs", nargs="+", required=True, metavar="PATH",
                    help="config files, or a directory of them")
+    p.add_argument("--resize", nargs=2, type=int, metavar=("H", "W"),
+                   help="frame size to measure at (default: each config's own)")
     p.add_argument("--gpus", type=int, metavar="N",
                    help="cards the sweep's node has (default: the cards visible)")
     p.add_argument("--cpus", type=int, metavar="N",

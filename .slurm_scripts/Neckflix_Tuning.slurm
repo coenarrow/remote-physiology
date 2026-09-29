@@ -17,18 +17,23 @@
 # --nproc-per-node and --num-workers each model's sweep script wants, with
 # the hours the sweep takes.
 #
-#   sbatch .slurm_scripts/Neckflix_Tuning.slurm
+#   sbatch .slurm_scripts/Neckflix_Tuning.slurm          # at the configs' 300 px
+#   sbatch .slurm_scripts/Neckflix_Tuning.slurm 200      # the same configs at 200 px
+#
+# The argument is a square frame size measured in place of the configs' own,
+# so a size can be costed before configs are written for it.
 #
 # One card and a quarter of the node's cores are enough to measure; GPUS and
 # CPUS are the node the sweeps run on, not this allocation. EPOCHS is the
 # sweep's, and only scales the hours.
 #
-# The plan lands in logs/<job id>_tuning.csv, the measurements it was made
-# from beside it in logs/<job id>_tuning_measured.csv.
+# The plan lands in logs/<job id>_tuning_<size>.csv, the measurements it was
+# made from beside it in logs/<job id>_tuning_<size>_measured.csv.
 
 GPUS=4
 CPUS=48
 EPOCHS=20
+SIZE="${1:-}"
 
 mkdir -p logs
 
@@ -39,7 +44,13 @@ module load cuda
 echo "Job ID: ${SLURM_JOB_ID}, node ${SLURMD_NODENAME}"
 echo "CPUs on node: ${SLURM_CPUS_ON_NODE}, CPUs per task: ${SLURM_CPUS_PER_TASK}, usable here: $(nproc)"
 
+RESIZE=()
+if [ -n "${SIZE}" ]; then
+    RESIZE=(--resize "${SIZE}" "${SIZE}")
+fi
+echo "frame size: ${SIZE:-as each config states}"
+
 uv run python tools/tuning_report.py probe --datasets neckflix_hpc \
-    --configs configs/hpc_configs \
+    --configs configs/hpc_configs "${RESIZE[@]}" \
     --gpus "${GPUS}" --cpus "${CPUS}" --epochs "${EPOCHS}" \
-    --out "logs/${SLURM_JOB_ID}_tuning.csv"
+    --out "logs/${SLURM_JOB_ID}_tuning_${SIZE:-configs}.csv"
