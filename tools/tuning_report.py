@@ -23,7 +23,7 @@ sweep takes. The steps are real ones on real windows, as in
 would use (``.slurm_scripts/Neckflix_Tuning.slurm``).
 
     uv run tools/tuning_report.py probe --datasets neckflix_hpc \\
-        --configs configs/hpc_configs --gpus 4 --cpus 48 --epochs 20
+        --configs configs/hpc_configs_200 --gpus 4 --cpus 48 --epochs 20
 
 ``--resize H W`` measures the same configs at another frame size, in place of
 the one their ``INTERFACE`` states, so a size can be costed before a

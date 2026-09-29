@@ -34,6 +34,6 @@ module load cuda
 echo "Job ID: ${SLURM_JOB_ID}, node ${SLURMD_NODENAME}"
 
 uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc \
-    --config configs/hpc_configs/physmamba_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml \
+    --config configs/hpc_configs_300/physmamba_FS30_W10S1_RGBID_ABP-CVP_H300W300.yaml \
     --experiment "neckflix_hpc_physmamba_H300W300" \
     --epochs 30 --batch-size 1 --num-workers 4 --parallel 1 --nproc-per-node 2
