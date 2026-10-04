@@ -1,64 +1,75 @@
-"""Heart-rate-conditioned, pixel-wise continuous wavelet transform."""
+"""Heart-rate-conditioned, pixel-wise complex Morlet transform, in closed form."""
 
-import pywt
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from ptwt import cwt
 
-from neural_methods.model.cardioconv.utils import buffer_steps, heart_rate_scales
+from neural_methods.model.cardioconv.utils import buffer_steps, centre_frequencies
 
 
 class WaveletTransformer(nn.Module):
-    """The complex wavelet field of a clip at the harmonics of its heart rate.
+    """The complex wavelet field of a shrunk clip at the harmonics of its heart rate.
 
-    The clip is shrunk spatially, each pixel's trace loses its mean, and a
-    complex Morlet transform is taken at the scales
-    :func:`~neural_methods.model.cardioconv.utils.heart_rate_scales` puts
-    around each harmonic. The field stays complex: power is its ``abs()`` and
-    phase its ``angle()``, each taken by the stage that wants it. Nothing here
-    is learned, and nothing carries a gradient.
+    The continuous wavelet transform with the complex Morlet
+    ``psi(t) = (pi B)^-1/2 exp(2 pi i C t) exp(-t^2 / B)`` has, at scale ``a``
+    frames, the spectrum ``sqrt(a) exp(-pi^2 B (a f - C)^2)`` in cycles per
+    frame: one Gaussian centred at ``f = C / a``. So the transform is the
+    traces' FFT times that Gaussian, inverse-transformed, and the scale
+    enters analytically. That is what lets the rate the scales come from
+    be learned: the field carries ``d(field) / d(rate)``. (pywt reaches the
+    same quantity by resampling a tabulated integral of the wavelet by
+    integer index, which has no gradient in the scale.)
+
+    Each pixel's trace loses its mean and is zero padded on both sides by
+    four standard deviations of the slowest kernel the model can meet, so
+    the convolution is linear, not circular. One FFT serves every scale;
+    the scales are run per harmonic to bound the forward-only product.
+    Nothing here is learned. The field stays complex: power is its
+    ``abs()`` and phase its ``angle()``, each taken by the stage that wants it.
 
     Args:
       fs: frame rate of the clip, in Hz.
       n_harmonics: harmonics of the heart rate the scales cover.
-      downscale: the spatial shrink before the transform.
-      wavelet: the pywt name of the complex wavelet.
+      bandwidth, centre: the Morlet's ``B`` and ``C``; ``cmor1.5-1.0``.
       buffer_bpm, step_bpm: the scales sit ``+-buffer_bpm`` around each
         harmonic, ``step_bpm`` apart.
+      min_bpm: the lowest rate the model can be asked for; sets the pad.
     """
 
-    def __init__(self, fs: float, n_harmonics: int, downscale: int, wavelet: str = "cmor1.5-1.0",
-                 buffer_bpm: float = 10.0, step_bpm: float = 1.0):
+    def __init__(self, fs: float, n_harmonics: int, bandwidth: float = 1.5, centre: float = 1.0,
+                 buffer_bpm: float = 10.0, step_bpm: float = 1.0, min_bpm: float = 30.0):
         super().__init__()
         self.fs = fs
         self.n_harmonics = n_harmonics
-        self.downscale = downscale
+        self.bandwidth = bandwidth
+        self.centre = centre
         self.buffer_bpm = buffer_bpm
         self.step_bpm = step_bpm
-        # The wavelet object, not its name, so ptwt conjugates a complex one correctly.
-        self.wavelet = pywt.ContinuousWavelet(wavelet)
-        self.n_scales = n_harmonics * buffer_steps(buffer_bpm, step_bpm)
+        self.steps = buffer_steps(buffer_bpm, step_bpm)
+        self.n_scales = n_harmonics * self.steps
+        slowest = (min_bpm - buffer_bpm) / 60.0 / fs                 # cycles per frame
+        sigma_frames = (centre / slowest) * math.sqrt(bandwidth / 2.0)
+        self.pad = math.ceil(4.0 * sigma_frames)
 
-    @torch.no_grad()
-    def forward(self, video: torch.Tensor, heart_rate: torch.Tensor) -> tuple:
-        """``(B, C, T, H, W)`` clip and ``(B,)`` finite bpm -> the complex field
-        ``(B, C, T, h, w, K)`` and the shrunk clip ``(B, C, T, h, w)`` it was
-        taken from, ``h = H // downscale``."""
-        b, c = video.shape[:2]
-        small = F.interpolate(rearrange(video.float(), "b c t h w -> (b c) t h w"),
-                              scale_factor=1.0 / self.downscale, mode="bilinear", align_corners=False)
-        small = rearrange(small, "(b c) t h w -> b c t h w", b=b)
-        height, width = small.shape[-2:]
-
+    def forward(self, small: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
+        """``(B, C, T, h, w)`` shrunk clip and ``(B,)`` bpm -> the complex field
+        ``(B, C, T, h, w, K)``, ``K = n_scales``, harmonic-major."""
+        b, c, t, h, w = small.shape
+        traces = rearrange(small.float(), "b c t h w -> b (c h w) t")
+        traces = traces - traces.mean(dim=-1, keepdim=True)
+        n = 1 << (t + 2 * self.pad - 1).bit_length()
+        spectrum = torch.fft.fft(F.pad(traces, (self.pad, n - t - self.pad)), dim=-1)
+        freqs = torch.fft.fftfreq(n, device=small.device, dtype=torch.float32)
+        scales = self.centre / centre_frequencies(rate.float(), self.fs, self.n_harmonics,
+                                                  self.buffer_bpm, self.step_bpm)        # (B, K) frames
         fields = []
-        for clip, rate in zip(small, heart_rate.tolist()):
-            scales = heart_rate_scales(rate, self.fs, self.n_harmonics, self.wavelet.center_frequency,
-                                       self.buffer_bpm, self.step_bpm)
-            traces = rearrange(clip, "c t h w -> (c h w) t")
-            traces = traces - traces.mean(dim=-1, keepdim=True)
-            coefficients, _ = cwt(traces, scales, self.wavelet, sampling_period=1.0 / self.fs)
-            fields.append(rearrange(coefficients.to(torch.complex64), "k (c h w) t -> c t h w k",
-                                    c=c, h=height, w=width))
-        return torch.stack(fields), small
+        for a in scales.split(self.steps, dim=1):                                       # (B, steps)
+            kernel = a.sqrt()[..., None] * torch.exp(
+                -(math.pi ** 2) * self.bandwidth * (a[..., None] * freqs - self.centre) ** 2)
+            product = spectrum[:, :, None, :] * kernel[:, None, :, :]                   # (B, P, steps, n)
+            fields.append(torch.fft.ifft(product, dim=-1)[..., self.pad:self.pad + t])
+        field = torch.cat(fields, dim=2)                                                # (B, P, K, T)
+        return rearrange(field, "b (c h w) k t -> b c t h w k", c=c, h=h, w=w)

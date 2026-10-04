@@ -1,9 +1,9 @@
-"""Functions CardioConv's modules share: the wavelet scales of a heart rate,
-circular statistics of wrapped phase, and presence-masked reduction."""
+"""Functions CardioConv's modules share: the wavelet centre frequencies of a
+heart rate, the spatial shrink, circular statistics of wrapped phase, and
+presence-masked reduction."""
 
 import math
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from einops import rearrange
@@ -16,19 +16,30 @@ def buffer_steps(buffer_bpm: float, step_bpm: float) -> int:
     return int(round(2.0 * buffer_bpm / step_bpm)) + 1
 
 
-def heart_rate_scales(heart_rate: float, fs: float, n_harmonics: int, centre_frequency: float,
-                      buffer_bpm: float, step_bpm: float) -> np.ndarray:
-    """CWT scales around each harmonic of a heart rate, ``(n_harmonics * steps,)``.
+def centre_frequencies(rate: torch.Tensor, fs: float, n_harmonics: int, buffer_bpm: float,
+                       step_bpm: float) -> torch.Tensor:
+    """``(B,)`` bpm -> ``(B, K)`` wavelet centre frequencies in cycles per frame.
 
-    Harmonic ``k`` contributes the rates ``k * heart_rate +- buffer_bpm`` in
-    ``step_bpm`` steps, each turned into the scale whose wavelet is centred on
-    it: ``centre_frequency * fs / (bpm / 60)``. Ordered by harmonic, the
-    fundamental first, so the last axis of the transform folds into
-    ``(harmonic, step)``.
+    Harmonic ``k`` contributes the rates ``k * rate +- buffer_bpm`` in
+    ``step_bpm`` steps. Ordered by harmonic, the fundamental first, so the
+    last axis of the transform folds into ``(harmonic, step)``. A torch
+    function of the rate, so the field carries ``d(field) / d(rate)``.
     """
-    offsets = np.linspace(-buffer_bpm, buffer_bpm, buffer_steps(buffer_bpm, step_bpm))
-    rates = np.concatenate([k * heart_rate + offsets for k in range(1, n_harmonics + 1)])
-    return (centre_frequency * fs / (rates / 60.0)).astype(np.float64)
+    offsets = torch.linspace(-buffer_bpm, buffer_bpm, buffer_steps(buffer_bpm, step_bpm),
+                             device=rate.device, dtype=rate.dtype)
+    rates = torch.cat([k * rate[:, None] + offsets for k in range(1, n_harmonics + 1)], dim=1)
+    return rates / 60.0 / fs
+
+
+def shrink(video: torch.Tensor, factor: int) -> torch.Tensor:
+    """``(B, C, T, H, W)`` -> ``(B, C, T, H // factor, W // factor)``, each output
+    pixel the mean of its ``factor x factor`` block, in float32. An area
+    average, not a sample: pulse is weak and averaging the block is the
+    gain a shrink is for."""
+    b = video.shape[0]
+    flat = rearrange(video.float(), "b c t h w -> (b c) t h w")
+    small = F.interpolate(flat, scale_factor=1.0 / factor, mode="area")
+    return rearrange(small, "(b c) t h w -> b c t h w", b=b)
 
 
 def softplus_inverse(y: float) -> float:

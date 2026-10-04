@@ -56,6 +56,7 @@ from neural_methods.model.cardioconv.channel_predictor import ChannelPredictor
 from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
+from neural_methods.model.cardioconv.utils import shrink
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
 from neural_methods.model._shared_modules.utils import require_min_frame
 
@@ -103,7 +104,7 @@ class CardioConv(nn.Module):
         self.traces = tuple(traces)
         self.fs = fs
         n_traces = len(self.traces)
-        self.wavelet_transformer = WaveletTransformer(fs, N_HARMONICS, DOWNSCALE)
+        self.wavelet_transformer = WaveletTransformer(fs, N_HARMONICS)
         self.pulsatility_masker = (
             PulsatilityMasker(self.wavelet_transformer.n_scales) if pulsatility_masker else None)
         self.phase_masker = PhaseMasker(n_traces) if phase_masker else None
@@ -124,7 +125,8 @@ class CardioConv(nn.Module):
         require_min_frame("CardioConv", MIN_FRAME, video.shape[-2], video.shape[-1])
         present = reduce(video.abs(), "b c t h w -> b c", "max") > 0
         heart_rate = torch.nan_to_num(heart_rate, nan=RATE_RANGE[0]).clamp(*RATE_RANGE)
-        field, small = self.wavelet_transformer(video, heart_rate)
+        small = shrink(video, DOWNSCALE)
+        field = self.wavelet_transformer(small, heart_rate)
         power = field.abs()
         zero = video.new_zeros(())
 
