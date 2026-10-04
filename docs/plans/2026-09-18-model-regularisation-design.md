@@ -13,7 +13,7 @@ top of this one.
 | Term | Depends on | Owned by | Config key |
 | ------ | ------------ | ---------- | ------------ |
 | Loss | prediction and label | the trace, shared by every model | `INTERFACE.LOSS.<TRACE>` |
-| Regulariser | a model's own intermediate tensors | the architecture | `MODEL.REGULARISATION` |
+| Regulariser | a model's own intermediate tensors, or a target the wrapper supplies in training (CardioConv's rate) | the architecture | `MODEL.REGULARISATION` |
 
 The loss stays exactly what it is. A regulariser is a scalar a backbone
 computes during `forward` from something the loss cannot see (an attention

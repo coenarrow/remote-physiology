@@ -362,7 +362,10 @@ network whose traces never meet is a single-trace network and is copied.
 - **`regularisers()`** returns `{trace: {term: () tensor}}`, every declared
   term under every trace. A term that belongs to one trace (a mask prior on
   that trace's mask) goes under it; a term the traces share goes, identical,
-  under each — the total is the mean over traces, so it counts once.
+  under each — the total is the mean over traces, so it counts once. A term
+  is usually label-free; it may instead be supervised by a target the
+  wrapper supplies, as CardioConv's rate terms are by `label_rate`, in
+  training mode only (`MultiTraceModel`'s docstring has the contract).
 - **The builder** wraps the one network directly instead of making copies:
 
   ```python
@@ -377,13 +380,6 @@ network whose traces never meet is a single-trace network and is copied.
   pressure traces, and its README command runs on Neckflix: the "nothing
   Neckflix-specific" rule is about the rPPG-Toolbox models, whose papers
   never saw it.
-
-One thing in CardioConv is a stopgap and not part of the form: it declares
-`NEEDS_HEART_RATE`, and the wrapper then passes it `heart_rate`, read from
-the label by `label_heart_rate` in [`src/models.py`](../src/models.py). That
-is label leakage at test time, stated in the model, its configs and the
-README, and it goes when CardioConv estimates the rate from the video. Do
-not build on it.
 
 This is the contract `MultiTraceModel` holds every backbone to. A
 single-trace architecture meets it through `PerTraceCopies`
