@@ -43,6 +43,7 @@ class VideoBRA(nn.Module):
         # separately below; kept as upstream has it, so the parameters are
         # created (and seeded) in the published order.
         self.qkv_linear = nn.Conv3d(self.dim, 3 * self.dim, kernel_size=1)
+        self.qkv_linear.requires_grad_(False)
         self.output_linear = nn.Conv3d(self.dim, self.dim, kernel_size=1)
         self.proj_q = nn.Sequential(
             CDCT(dim, dim, 3, stride=1, padding=1, groups=1, bias=False, theta=0.2),
