@@ -140,11 +140,14 @@ class FactorizePhysConfig(ModelConfig):
 
 @dataclass
 class CardioConvConfig(ModelConfig):
-    """CardioConv's ablations; every one is ``True`` in the model as designed."""
+    """CardioConv's ablations (every one ``True`` in the model as designed)
+    and its training gate."""
     PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a mask of ones
     PHASE_MASKER: bool = True         # learn the per-trace masks; false is masks of ones
     TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
     SUPERVISE_MASKS: bool = True      # the statistics head's pooled power trains the masks
+    RATE_TOLERANCE_BPM: float = 0.0   # a sample whose estimated rate is further than this
+                                      # from its label rate skips the stages after the estimator
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
@@ -153,6 +156,9 @@ class CardioConvConfig(ModelConfig):
             raise ConfigError(
                 f"{where}: CardioConv reads the clip at the harmonics of the heart "
                 f"rate, so it predicts cardiac traces only; TRACES has {other}")
+        if self.RATE_TOLERANCE_BPM <= 0:
+            raise ConfigError(
+                f"{where}: RATE_TOLERANCE_BPM must be positive, got {self.RATE_TOLERANCE_BPM}")
 
 
 #: ``NAME`` -> the dataclass its section is parsed into. One line per

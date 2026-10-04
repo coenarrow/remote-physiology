@@ -1,13 +1,12 @@
-# LABEL LEAKAGE: CardioConv is handed the heart rate of the label
-# (src.models.label_heart_rate), at test time too, until it estimates the rate
-# from the video itself; its numbers here are not like for like with the rest.
 MODEL:
   NAME: CardioConv
   PULSATILITY_MASKER: true
   PHASE_MASKER: true
   TRACE_INDEPENDENT: true
   SUPERVISE_MASKS: true
-  REGULARISATION:                # the mask priors, as in its original_model_config file
+  RATE_TOLERANCE_BPM: 6.0        # training gate on the learned heart rate: the
+                                 # evaluation's SNR half-width, inside the 10 bpm wavelet buffer
+  REGULARISATION:                # the mask priors, and the rate estimator's terms
     SPARSITY: 0.022
     PULSATILITY_TV: 0.44
     PULSATILITY_SMOOTHNESS: 1.0
@@ -16,6 +15,8 @@ MODEL:
     TEMPORAL_CONSISTENCY: 0.031
     PHASE_TV: 0.50
     PHASE_SMOOTHNESS: 1.0
+    RATE: 1.0                    # cross-entropy to the fused label rate
+    RATE_ERROR: 0.1              # L1 in bpm; the logged column is 0.1 x bpm
 
 # Neckflix blood-pressure interface, shared by every model in this directory so
 # the runs compare like for like. It is the interface of the 30-epoch PhysMamba

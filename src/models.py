@@ -21,6 +21,7 @@ import torch.nn as nn
 
 from src.config import ConfigError
 from src.evaluation import rate
+from src.signal_transforms import is_cardiac
 from neural_methods.model.cardioconv import cardioconv
 from neural_methods.model.deepphys import deepphys
 from neural_methods.model.efficientphys import efficientphys
@@ -86,25 +87,33 @@ def _require_regularisers(cfg: ModelConfig, backbone: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 # The multi-trace model
 # ---------------------------------------------------------------------------
-def label_heart_rate(batch: dict, traces, fs: float) -> torch.Tensor:
-    """``(B,)`` bpm, read from each sample's first present trace, in traces order.
+def label_rate(batch: dict, traces, fs: float) -> torch.Tensor:
+    """``(B,)`` bpm: each sample's heart rate read from its cardiac labels,
+    fused when it has more than one.
 
-    LABEL LEAKAGE, on purpose and for now: this hands a model the heart rate
-    of the very label it is scored against, at test time too. It exists for a
-    backbone that declares ``NEEDS_HEART_RATE`` (CardioConv) until that
-    backbone estimates the rate from the video itself, and it goes when that
-    does. The rate is the evaluation's own (``src.evaluation.rate``). A sample
-    with no trace present gets NaN, which the backbone clamps; its loss is
-    masked out anyway.
+    The target a backbone declaring ``NEEDS_RATE_TARGET`` (CardioConv) trains
+    its rate estimator against, and gates on. It is computed in training mode
+    only; nothing from the label reaches the model at test time. The rate is
+    the evaluation's own (``src.evaluation.rate``): every present cardiac
+    trace is cleaned and its spectrum taken, two or more are fused the way
+    the evaluation's ``FUSED`` source is, and the largest in-band bin is the
+    rate. A sample with no cardiac trace present gets NaN, which the backbone
+    leaves out of its terms and its gate.
     """
+    cardiac = [t for t in traces if is_cardiac(t)]
     rates = []
     for i in range(len(batch["labels"][traces[0]])):
-        found = next((t for t in traces if bool(batch["label_mask"][t][i])), None)
-        if found is None:
+        powers, freqs = [], None
+        for t in cardiac:
+            if bool(batch["label_mask"][t][i]):
+                trace = batch["labels"][t][i].detach().float().cpu().numpy()
+                freqs, power = rate.spectrum(rate.clean(trace, fs), fs)
+                powers.append(power)
+        if not powers:
             rates.append(float("nan"))
             continue
-        trace = batch["labels"][found][i].detach().float().cpu().numpy()
-        rates.append(rate.rate_of(*rate.spectrum(rate.clean(trace, fs), fs)))
+        fused = powers[0] if len(powers) == 1 else rate.fuse(freqs, powers)
+        rates.append(rate.rate_of(freqs, fused))
     return torch.tensor(rates, dtype=torch.float32)
 
 
@@ -172,8 +181,13 @@ class MultiTraceModel(nn.Module):
     ``output_layers()`` giving one activation-free readout per trace in the
     same order; one with regularisers also declares ``REGULARISERS`` and
     returns ``{trace: {term: () tensor}}`` from ``regularisers()`` after each
-    forward. Whatever preprocessing the published network was fed, the
-    backbone applies itself. An architecture designed to predict several
+    forward. A backbone that declares ``NEEDS_RATE_TARGET`` takes
+    ``forward(video, target_rate=None)`` and is handed, in training mode
+    only, each sample's label rate (:func:`label_rate`); one that sets a
+    ``sample_mask`` ``(B,)`` after its forward has that mask joined into
+    every trace's ``label_mask``, so a sample it chose not to predict is
+    out of the loss. Whatever preprocessing the published network was fed,
+    the backbone applies itself. An architecture designed to predict several
     traces is such a backbone as it stands; one designed for a single trace
     becomes one through :class:`PerTraceCopies`. ``C_in = len(channels)``:
     the interface's channels stacked in order. Channel and trace order is
@@ -215,14 +229,21 @@ class MultiTraceModel(nn.Module):
 
     def forward(self, batch: dict) -> dict:
         video = self.prepare_frames(batch)
-        if getattr(self.backbone, "NEEDS_HEART_RATE", False):
-            heart_rate = label_heart_rate(batch, self.traces, self.backbone.fs).to(video.device)
-            out = self.backbone(video, heart_rate=heart_rate)
+        if self.training and getattr(self.backbone, "NEEDS_RATE_TARGET", False):
+            target = label_rate(batch, self.traces, self.backbone.fs).to(video.device)
+            out = self.backbone(video, target_rate=target)
         else:
             out = self.forward_video(video)
         predictions = {trace: out[:, i] for i, trace in enumerate(self.traces)}
-        return {**batch, "predictions": predictions,
-                "regularisers": self.collect_regularisers()}
+        result = {**batch, "predictions": predictions,
+                  "regularisers": self.collect_regularisers()}
+        # A backbone that gates samples says which outputs count; the loss
+        # already masks a trace per sample, so the gate joins that mask.
+        sample_mask = getattr(self.backbone, "sample_mask", None)
+        if sample_mask is not None:
+            result["label_mask"] = {trace: mask & sample_mask
+                                    for trace, mask in batch["label_mask"].items()}
+        return result
 
     def collect_regularisers(self) -> dict:
         """``{trace: {term: () tensor}}``: every term the backbone declares in
@@ -267,10 +288,16 @@ def _multi_trace(make_copy, interface: InterfaceConfig, cfg: ModelConfig) -> Mul
 
 def _build_cardioconv(cfg: CardioConvConfig, interface: InterfaceConfig) -> MultiTraceModel:
     _require_min_frame(interface, "CardioConv", cardioconv.MIN_FRAME)
+    if not cfg.RATE_TOLERANCE_BPM < cardioconv.BUFFER_BPM:
+        raise ConfigError(
+            f"CardioConv: RATE_TOLERANCE_BPM must be inside the wavelet buffer of "
+            f"{cardioconv.BUFFER_BPM:g} bpm either side of each harmonic, got "
+            f"{cfg.RATE_TOLERANCE_BPM:g}")
     backbone = cardioconv.CardioConv(
         in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
         pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
-        trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS)
+        trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS,
+        rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM)
     return _wrap(backbone, interface, cfg)
 
 

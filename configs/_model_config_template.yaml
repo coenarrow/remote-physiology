@@ -22,6 +22,10 @@
 #   CardioConv             PULSATILITY_MASKER, PHASE_MASKER, TRACE_INDEPENDENT,
 #                          SUPERVISE_MASKS: <bool>   its ablations; all true is
 #                                                   the model as designed
+#                          RATE_TOLERANCE_BPM: <number > 0>  training gate: a sample
+#                                                   whose learned heart rate is further
+#                                                   than this from its label rate skips
+#                                                   the stages after the estimator
 #   FactorizePhys          FSAM: <bool>              the factorized attention
 #                                                   module; false is the paper's ablation
 # One key is optional for every NAME and is normally left out:
@@ -32,8 +36,8 @@
 #                                                 means none. A term left out is
 #                                                 off, never zeroed. The terms a
 #                                                 backbone has are its REGULARISERS
-#                                                 (CardioConv's mask priors; no
-#                                                 other model has any).
+#                                                 (CardioConv's mask priors and rate
+#                                                 terms; no other model has any).
 MODEL:
   NAME: <string>                 # CardioConv | DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
                                  # PhysMamba | PhysNet | RhythmFormer | TSCAN | iBVPNet
