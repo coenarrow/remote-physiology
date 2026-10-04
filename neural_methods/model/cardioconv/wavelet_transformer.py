@@ -70,6 +70,8 @@ class WaveletTransformer(nn.Module):
             kernel = a.sqrt()[..., None] * torch.exp(
                 -(math.pi ** 2) * self.bandwidth * (a[..., None] * freqs - self.centre) ** 2)
             product = spectrum[:, :, None, :] * kernel[:, None, :, :]                   # (B, P, steps, n)
-            fields.append(torch.fft.ifft(product, dim=-1)[..., self.pad:self.pad + t])
+            # Cloned: the crop is a view, and a view would keep the whole padded
+            # inverse transform alive until the harmonics are joined.
+            fields.append(torch.fft.ifft(product, dim=-1)[..., self.pad:self.pad + t].clone())
         field = torch.cat(fields, dim=2)                                                # (B, P, K, T)
         return rearrange(field, "b (c h w) k t -> b c t h w k", c=c, h=h, w=w)

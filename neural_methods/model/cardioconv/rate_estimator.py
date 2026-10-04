@@ -102,8 +102,11 @@ class RateEstimator(nn.Module):
 
     def spectra(self, traces: torch.Tensor) -> torch.Tensor:
         """``(B, C, T)`` -> ``(B, C, n_bins)`` log power on the bpm grid."""
+        # Float32 whatever autocast made of the attention: the FFT takes no
+        # half precision, and the readout should not inherit a coarse grid.
+        traces = traces.float()
         t = traces.shape[-1]
-        window = torch.hann_window(t, device=traces.device, dtype=traces.dtype)
+        window = torch.hann_window(t, device=traces.device, dtype=torch.float32)
         n = 1 << (t - 1).bit_length()
         power = torch.fft.rfft(traces * window, n=n, dim=-1).abs() ** 2         # (B, C, n // 2 + 1)
         bin_hz = self.fs / n
@@ -116,5 +119,8 @@ class RateEstimator(nn.Module):
         """``(B, C, T, h, w)`` shrunk clip and ``(B, C)`` presence -> the rate
         ``(B,)`` in bpm and the logits ``(B, n_bins)`` it was read from."""
         spectra = self.spectra(self.traces(small)) * rearrange(present.float(), "b c -> b c 1")
-        logits = rearrange(self.head(spectra), "b 1 k -> b k")
-        return logits.softmax(dim=-1) @ self.bins, logits
+        logits = rearrange(self.head(spectra), "b 1 k -> b k").float()
+        # Elementwise, not a matmul: autocast would run the matmul in half
+        # precision and quantise the rate to half a bpm.
+        rate = (logits.softmax(dim=-1) * self.bins).sum(dim=-1)
+        return rate, logits

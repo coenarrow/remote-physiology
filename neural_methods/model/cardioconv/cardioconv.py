@@ -118,7 +118,9 @@ class CardioConv(nn.Module):
         self.rate_tolerance_bpm = rate_tolerance_bpm
         n_traces = len(self.traces)
         self.rate_estimator = RateEstimator(in_channels, fs)
-        self.wavelet_transformer = WaveletTransformer(fs, N_HARMONICS, buffer_bpm=BUFFER_BPM)
+        # The bank's pad covers the slowest kernel the estimator can ask for.
+        self.wavelet_transformer = WaveletTransformer(
+            fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, min_bpm=float(self.rate_estimator.bins[0]))
         self.pulsatility_masker = (
             PulsatilityMasker(self.wavelet_transformer.n_scales) if pulsatility_masker else None)
         self.phase_masker = PhaseMasker(n_traces) if phase_masker else None
@@ -145,6 +147,7 @@ class CardioConv(nn.Module):
         rate, logits = self.rate_estimator(small, present)
         zero = small.new_zeros(())
 
+        keep = 1.0                                # weight of the mask priors
         if target_rate is None:
             passed = torch.ones_like(rate, dtype=torch.bool)
             run = passed
@@ -154,10 +157,13 @@ class CardioConv(nn.Module):
             passed = torch.isfinite(target_rate) & (error <= self.rate_tolerance_bpm)
             run = passed
             if not bool(passed.any()):
-                # Nothing passed: run the closest sample anyway, masked out of
-                # the loss, so every parameter is in the graph on every step.
+                # Nothing passed: run the closest sample anyway, so every
+                # parameter is in the graph on every step, but let nothing of
+                # it count: its waveform leaves through sample_mask and its
+                # mask priors, taken on a field at the wrong rate, are zeroed.
                 run = torch.zeros_like(passed)
                 run[torch.nan_to_num(error, nan=float("inf")).argmin()] = True
+                keep = 0.0
             terms = rate_terms(logits, rate, target_rate, self.rate_estimator.bins)
         self.sample_mask = passed
 
@@ -165,7 +171,8 @@ class CardioConv(nn.Module):
         subset, priors = self.predict(small[index], present[index], rate[index])
         out = small.new_zeros(video.shape[0], len(self.traces), video.shape[2])
         out[index] = subset.to(out.dtype)       # autocast may have left the head in half precision
-        self._regularisers = {trace: {**own, **terms} for trace, own in zip(self.traces, priors)}
+        self._regularisers = {trace: {**{term: value * keep for term, value in own.items()}, **terms}
+                              for trace, own in zip(self.traces, priors)}
         return out
 
     def predict(self, small: torch.Tensor, present: torch.Tensor, rate: torch.Tensor) -> tuple:
