@@ -287,21 +287,19 @@ uv run python main.py \
 
 ### Evaluating a finished run
 
-Once the folds have trained and scored their held-out participants, pool them into one report:
+Training only records and draws each held-out participant; scoring is a separate step over the finished run:
 
 ```bash
-# the last epoch of every fold; recordings covered for 20 to 30 s count
-uv run scripts/evaluate.py runs/synthetic_benchmark_physmamba
+# the last epoch of every fold, cut into 10 s paired measurements
+uv run scripts/evaluate.py runs/neckflix_hpc_factorizephys_H200W200
 
-# or a specific epoch, other bounds, and further attributes to describe
-uv run scripts/evaluate.py runs/synthetic_benchmark_physmamba \
---epoch 8 \
---segment-min 20 --segment-max 30 \
---additional-params abp_site synthetic_neck.traces.heart_rate_bpm
+# or a specific epoch and another measurement length
+uv run scripts/evaluate.py runs/neckflix_hpc_factorizephys_H200W200 \
+--epoch 8 --measurement-duration 10 --measurement-tolerance 1
 ```
 
-The report lands in `runs/synthetic_benchmark_physmamba/evaluation/` as `report.md` and `report.html`, with every table and figure beside it.
-It covers who was tested, the clinical accuracy of each parameter (ISO 81060-3 statistics, Bland-Altman plots) and the usual deep-learning metrics; `docs/evaluation.md` lists what each table holds.
+Every trace of every recording and camera is cut into paired measurements of that length. Each is scored for waveform agreement (lag-aware MAE, RMSE, Lin's concordance) and the derived parameters (CVP mean; ABP mean, systolic, diastolic; heart rate from the fused cardiac spectra), then everything is pooled with the ISO 81060-3 repeated-measures statistics.
+The results land in `runs/<run>/evaluation/`: the per-measurement tables under `measurements/`, each row tagged with the recording's sex, age, skin tone and posture; the pooled agreement and demographics tables under `tables/`; the best waveforms and Bland-Altman plots under `figures/`. The script's docstring lists every file.
 Every fold must have finished at least one epoch, so run it once the experiment is complete.
 
 ### Train on dataset(s) A, B..., test on dataset X
