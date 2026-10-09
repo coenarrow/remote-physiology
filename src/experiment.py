@@ -45,7 +45,7 @@ from src.model_config import (
     InterfaceConfig, RunSettings, TrainingConfig, parse_interface,
     parse_model_config, parse_training,
 )
-from src.evaluation.recording import score_recording
+from src.evaluation.recording import plot_recording
 from src.outputs import META_NAME, RECORDS_DIR
 from src.trainer import CHECKPOINT_NAME, CONFIG_NAME
 from src.inputs import WindowedDataset
@@ -402,15 +402,15 @@ def records_dir(epoch_dir: Path, dataset: str) -> Path:
     return Path(epoch_dir) / RECORDS_DIR / dataset
 
 
-def score_records(out_dir: Path) -> list:
-    """Score every ``<recording>/<perspective>/`` folder under one dataset's
-    records directory from its files alone, found by the first trace's
-    table; returns the folders scored, in order."""
+def plot_records(out_dir: Path) -> list:
+    """Draw every ``<recording>/<perspective>/`` folder under one dataset's
+    records directory from its trace tables alone, found by the first
+    trace's table; returns the folders drawn, in order."""
     meta = json.loads((out_dir / META_NAME).read_text(encoding="utf-8"))
     first = str(meta["traces"][0])
     folders = sorted(path.parent for path in out_dir.glob(f"*/*/{first}.csv"))
     for folder in folders:
-        score_recording(folder, meta)
+        plot_recording(folder, meta)
     return folders
 
 

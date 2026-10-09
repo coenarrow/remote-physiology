@@ -1,10 +1,13 @@
 """The figures: one trace of one recording (the label, the combined
 prediction with its spread across the overlapping windows, and the detected
-beats), and the pooled figures of a run's evaluation report.
+beats), the Bland-Altman plot of a pooled parameter, and the sets of them a
+run's evaluation writes (the best measurement of each waveform metric per
+signal, one Bland-Altman plot per parameter), each with its numbers in a
+panel beside the axes.
 
 Seaborn on the Agg backend. Every function draws and returns the figure; the
-caller saves and closes it. Report figures are ``REPORT_WIDTH`` inches wide,
-the text width of A4 portrait, so one file serves Markdown, HTML and print.
+caller saves and closes it. Pooled figures are ``REPORT_WIDTH`` inches wide,
+the text width of A4 portrait.
 """
 
 import matplotlib
@@ -13,16 +16,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.ticker import MaxNLocator
 
+from src.evaluation.agreement import limits, repeated_measures
+from src.evaluation.measurements import PARAMETERS, WAVEFORM_METRICS, pairs_of
+from src.evaluation.pooling import MEASUREMENT_KEY
 from src.signal_transforms import signal_unit
 
 sns.set_theme(style="whitegrid", context="paper")
 LABEL_COLOUR, PRED_COLOUR = "0.25", "C0"
 #: Inches of figure width per second of recording, between the two bounds.
 WIDTH_PER_SECOND, MIN_WIDTH, MAX_WIDTH = 0.4, 8.0, 20.0
-#: The beat marks, by the ``Beats`` attribute suffix they come from.
-MARK_STYLES = {"peaks": ("^", "peak"), "troughs": ("v", "trough")}
 
 
 def _at(t: np.ndarray, values: np.ndarray, times: np.ndarray) -> np.ndarray:
@@ -37,10 +40,9 @@ def _at(t: np.ndarray, values: np.ndarray, times: np.ndarray) -> np.ndarray:
 def recording_figure(trace: pd.DataFrame, marks: dict | None, sig: str, title: str) -> plt.Figure:
     """The whole recording: the label, the combined prediction (the mean over
     the windows covering each frame) with a ± 1 SD band across those
-    windows, and, when ``marks`` is given, every detected peak (up
-    triangle) and trough (down triangle) on both traces. ``marks`` maps
-    ``ref_peaks`` / ``ref_troughs`` / ``pred_peaks`` / ``pred_troughs`` to
-    times in seconds."""
+    windows, and, when ``marks`` is given, every detected beat on both
+    traces. ``marks`` maps ``ref_peaks`` / ``pred_peaks`` to times in
+    seconds."""
     t = trace["t"].to_numpy(dtype=np.float64)
     label = trace["label"].to_numpy(dtype=np.float64)
     mean = trace["mean"].to_numpy(dtype=np.float64)
@@ -54,13 +56,12 @@ def recording_figure(trace: pd.DataFrame, marks: dict | None, sig: str, title: s
                       linewidth=0, label="± 1 SD across windows")
     for side, word, values, colour in (("ref", "label", label, LABEL_COLOUR),
                                        ("pred", "predicted", mean, PRED_COLOUR)):
-        for kind, (marker, name) in MARK_STYLES.items():
-            times = np.asarray((marks or {}).get(f"{side}_{kind}", []), dtype=np.float64)
-            if times.size == 0:
-                continue
-            sns.scatterplot(x=times, y=_at(t, values, times), ax=axis, marker=marker, s=36,
-                            color=colour, edgecolor="white", linewidth=0.4, zorder=3,
-                            label=f"{word} {name}s ({times.size})")
+        times = np.asarray((marks or {}).get(f"{side}_peaks", []), dtype=np.float64)
+        if times.size == 0:
+            continue
+        sns.scatterplot(x=times, y=_at(t, values, times), ax=axis, marker="^", s=36,
+                        color=colour, edgecolor="white", linewidth=0.4, zorder=3,
+                        label=f"{word} beats ({times.size})")
     axis.set_xlabel("time (s)")
     axis.set_ylabel(signal_unit(sig))
     axis.set_title(title, fontsize=10)
@@ -72,7 +73,7 @@ def recording_figure(trace: pd.DataFrame, marks: dict | None, sig: str, title: s
 
 
 # ---------------------------------------------------------------------------
-# The pooled figures of a run's evaluation report
+# The pooled figures
 # ---------------------------------------------------------------------------
 REPORT_WIDTH = 6.3
 #: Subjects are told apart by colour up to this many; beyond it no palette
@@ -87,14 +88,28 @@ def _report_axes(height: float = 3.6, columns: int = 1):
 
 
 def _points(pairs: pd.DataFrame, x, y, axis) -> None:
-    """One point per measurement, coloured by subject while they are few."""
+    """One point per measurement, coloured by subject while they are few; a
+    measurement read off an extreme sample for want of beats
+    (``pairs["fallback"]``) is a cross."""
     style = {"ax": axis, "s": 30, "edgecolor": "white", "linewidth": 0.5}
-    if pairs["subject"].nunique() > MAX_SUBJECT_COLOURS:
-        sns.scatterplot(x=x, y=y, color=PRED_COLOUR, **style)
-        return
-    sns.scatterplot(x=x, y=y, hue=pairs["subject"], palette="colorblind", **style)
-    axis.legend(title="subject", fontsize=7, title_fontsize=7, loc="upper center",
-                bbox_to_anchor=(0.5, -0.2), ncol=4, frameon=False)
+    fallback = pairs["fallback"].to_numpy(dtype=bool)
+    few = pairs["subject"].nunique() <= MAX_SUBJECT_COLOURS
+    for marker, rows, word in (("o", ~fallback, "beats"), ("X", fallback, "no beats, extreme sample")):
+        if not rows.any():
+            continue
+        if few:
+            sns.scatterplot(x=x[rows], y=y[rows], hue=pairs["subject"][rows],
+                            palette="colorblind", marker=marker, **style)
+        else:
+            sns.scatterplot(x=x[rows], y=y[rows], color=PRED_COLOUR, marker=marker,
+                            label=f"{word} ({rows.sum()})", **style)
+    if few:
+        axis.legend(title="subject (crosses: no beats, extreme sample)", fontsize=7,
+                    title_fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.2),
+                    ncol=4, frameon=False)
+    elif fallback.any():
+        axis.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2,
+                    frameon=False)
 
 
 def bland_altman_figure(pairs: pd.DataFrame, stats: dict, limits: tuple, unit: str,
@@ -119,80 +134,70 @@ def bland_altman_figure(pairs: pd.DataFrame, stats: dict, limits: tuple, unit: s
     return figure
 
 
-def agreement_figure(pairs: pd.DataFrame, unit: str, title: str) -> plt.Figure:
-    """Prediction against reference with the line of identity."""
-    figure, (axis,) = _report_axes(height=4.2)
-    _points(pairs, pairs["ref"], pairs["pred"], axis)
-    low = float(min(pairs["ref"].min(), pairs["pred"].min()))
-    high = float(max(pairs["ref"].max(), pairs["pred"].max()))
-    pad = 0.05 * (high - low) or 1.0
-    axis.plot([low - pad, high + pad], [low - pad, high + pad], color=LINE_COLOUR,
-              linestyle="--", linewidth=0.9, zorder=0)
-    axis.set_xlabel(f"reference ({unit})")
-    axis.set_ylabel(f"prediction ({unit})")
-    axis.set_title(title, fontsize=10)
-    figure.tight_layout()
+# ---------------------------------------------------------------------------
+# The figures of a run's evaluation
+# ---------------------------------------------------------------------------
+#: The share of the figure width the side panel takes.
+PANEL_WIDTH = 0.24
+
+
+def with_panel(figure, lines: list):
+    """``figure`` with the axes narrowed and ``lines`` of text in a box to
+    their right."""
+    figure.subplots_adjust(right=1 - PANEL_WIDTH - 0.02)
+    figure.text(1 - PANEL_WIDTH, 0.5, "\n".join(lines), fontsize=8, family="monospace",
+                va="center", ha="left",
+                bbox={"boxstyle": "round", "facecolor": "white", "edgecolor": "0.7"})
     return figure
 
 
-def histogram_figure(values, label: str, title: str, edges=()) -> plt.Figure:
-    """The spread of one quantity; ``edges`` are drawn as vertical lines (the
-    band edges of ISO 81060-3 clause 4.3.3)."""
-    figure, (axis,) = _report_axes(height=3.0)
-    sns.histplot(x=np.asarray(values, dtype=np.float64), ax=axis, color=PRED_COLOUR,
-                 edgecolor="white")
-    for edge in edges:
-        axis.axvline(edge, color=LINE_COLOUR, linestyle="--", linewidth=0.9)
-    axis.yaxis.set_major_locator(MaxNLocator(integer=True))
-    axis.set_xlabel(label)
-    axis.set_ylabel("count")
-    axis.set_title(title, fontsize=10)
-    figure.tight_layout()
-    return figure
+def best_waveform_figures(measurements: pd.DataFrame, frames: dict) -> dict:
+    """``{figure name: Figure}``: per signal, the measurement each waveform
+    metric rates best (lowest MAE or RMSE, highest CCC), drawn as its label
+    and prediction over time."""
+    figures = {}
+    for sig, frame in frames.items():
+        for metric in WAVEFORM_METRICS:
+            scored = frame.dropna(subset=[metric])
+            if scored.empty:
+                continue
+            best = scored.loc[scored[metric].idxmax() if metric == "ccc"
+                              else scored[metric].idxmin()]
+            where = (measurements["signal"] == sig)
+            for name in MEASUREMENT_KEY:
+                where &= measurements[name] == best[name]
+            trace = measurements[where].assign(std=np.nan)
+            title = (f"{sig}, best {metric}: {best['recording']} camera "
+                     f"{best['perspective']} segment {best['segment']}")
+            figure = recording_figure(trace, None, sig, title)
+            figures[f"waveform_{sig}_best_{metric}"] = with_panel(figure, [
+                f"mae  {best['mae']:.2f}",
+                f"rmse {best['rmse']:.2f}",
+                f"ccc  {best['ccc']:.3f}",
+                f"lag  {best['lag']:.2f} s",
+            ])
+    return figures
 
 
-def counts_figure(columns: dict, title: str) -> plt.Figure:
-    """One bar chart of counts per value for each ``{label: values}``."""
-    figure, axes = _report_axes(height=3.0, columns=len(columns))
-    for axis, (label, values) in zip(axes, columns.items()):
-        counts = values.dropna().map(
-            lambda v: f"{v:g}" if isinstance(v, float) else str(v)).value_counts().sort_index()
-        sns.barplot(x=counts.index.to_numpy(), y=counts.to_numpy(), ax=axis,
-                    color=PRED_COLOUR, width=0.6)
-        axis.yaxis.set_major_locator(MaxNLocator(integer=True))
-        axis.set_xlabel(label)
-        axis.set_ylabel("count" if axis is axes[0] else "")
-    figure.suptitle(title, fontsize=10)
-    figure.tight_layout()
-    return figure
-
-
-def box_figure(frame: pd.DataFrame, value: str, label: str, title: str) -> plt.Figure:
-    """One box per trace of a per-measurement metric, with every measurement
-    as a point."""
-    figure, (axis,) = _report_axes(height=3.0)
-    sns.boxplot(data=frame, x="signal", y=value, ax=axis, color=PRED_COLOUR,
-                width=0.5, fliersize=0, boxprops={"alpha": 0.4})
-    sns.stripplot(data=frame, x="signal", y=value, ax=axis, color=LABEL_COLOUR, size=3)
-    axis.set_xlabel("trace")
-    axis.set_ylabel(label)
-    axis.set_title(title, fontsize=10)
-    figure.tight_layout()
-    return figure
-
-
-def curves_figure(frame: pd.DataFrame, value: str, label: str, title: str) -> plt.Figure:
-    """``value`` against the epoch, one panel per trace (their units differ);
-    the line is the mean and the band ± 1 SD over folds and recordings."""
-    signals = list(dict.fromkeys(frame["signal"]))
-    figure, axes = _report_axes(height=2.8, columns=len(signals))
-    for axis, sig in zip(axes, signals):
-        sns.lineplot(data=frame[frame["signal"] == sig], x="epoch", y=value, ax=axis,
-                     color=PRED_COLOUR, errorbar="sd")
-        axis.set_title(sig, fontsize=9)
-        axis.xaxis.set_major_locator(MaxNLocator(integer=True))
-        axis.set_xlabel("epoch")
-        axis.set_ylabel(label if axis is axes[0] else "")
-    figure.suptitle(title, fontsize=10)
-    figure.tight_layout()
-    return figure
+def bland_altman_figures(frames: dict) -> dict:
+    """``{figure name: Figure}``: one Bland-Altman plot per parameter, the
+    error against the mean of reference and prediction, with the mean error
+    and the limits of agreement on the corrected SD."""
+    figures = {}
+    for p in PARAMETERS:
+        pairs = pairs_of(frames[p.name], p)
+        if pairs.empty:
+            continue
+        stats = repeated_measures(pairs["error"], pairs["subject"])
+        figure = bland_altman_figure(pairs, stats, limits(stats), p.unit,
+                                     f"{p.name}: Bland-Altman")
+        figures[f"bland_altman_{p.key}"] = with_panel(figure, [
+            f"n          {stats['n']}",
+            f"subjects   {stats['k']}",
+            f"mean error {stats['mean_error']:.2f} {p.unit}",
+            f"s_corr     {stats['s_corr']:.2f} {p.unit}",
+            f"ICC        {stats['icc']:.2f}",
+            f"N_ind      {stats['n_ind']:.0f}",
+            f"fallback   {int(pairs['fallback'].sum())}",
+        ])
+    return figures

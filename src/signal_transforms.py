@@ -66,9 +66,7 @@ SIGNALS = {
              "beat_labels": {"max": "systolic", "mean": "MAP", "min": "diastolic"}},
     # CVP has no systole: its waveform is a/c/v waves, and the quantity that
     # matters clinically is the mean. Same machinery as ABP, other words.
-    # Its beats are detected with the same detector and a lower prominence;
-    # signals.csv's n_ref_beats / n_pred_beats / n_matched say whether
-    # that works.
+    # Its beats are detected with the same detector and a lower prominence.
     "CVP":  {"class": ABSOLUTE, "unit": "mmHg", "prior": 8.0,  "cardiac": True,
              "beat": {"polarity": 1, "prominence": 0.2},
              "beat_labels": {"max": "peak", "mean": "mean", "min": "trough"}},

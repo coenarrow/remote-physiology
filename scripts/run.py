@@ -1,4 +1,4 @@
-"""Train one model, run it over the held-out participant and score the records.
+"""Train one model, run it over the held-out participant and record it.
 
     uv run python scripts/run.py --datasets pure \\
         --test-participant-dataset pure --test-participant-id 01 \\
@@ -18,11 +18,11 @@ writes ``RUN_DIR/epoch_NN/``: that epoch's ``model.pt`` and its
 ``test_records/<dataset>/`` (``meta.json``, ``windows.csv``, and per recording and
 camera one ``<TRACE>.csv`` with the time axis, the label, the mean and
 spread of the overlapping window predictions and one column per window,
-all in physical units; ``src/outputs.py``), then scores every
+all in physical units; ``src/outputs.py``), then draws every
 ``<recording>/<perspective>/`` folder from those files alone
-(``src/evaluation/recording.py``), writing one ``<TRACE>_beats.csv`` per
-cardiac trace, ``signals.csv``, ``rates.csv`` and one ``<TRACE>.png`` per
-trace beside its trace tables; ``docs/evaluation.md`` lists every column.
+(``src/evaluation/recording.py``): one ``<TRACE>.png`` per trace beside its
+trace table, the sanity picture of the fold. Nothing is scored until
+``scripts/evaluate.py`` runs over the finished run.
 A killed run keeps every finished epoch. With nobody held out it trains on
 every admitted store and ``RUN_DIR/epoch_NN/`` holds that epoch's
 ``model.pt`` alone: every run keeps every epoch's weights.
@@ -59,9 +59,10 @@ from src.distributed import init_runtime, shutdown               # noqa: E402
 from src.experiment import (                                     # noqa: E402
     EPOCH_DIR, add_config_arguments, add_limit_argument, add_run_arguments,
     add_split_arguments, check_config_arguments, check_split_arguments,
-    compile_config, limit_windows, load_start, print_model, print_runtime,
-    print_setup, print_split, print_stores, records_dir, run_name,
-    run_settings, score_records, split_stores, test_windows, train_windows,
+    compile_config, limit_windows, load_start,
+    plot_records, print_model, print_runtime, print_setup, print_split,
+    print_stores, records_dir, run_name, run_settings, split_stores,
+    test_windows, train_windows,
 )
 from src.model_config import load_config                         # noqa: E402
 from src.models import build_model                               # noqa: E402
@@ -74,7 +75,7 @@ SCRIPT = "scripts/run.py"
 def build_parser() -> argparse.ArgumentParser:
     parser = add_config_arguments(argparse.ArgumentParser(
         description="Train one model holding one participant out or none, run "
-                    "it over the held-out participant and score the records."),
+                    "it over the held-out participant and record it."),
         init_from=True)
     add_run_arguments(parser)
     add_split_arguments(parser)
@@ -105,7 +106,7 @@ def inherit(args, start) -> None:
 
 
 def main(argv=None) -> Path:
-    """Fit, record and score the run; returns its directory."""
+    """Fit and record the run; returns its directory."""
     parser = build_parser()
     args = parser.parse_args(argv)
     check_config_arguments(parser, args)
@@ -175,7 +176,7 @@ def main(argv=None) -> Path:
     def after_epoch(epoch: int) -> None:
         """That epoch's model over the held-out participant: every rank runs
         its shard, the main rank gets every record and alone keeps the
-        weights, writes the records and scores them under ``epoch_NN/``.
+        weights, writes the records and draws them under ``epoch_NN/``.
         With nobody held out it keeps the weights and stops there."""
         records = trainer.test(test_dataset) if test_dataset is not None else None
         if not runtime.is_main:
@@ -188,9 +189,9 @@ def main(argv=None) -> Path:
         out_dir = records_dir(epoch_dir, args.test_participant_dataset)
         write_records(records, out_dir, interface, {**meta, "epoch": epoch},
                       split.test[args.test_participant_dataset])
-        folders = score_records(out_dir)
+        folders = plot_records(out_dir)
         print(f"epoch {epoch}: {len(records)} windows written to {out_dir}, "
-              f"{len(folders)} recording(s) scored")
+              f"{len(folders)} recording(s) drawn")
 
     try:
         trainer.fit(train_dataset, after_epoch)

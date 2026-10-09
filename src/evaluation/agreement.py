@@ -14,20 +14,18 @@ The accuracy statistics are ISO 81060-3:2022 clauses 4.5.2 and 5.1.3
 The standard prints (5) and (9) to (12) for unequal ``m_i``; (6) it prints
 with ``r`` measurements per subject, for which ``f_BA`` stands here and to
 which it reduces when every subject contributes equally. Errors are
-prediction minus reference. Every function takes arrays and returns numbers.
+prediction minus reference. :func:`repeated_measures` and :func:`limits`
+take arrays and return numbers; :func:`agreement` and
+:func:`waveform_agreement` run them over the scored frames into one table.
 """
 
 import numpy as np
+import pandas as pd
 
-from src.evaluation.recording import pearson
+from src.evaluation.measurements import PARAMETERS, WAVEFORM_METRICS, pairs_of
 
 #: Limits of agreement are the mean error plus and minus this many s_corr.
 LIMIT_Z = 1.96
-#: ISO 81060-3 clause 5.1.4 a) to c) and clause 4.5.1 b) 3).
-ISO_MEAN_ERROR, ISO_S_CORR, ISO_N_IND, ISO_SUBJECTS = 6.0, 10.0, 278, 30
-#: Cumulative accuracy: the share of absolute errors within each, in the
-#: parameter's unit (the BHS grading's 5 / 10 / 15 mmHg).
-WITHIN = (5, 10, 15)
 _NAN = float("nan")
 
 
@@ -79,58 +77,30 @@ def limits(stats: dict) -> tuple:
     return stats["mean_error"] - half, stats["mean_error"] + half
 
 
-def spread(error) -> dict:
-    error = np.asarray(error, dtype=np.float64)
-    if error.size == 0:
-        return {"mae": _NAN, "rmse": _NAN}
-    return {"mae": float(np.abs(error).mean()),
-            "rmse": float(np.sqrt((error ** 2).mean()))}
+def agreement(frames: dict) -> pd.DataFrame:
+    """One row per parameter: the repeated-measures accuracy statistics of
+    its errors over the measurements that have one, the participant as the
+    subject."""
+    rows = []
+    for p in PARAMETERS:
+        pairs = pairs_of(frames[p.name], p)
+        rows.append({"parameter": p.name,
+                     **repeated_measures(pairs["error"], pairs["subject"])})
+    return pd.DataFrame(rows)
 
 
-def within_shares(error) -> dict:
-    """Percent of absolute errors within each of ``WITHIN``."""
-    error = np.abs(np.asarray(error, dtype=np.float64))
-    return {f"within_{bound}": float((error <= bound).mean() * 100) if error.size else _NAN
-            for bound in WITHIN}
-
-
-def criteria(stats: dict) -> list:
-    """The ISO 81060-3 accuracy criteria against the statistics."""
-    rows = (
-        ("mean error (5.1.4 a)", abs(stats["mean_error"]), f"within ±{ISO_MEAN_ERROR:.1f}",
-         abs(stats["mean_error"]) <= ISO_MEAN_ERROR),
-        ("s_corr (5.1.4 b)", stats["s_corr"], f"≤ {ISO_S_CORR:.1f}",
-         stats["s_corr"] <= ISO_S_CORR),
-        ("N_ind (5.1.4 c)", stats["n_ind"], f"≥ {ISO_N_IND}", stats["n_ind"] >= ISO_N_IND),
-        ("subjects (4.5.1 b)", stats["k"], f"≥ {ISO_SUBJECTS}", stats["k"] >= ISO_SUBJECTS),
-    )
-    return [{"criterion": name, "value": float(value), "threshold": threshold,
-             "met": "yes" if np.isfinite(value) and met else "no"}
-            for name, value, threshold, met in rows]
-
-
-def rate_metrics(ref, pred) -> dict:
-    """What rPPG papers report of a rate: MAE, RMSE, MAPE (percent of the
-    reference) and Pearson r."""
-    ref, pred = np.asarray(ref, dtype=np.float64), np.asarray(pred, dtype=np.float64)
-    if ref.size == 0:
-        return {"mae": _NAN, "rmse": _NAN, "mape": _NAN, "r": _NAN}
-    error = pred - ref
-    mape = float((np.abs(error) / np.abs(ref)).mean() * 100) if (ref != 0).all() else _NAN
-    return {**spread(error), "mape": mape, "r": pearson(pred, ref)}
-
-
-def baseline(ref, pred) -> dict:
-    """The model beside a constant predictor, the mean of the references
-    themselves (which favours the constant: it has seen them), and the ratio
-    of the predictions' SD to the references'. A ratio near 0 is a model that
-    answers the same level for everyone."""
-    ref, pred = np.asarray(ref, dtype=np.float64), np.asarray(pred, dtype=np.float64)
-    if ref.size == 0:
-        return {"model_mae": _NAN, "baseline_mae": _NAN, "model_rmse": _NAN,
-                "baseline_rmse": _NAN, "spread_ratio": _NAN}
-    model, constant = spread(pred - ref), spread(ref.mean() - ref)
-    ref_sd = ref.std(ddof=1) if ref.size > 1 else 0.0
-    return {"model_mae": model["mae"], "baseline_mae": constant["mae"],
-            "model_rmse": model["rmse"], "baseline_rmse": constant["rmse"],
-            "spread_ratio": float(pred.std(ddof=1) / ref_sd) if ref_sd > 0 else _NAN}
+def waveform_agreement(frames: dict) -> pd.DataFrame:
+    """One row per signal and waveform metric: the repeated-measures
+    statistics of the metric across measurements, the participant as the
+    subject. Descriptive only: a score is not a signed error, so ``s_corr``
+    is its corrected spread, not a limit of agreement, and no criterion
+    applies."""
+    rows = []
+    for sig, frame in frames.items():
+        for metric in WAVEFORM_METRICS:
+            scored = frame.dropna(subset=[metric])
+            stats = repeated_measures(scored[metric], scored["participant"])
+            rows.append({"signal": sig, "metric": metric,
+                         **{("mean" if k == "mean_error" else k): v
+                            for k, v in stats.items()}})
+    return pd.DataFrame(rows)

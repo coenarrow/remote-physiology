@@ -1,14 +1,12 @@
 """Heart rate from every cardiac trace, and from all of them fused.
 
-Per recording, for every trace the registry marks cardiac (PPG, ECG, ABP,
-CVP) that the recording labels, the estimate the upstream toolbox made: detrend,
-bandpass to the heart-rate band, periodogram, the largest in-band bin, in
-beats per minute. Run on the label and on the prediction, so every trace
-reports its own reference and predicted rate and is compared with itself.
-One more *source* joins the per-trace ones whenever a recording carries at
-least two cardiac traces:
+For every trace the registry marks cardiac (PPG, ECG, ABP, CVP), the
+estimate the upstream toolbox made: detrend, bandpass to the heart-rate
+band, periodogram, the largest in-band bin, in beats per minute
+(:func:`clean`, :func:`spectrum`, :func:`rate_of`). Run on the label and
+on the prediction, so each side has its own rate. Where a stretch carries
+several cardiac traces they are fused (:func:`fuse`):
 
-``FUSED``
     The traces' power spectra, each normalised to unit power in the band,
     combined as their weighted geometric mean — a product of spectra, so
     the frequency the traces agree on wins and a peak only one of them has
@@ -29,9 +27,9 @@ least two cardiac traces:
 No config. The detrender is the upstream one, the band is wider than
 upstream's 36–198 bpm, and the trace tables are already in physical units,
 so nothing here needs to know how a trace's label was normalised.
-The three upstream helpers this needs (the smoothness-prior detrender, the
-FFT length and the maximum amplitude of cross-correlation) live at the top
-of this module; the rest of the toolbox's post-processing is gone.
+The two upstream helpers this needs (the smoothness-prior detrender and
+the FFT length) live at the top of this module; the rest of the toolbox's
+post-processing is gone.
 """
 
 import functools
@@ -52,9 +50,6 @@ MIN_FRAMES = 10
 #: Floor under a normalised spectrum before its log, so one trace's empty bin
 #: cannot veto the frequency every other trace favours.
 SPECTRUM_FLOOR = 1e-12
-
-FUSED = "FUSED"
-RATE_METRICS = ("ref_hr", "pred_hr", "err_hr", "snr", "macc")
 _NAN = float("nan")
 
 
@@ -96,29 +91,6 @@ def detrend(trace, lambda_value: float) -> np.ndarray:
     flat = trace.reshape(length, -1)
     trend = solveh_banded(_detrend_bands(length, float(lambda_value)), flat, lower=False)
     return (flat - trend).reshape(trace.shape)
-
-
-def macc(pred, ref) -> float:
-    """Maximum amplitude of cross-correlation: the largest
-    ``|corrcoef(pred, roll(ref, lag))|`` over every lag, computed as one
-    circular cross-correlation via FFT (the two norms are roll-invariant, so
-    this equals the per-lag loop). Zero for a constant trace or fewer than
-    two samples."""
-    pred = np.squeeze(np.asarray(pred, dtype=np.float64))
-    ref = np.squeeze(np.asarray(ref, dtype=np.float64))
-    n = min(pred.size, ref.size)
-    pred, ref = pred[:n], ref[:n]
-    if n < 2:
-        return 0.0
-    centred_pred, centred_ref = pred - pred.mean(), ref - ref.mean()
-    denominator = np.sqrt((centred_pred ** 2).sum() * (centred_ref ** 2).sum())
-    if denominator == 0:
-        return 0.0
-    # circular[lag] == sum_i centred_pred[i] * centred_ref[(i - lag) % n]
-    circular = np.fft.irfft(
-        np.fft.rfft(centred_pred) * np.conj(np.fft.rfft(centred_ref)), n=n)
-    # Lags 0 .. n-2, matching upstream's range(0, len(pred) - 1).
-    return float(np.max(np.abs(circular[:n - 1])) / denominator)
 
 
 # ---------------------------------------------------------------------------
@@ -183,39 +155,3 @@ def snr(freqs, power, hr_bpm: float | None = None) -> float:
     if noise_power <= 0 or signal_power <= 0:
         return _NAN
     return float(10 * np.log10(signal_power / noise_power))
-
-
-# ---------------------------------------------------------------------------
-# One recording to its rows
-# ---------------------------------------------------------------------------
-def recording_rates(traces: dict, fs: float) -> list:
-    """``[{source, ref_hr, pred_hr, err_hr, snr, macc}, ...]`` for one
-    recording, given ``{signal: (label, prediction)}`` over the cardiac
-    traces it carries, both finite: one row per trace, then ``FUSED`` when
-    there are two or more to combine. Empty for a stretch too short to
-    filter."""
-    rows, ref_powers, pred_powers = [], [], []
-    freqs = None
-    for sig, (ref, pred) in traces.items():
-        ref = np.asarray(ref, dtype=np.float64)
-        pred = np.asarray(pred, dtype=np.float64)
-        if ref.size < MIN_FRAMES:
-            return []
-        ref, pred = clean(ref, fs), clean(pred, fs)
-        freqs, ref_power = spectrum(ref, fs)
-        _, pred_power = spectrum(pred, fs)
-        ref_hr, pred_hr = rate_of(freqs, ref_power), rate_of(freqs, pred_power)
-        rows.append({"source": sig, "ref_hr": ref_hr, "pred_hr": pred_hr,
-                     "err_hr": pred_hr - ref_hr, "snr": snr(freqs, pred_power, ref_hr),
-                     "macc": macc(pred, ref)})
-        ref_powers.append(ref_power)
-        pred_powers.append(pred_power)
-    if len(rows) < 2:
-        return rows
-
-    ref_fused, pred_fused = fuse(freqs, ref_powers), fuse(freqs, pred_powers)
-    ref_hr, pred_hr = rate_of(freqs, ref_fused), rate_of(freqs, pred_fused)
-    rows.append({"source": FUSED, "ref_hr": ref_hr, "pred_hr": pred_hr,
-                 "err_hr": pred_hr - ref_hr, "snr": snr(freqs, pred_fused, ref_hr),
-                 "macc": _NAN})
-    return rows

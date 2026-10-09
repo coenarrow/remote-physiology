@@ -1,23 +1,35 @@
-"""Evaluate a finished run: pool its per-recording tables into one report.
+"""Evaluate a finished run from its waveforms.
 
-    uv run scripts/evaluate.py runs/synthetic_benchmark_physmamba
+    uv run scripts/evaluate.py runs/neckflix_hpc_factorizephys_H200W200
 
 The run directory is one ``scripts/run.py`` wrote, or one ``main.py`` wrote
-a fold per participant into. Its records are already scored
-(``docs/evaluation.md``); nothing is trained, inferred or re-scored here,
-and nothing but the run directory is read. One recording and camera is one
-paired measurement, eligible when its covered stretch is within
-``--segment-min`` and ``--segment-max`` seconds. The last epoch of each fold
-is evaluated, or the one ``--epoch`` names; it is never chosen by test error.
+a fold per participant into. Nothing is trained or inferred here; the
+per-trace tables each fold wrote (label and mean prediction per frame) are
+read and everything is scored from them. The last epoch of each fold is
+evaluated, or the one ``--epoch`` names; it is never chosen by test error.
+
+Each trace of each recording and camera is cut into paired measurements of
+``--measurement-duration`` seconds (a trailing one kept while within
+``--measurement-tolerance`` of that). Per measurement the waveform metrics
+(lag-aware MAE and RMSE, Lin's concordance at its best lag) and the derived
+parameters (CVP mean; ABP mean, systolic, diastolic; the heart rate of the
+spectrally fused cardiac traces) are scored, then pooled over all subjects
+with the ISO 81060-3 repeated-measures statistics: mean error, corrected SD,
+ICC and the number of independent measurements.
 
 Written to ``RUN_DIR/evaluation/``, replacing what was there::
 
-    measurements.csv   one row per fold, recording, camera and signal
-    exclusions.csv     what was left out, and why
-    tables/*.csv       every table of the report
-    figures/*.png      every figure
-    report.md          the report
-    report.html        the same, as one file, A4 when printed
+    measurements/waveform_<SIGNAL>.csv   one row per measurement and signal
+    measurements/<PARAMETER>.csv         one row per measurement and parameter
+    tables/demographics_<SIGNAL>.csv     who each signal was measured on
+    tables/waveform_agreement.csv        the waveform metrics pooled
+    tables/agreement.csv                 the derived parameters pooled
+    figures/*.png                        best waveforms, Bland-Altman plots
+
+Every measurement row ends with its recording's sex, age, skin tone and
+posture, for comparisons across them. Each stage reports a progress bar;
+the slow ones are the waveform metrics (a concordance per lag per
+measurement) and the beat detection behind systolic and diastolic.
 """
 
 import argparse
@@ -27,21 +39,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.evaluation.demographics import with_core                  # noqa: E402
-from src.evaluation.pooling import (                               # noqa: E402
-    additional_params, collect, collect_epochs, exclusions, mark_eligible,
-    parameters, read_losses,
+import matplotlib.pyplot as plt                                    # noqa: E402
+import pandas as pd                                                # noqa: E402
+
+from src.evaluation import progress                               # noqa: E402
+from src.evaluation.agreement import agreement, waveform_agreement  # noqa: E402
+from src.evaluation.demographics import demographics, with_markers  # noqa: E402
+from src.evaluation.measurements import (                          # noqa: E402
+    PARAMETERS, score_measurements, waveform_measurements,
 )
-from src.evaluation.report import MEASUREMENT_KEY, build           # noqa: E402
+from src.evaluation.plots import (                                 # noqa: E402
+    best_waveform_figures, bland_altman_figures,
+)
+from src.evaluation.pooling import (                               # noqa: E402
+    MEASUREMENT_KEY, collect_waveforms, segment,
+)
 from src.outputs import FLOAT_FORMAT                               # noqa: E402
 
 OUT_DIR = "evaluation"
-MEASUREMENTS_NAME, EXCLUSIONS_NAME = "measurements.csv", "exclusions.csv"
+MEASUREMENTS_DIR, TABLES_DIR, FIGURES_DIR = "measurements", "tables", "figures"
+FIGURE_DPI = 150
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Pool a finished run's per-recording tables into one report.")
+        description="Score a finished run's waveforms as paired measurements.")
     parser.add_argument(
         "run_dir", metavar="RUN_DIR",
         help="a run directory written by scripts/run.py, or the directory "
@@ -50,58 +72,69 @@ def build_parser() -> argparse.ArgumentParser:
         "--epoch", type=int, metavar="N",
         help="which epoch of every fold to evaluate (default: each fold's last)")
     parser.add_argument(
-        "--segment-min", type=float, default=20.0, metavar="SECONDS",
-        help="shortest covered stretch that counts as a measurement (default: 20)")
+        "--measurement-duration", type=float, default=10.0, metavar="SECONDS",
+        help="nominal length of one paired measurement (default: 10)")
     parser.add_argument(
-        "--segment-max", type=float, default=30.0, metavar="SECONDS",
-        help="longest covered stretch that counts as a measurement (default: 30)")
-    parser.add_argument(
-        "--additional-params", nargs="+", default=[], metavar="ATTR",
-        help="root attrs to report beside the core five and the datasets' "
-             "ADDITIONAL_PARAMS, as recordings.csv names them (dotted when nested)")
+        "--measurement-tolerance", type=float, default=1.0, metavar="SECONDS",
+        help="how far from the nominal length a measurement may be (default: 1)")
     return parser
 
 
 def main(argv=None) -> Path:
-    """Write the evaluation; returns ``report.md``."""
+    """Write the evaluation; returns its directory."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.segment_min > args.segment_max:
-        parser.error("--segment-min is above --segment-max")
     run_dir = Path(args.run_dir)
     if not run_dir.is_dir():
         parser.error(f"{run_dir} is not a directory")
-    bounds = (args.segment_min, args.segment_max)
     try:
-        pooled, meta = collect(run_dir, args.epoch)
-        pooled = mark_eligible(with_core(pooled), *bounds)
-        curves = mark_eligible(collect_epochs(run_dir), *bounds)
-        losses = read_losses(run_dir)
-        additional = list(dict.fromkeys(
-            [*additional_params(run_dir), *args.additional_params]))
+        waveforms, attrs, meta = collect_waveforms(run_dir, args.epoch)
     except (ValueError, FileNotFoundError) as err:
         parser.error(str(err))
+    fs = float(meta["fs"])
+    measurements = segment(waveforms, fs, args.measurement_duration,
+                           args.measurement_tolerance)
+    if measurements.empty:
+        parser.error(f"no trace has a paired stretch of {args.measurement_duration:g} "
+                     f"± {args.measurement_tolerance:g} s")
+    n = len(measurements.drop_duplicates(MEASUREMENT_KEY))
+    print(f"{n} measurement(s) of {args.measurement_duration:g} ± "
+          f"{args.measurement_tolerance:g} s over "
+          f"{measurements['participant'].nunique()} participant(s)")
 
     out_dir = run_dir / OUT_DIR
     if out_dir.exists():
         shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
-    excluded = exclusions(pooled)
-    excluded.to_csv(out_dir / EXCLUSIONS_NAME, index=False, float_format=FLOAT_FORMAT)
-    measurements = pooled[pooled["eligible"]].drop(columns=["eligible", "reason"])
-    if measurements.empty:
-        parser.error(f"no recording has a covered stretch within {bounds[0]:g} to "
-                     f"{bounds[1]:g} s; {out_dir / EXCLUSIONS_NAME} lists them")
-    measurements.to_csv(out_dir / MEASUREMENTS_NAME, index=False,
-                        float_format=FLOAT_FORMAT)
+    for name in (MEASUREMENTS_DIR, TABLES_DIR, FIGURES_DIR):
+        (out_dir / name).mkdir(parents=True)
 
-    params = parameters(meta["traces"], measurements)
-    path = build(out_dir, run_dir, pooled, measurements, excluded, params, meta,
-                 curves, losses, additional, bounds)
-    print(f"{len(measurements.drop_duplicates(MEASUREMENT_KEY))} measurement(s) of "
-          f"{measurements['subject'].nunique()} subject(s), {len(excluded)} excluded")
-    print(f"report: {path}")
-    return path
+    def write(folder: str, name: str, frame: pd.DataFrame) -> None:
+        frame.to_csv(out_dir / folder / f"{name}.csv", index=False,
+                     float_format=FLOAT_FORMAT)
+
+    for name, table in demographics(measurements, attrs).items():
+        write(TABLES_DIR, f"demographics_{name}", table)
+
+    waveform_frames = {sig: with_markers(frame, attrs) for sig, frame
+                       in waveform_measurements(measurements, fs).items()}
+    for sig, frame in waveform_frames.items():
+        write(MEASUREMENTS_DIR, f"waveform_{sig}", frame)
+    write(TABLES_DIR, "waveform_agreement", waveform_agreement(waveform_frames))
+
+    parameter_frames = {name: with_markers(frame, attrs) for name, frame
+                        in score_measurements(measurements, fs).items()}
+    for p in PARAMETERS:
+        write(MEASUREMENTS_DIR, p.key, parameter_frames[p.name])
+    write(TABLES_DIR, "agreement", agreement(parameter_frames))
+
+    figures = {**best_waveform_figures(measurements, waveform_frames),
+               **bland_altman_figures(parameter_frames)}
+    for name, figure in progress(figures.items(), "writing figures"):
+        figure.savefig(out_dir / FIGURES_DIR / f"{name}.png", dpi=FIGURE_DPI)
+        plt.close(figure)
+
+    print(f"written to {out_dir}")
+    return out_dir
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Run a trained model over datasets it has not seen and score the records.
+"""Run a trained model over datasets it has not seen and record it.
 
     uv run scripts/test.py --checkpoint runs/PHYSMAMBA_PURE.all_202609091000 \\
         --test-dataset neckflix synthetic_neck
@@ -14,15 +14,14 @@ window of it, or one participant's stores with ``--test-participant-id``
 on, in its own run or in any run of its ``history``, is refused.
 
 The records land beside the weights that made them, one directory per
-dataset, in the layout a held-out run writes and scored the same way::
+dataset, in the layout a held-out run writes and drawn the same way::
 
     RUN_DIR/epoch_NN/test_records/<dataset>/
       meta.json  windows.csv  recordings.csv
-      <recording>/<perspective>/<TRACE>.csv, <TRACE>_beats.csv, signals.csv,
-                                rates.csv, <TRACE>.png
+      <recording>/<perspective>/<TRACE>.csv, <TRACE>.png
 
-``src/outputs.py`` and ``docs/evaluation.md`` describe the files. A dataset
-already tested at that epoch is refused, not overwritten.
+``src/outputs.py`` describes the files; ``scripts/evaluate.py`` scores
+them. A dataset already tested at that epoch is refused, not overwritten.
 """
 
 import argparse
@@ -38,8 +37,8 @@ from src.datasets import Split, hold_out_participant, load_stores  # noqa: E402
 from src.distributed import init_runtime, shutdown               # noqa: E402
 from src.experiment import (                                     # noqa: E402
     add_limit_argument, add_run_arguments, epoch_checkpoint, git_state,
-    limit_windows, load_checkpoint, print_model, print_runtime, print_stores,
-    rebuild, records_dir, run_settings, score_records, test_windows,
+    limit_windows, load_checkpoint, plot_records, print_model, print_runtime,
+    print_stores, rebuild, records_dir, run_settings, test_windows,
     trained_stores,
 )
 from src.models import build_model                               # noqa: E402
@@ -52,7 +51,7 @@ SCRIPT = "scripts/test.py"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a trained model over datasets it has not seen and "
-                    "score the records.")
+                    "record it.")
     parser.add_argument(
         "--checkpoint", required=True, metavar="PATH",
         help="the trained model: a run directory written by scripts/run.py "
@@ -94,7 +93,7 @@ def test_stores(stores: dict, participant: str | None, trained: set) -> dict:
 
 
 def main(argv=None) -> list:
-    """Record and score each dataset; returns the records directories."""
+    """Record and draw each dataset; returns the records directories."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.test_participant_id is not None and len(args.test_dataset) > 1:
@@ -151,9 +150,9 @@ def main(argv=None) -> list:
                 continue
             write_records(records, out_dirs[name], interface,
                           {"dataset": name, **meta}, stores[name])
-            folders = score_records(out_dirs[name])
+            folders = plot_records(out_dirs[name])
             print(f"{name}: {len(records)} windows written to {out_dirs[name]}, "
-                  f"{len(folders)} recording(s) scored")
+                  f"{len(folders)} recording(s) drawn")
         return list(out_dirs.values())
     finally:
         shutdown(runtime)

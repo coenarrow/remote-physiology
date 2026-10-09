@@ -615,11 +615,10 @@ What happens, in order:
    `src/outputs.py` writes them as `epoch_NN/test_records/<dataset>/`
    beside a copy of the weights. `scripts/test.py` writes the same
    directory for any other dataset, from a finished epoch.
-3. Evaluation, straight after: `src/evaluation/recording.py` reads that
-   `test_records/<dataset>/` alone
-   and writes one `<TRACE>_beats.csv` per cardiac trace, `signals.csv`,
-   `rates.csv` and one `<TRACE>.png` per trace beside each recording's
-   trace tables (`docs/evaluation.md`).
+3. A picture, straight after: `src/evaluation/recording.py` reads that
+   `test_records/<dataset>/` alone and draws one `<TRACE>.png` per trace
+   beside each recording's trace tables. Scoring is `scripts/evaluate.py`,
+   run by hand over the finished run.
 
 Outputs land in `runs/<MODEL>_<DATASET>.<participant or all>-..._<YYYYMMDDHHMM>/`
 (one `<DATASET>.<...>` per `--datasets` entry, the held-out participant on the
@@ -632,7 +631,7 @@ dataset it came from and `all` on the rest):
 | `losses.csv` | every epoch | per-epoch loss, per trace and component; `epoch` is 1-based like the directories below |
 | `epoch_NN/model.pt` | after epoch NN | that epoch's state dict, in the same form |
 | `epoch_NN/test_records/<dataset>/` | after epoch NN | `meta.json` (with the epoch), `windows.csv` (one row per window with its position and presence flags), `recordings.csv` (one row per recording with the cache's root attributes), and per recording and camera one `<TRACE>.csv`: frame, time, label, mean / std / n over the overlapping windows, then one column per window, all in physical units |
-| `epoch_NN/test_records/<dataset>/<recording>/<camera>/<TRACE>_beats.csv`, `signals.csv`, `rates.csv`, `<TRACE>.png` | after the records | per reference beat its peak and trough times, its matched predicted beat's and both beats' levels; per signal, over the whole covered stretch, the beat counts, the level means / SDs / errors and the waveform agreement; a heart rate per source; per trace the figure of label, prediction with its spread, and beats |
+| `epoch_NN/test_records/<dataset>/<recording>/<camera>/<TRACE>.png` | after the records | per trace the figure of label, prediction with its spread, and the beats detected on each |
 
 ## Migrating an upstream rPPG-Toolbox model
 
