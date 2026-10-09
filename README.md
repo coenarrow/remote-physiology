@@ -163,6 +163,8 @@ uv run scripts/run.py \
 --epochs 10
 ```
 
+The `--epochs` are new ones, numbered after the checkpoint's: a run of 20 epochs continued for 10 writes `epoch_21/` to `epoch_30/` and a `losses.csv` of those rows, with a fresh learning-rate schedule over them (the checkpoint holds the weights, not the optimiser). The new run directory's `config.yaml` lists the run it came from under `history`.
+
 Or we could take it and train it further on an different dataset at a lower learning rate, by using:
 
 ```bash
@@ -171,6 +173,14 @@ uv run scripts/run.py \
 --datasets synthetic_neck_high_snr \
 --epochs 10 \
 --lr 0.0003
+```
+
+A whole leave-one-out experiment is continued the same way, every fold from its own latest epoch, into `runs/<experiment>_continued/` (or `--experiment`); `--test-participant-id` picks folds, and `--parallel` / `--nproc-per-node` work as for a new experiment:
+
+```bash
+uv run main.py \
+--init-from runs/neckflix_hpc_physnet_H200W200 \
+--epochs 10 --batch-size 4 --num-workers 5 --parallel 4
 ```
 
 ### Evaluating a pretrained model on a dataset

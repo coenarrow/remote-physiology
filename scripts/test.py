@@ -132,7 +132,7 @@ def main(argv=None) -> list:
         trainer = Trainer(model, interface, model_config, training, run, runtime,
                           path.parent, checkpoint["config"])
         # After the trainer, which sets the readout biases of a new model.
-        trainer.model.load_state_dict(checkpoint["model_state"])
+        trainer.restore(checkpoint)
     except ConfigError as err:
         parser.error(str(err))
     except RuntimeError as err:          # a state dict the model does not fit

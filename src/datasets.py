@@ -73,17 +73,23 @@ class Split:
     test: dict[str, dict[Path, dict]]
 
 
+def id_order(participant: str) -> tuple:
+    """Sort key putting participant ids in id order: ``'2'`` before ``'10'``,
+    ``'01'`` before ``'10'``, without assuming they are numbers."""
+    return (len(participant), participant)
+
+
 def participants(stores: dict[str, dict[Path, dict]], dataset: str) -> list[str]:
-    """The participant ids the named dataset's admitted stores carry, sorted
-    as ids (``'2'`` before ``'10'``). Naming a dataset that was not loaded
-    is an error listing what is."""
+    """The participant ids the named dataset's admitted stores carry, in
+    ``id_order``. Naming a dataset that was not loaded is an error listing
+    what is."""
     if dataset not in stores:
         raise ValueError(
             f"--test-participant-dataset {dataset!r} is not one of the loaded "
             f"datasets {sorted(stores)}")
     ids = {str(_lookup(a, "participant")) for a in stores[dataset].values()
            if _lookup(a, "participant") is not None}
-    return sorted(ids, key=lambda s: (len(s), s))
+    return sorted(ids, key=id_order)
 
 
 def hold_out_participant(stores: dict[str, dict[Path, dict]],

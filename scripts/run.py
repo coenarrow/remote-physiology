@@ -34,8 +34,11 @@ every admitted store and ``RUN_DIR/epoch_NN/`` holds that epoch's
 
 It names a run directory (its latest epoch), one of its ``epoch_NN`` folders
 or a ``model.pt``. The interface, model and recipe are the checkpoint's, so
-there is no ``--config``; ``--lr`` alone overrides the recipe's rate, and the
-schedule starts afresh over the new epochs. Without ``--datasets`` it trains
+there is no ``--config``; ``--lr`` alone overrides the recipe's rate. The
+``--epochs`` are new ones, numbered after the checkpoint's — continued from
+epoch 20 for 10, the run writes ``epoch_21/`` to ``epoch_30/`` and a
+``losses.csv`` of those rows — and the schedule starts afresh over them;
+``main.py --init-from`` does this for every fold of an experiment. Without ``--datasets`` it trains
 on the datasets that run trained on, exactly as it admitted them; it holds
 out the participant that run held out, unless the flags name another or the
 dataset is no longer among those trained on. It always writes a new run
@@ -166,9 +169,11 @@ def main(argv=None) -> Path:
     if start:
         # After the trainer, which sets the readout biases of a new model.
         try:
-            trainer.model.load_state_dict(start.checkpoint["model_state"])
+            trainer.restore(start.checkpoint)
         except RuntimeError as err:      # a state dict the model does not fit
             parser.error(f"{start.path} does not fit the model it describes: {err}")
+        except ConfigError as err:
+            parser.error(f"{start.path}: {err}")
     meta = {"dataset": args.test_participant_dataset,
             "participant": args.test_participant_id, "run_dir": str(run_dir),
             "command": config["command"], "git": config["git"]}

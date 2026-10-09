@@ -17,7 +17,9 @@ write to. Everything it does is stated by the three configs it is handed:
 
 There is no validation split: LOSO scores on the held-out participant after
 every epoch (``fit``'s ``after_epoch`` hook), and the last epoch is the
-model. The test pass returns *records* — one dict per
+model. A trainer restored from a checkpoint (``restore``) counts on from that
+checkpoint's epoch: the run's epochs are new ones, numbered after it, with
+the schedule laid over them alone. The test pass returns *records* — one dict per
 strided window with predictions, labels, stats, masks and metadata, in
 physical units — and writes nothing: ``src.outputs`` turns them into files,
 and scoring them is the evaluation package's job, not this one's.
@@ -304,6 +306,18 @@ class Trainer:
         return {"model_state": self.model.state_dict(), "config": self.config,
                 "epoch": self.epoch}
 
+    def restore(self, checkpoint: dict) -> None:
+        """Take a checkpoint's weights and the epochs it had finished, so
+        ``fit`` counts on from there: restored at epoch 20, the run trains
+        epochs 21 onward. A checkpoint from before the count was kept
+        (commit 3f84034, 2026-09-29) has nothing to count on from."""
+        self.model.load_state_dict(checkpoint["model_state"])
+        if "epoch" not in checkpoint:
+            raise ConfigError("the checkpoint carries no epoch count (it predates "
+                              "commit 3f84034, 2026-09-29); the run cannot number "
+                              "its epochs after it")
+        self.epoch = checkpoint["epoch"]
+
     def _prepare_run_dir(self) -> None:
         """Main rank only: create the run directory and write ``config.yaml``
         into it, once, before anything else lands there."""
@@ -333,14 +347,17 @@ class Trainer:
         return float(total.detach()), weighted
 
     def fit(self, train_dataset: Dataset, after_epoch=None) -> list:
-        """Train for the recipe's epochs; returns the per-epoch loss log.
+        """Train for the run's epochs; returns the per-epoch loss log.
 
-        ``after_epoch(epoch)`` is called on every rank once the epoch's loss
-        log and checkpoint are written, with the 1-based epoch number: the
-        script's chance to run and score the held-out participant on that
-        epoch's weights.
+        The epochs are numbered after those the model has finished
+        (``self.epoch``: 0 for a new model, the checkpoint's after
+        ``restore``), and the schedule runs over them alone. ``after_epoch(epoch)``
+        is called on every rank once the epoch's loss log and checkpoint are
+        written, with the 1-based epoch number: the script's chance to run
+        and score the held-out participant on that epoch's weights.
         """
         cfg, runtime, epochs = self.training, self.runtime, self.run.epochs
+        first, last = self.epoch, self.epoch + epochs
         sampler = DistributedSampler(train_dataset, num_replicas=runtime.world_size,
                                      rank=runtime.rank, shuffle=True) \
             if runtime.distributed else None
@@ -356,13 +373,13 @@ class Trainer:
             print(f"gpu: {describe_device(memory)}")
         reset_peak(self.device)
         log = []
-        for epoch in range(epochs):
+        for epoch in range(first, last):
             if sampler is not None:
                 sampler.set_epoch(epoch)
             self.net.train()
             started = time.time()
             sums = {"batches": 0.0}
-            progress = self._progress(loader, f"epoch {epoch + 1}/{epochs}")
+            progress = self._progress(loader, f"epoch {epoch + 1}/{last}")
             for batch in progress:
                 total, weighted = self.step(batch)
                 scheduler.step()
@@ -383,17 +400,17 @@ class Trainer:
             log.append(row)
             self.epoch = epoch + 1
             if runtime.is_main:
-                self._print_epoch(row)
+                self._print_epoch(row, last)
                 self._write_loss_log(log)
                 torch.save(self.checkpoint(), self.run_dir / CHECKPOINT_NAME)
             if after_epoch is not None:
                 after_epoch(epoch + 1)
         return log
 
-    def _print_epoch(self, row: dict) -> None:
+    def _print_epoch(self, row: dict, last: int) -> None:
         per_trace = ", ".join(f"{t}={row.get(f'{t}/total', 0.0):.4g}"
                               for t in self.model.traces)
-        print(f"epoch {row['epoch']}/{self.run.epochs}: "
+        print(f"epoch {row['epoch']}/{last}: "
               f"loss {row['total']:.4g} ({per_trace}) in {row['seconds']:.0f}s")
 
     def _write_loss_log(self, log: list) -> None:
