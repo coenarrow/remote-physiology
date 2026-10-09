@@ -42,6 +42,13 @@ def shrink(video: torch.Tensor, factor: int) -> torch.Tensor:
     return rearrange(small, "(b c) t h w -> b c t h w", b=b)
 
 
+def pearson(pred: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
+    """``(B, T)`` prediction and label -> ``(B,)`` Pearson correlation."""
+    pred = pred - pred.mean(dim=-1, keepdim=True)
+    label = label - label.mean(dim=-1, keepdim=True)
+    return (pred * label).sum(dim=-1) / (pred.norm(dim=-1) * label.norm(dim=-1) + EPS)
+
+
 def softplus_inverse(y: float) -> float:
     """``x`` such that ``softplus(x) == y``, for ``y > 0``."""
     return math.log(math.expm1(y))

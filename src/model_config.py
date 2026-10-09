@@ -111,7 +111,7 @@ def normalise_regularisation(weights, where: str) -> dict:
 @dataclass
 class TemporalShiftConfig(ModelConfig):
     """EfficientPhys and TS-CAN: the segment length the temporal shift shifts within."""
-    FRAME_DEPTH: int = 0
+    FRAME_DEPTH: int = 10         # the paper's
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
@@ -124,7 +124,7 @@ class TemporalShiftConfig(ModelConfig):
 class PhysMambaConfig(ModelConfig):
     """PhysMamba, PhysMamba2 and PhysMamba3: the Mamba layers' learning rate as
     a multiple of the recipe's; 1 is the paper."""
-    MAMBA_LR_SCALE: float = 0.0
+    MAMBA_LR_SCALE: float = 1.0
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
@@ -138,33 +138,51 @@ class FactorizePhysConfig(ModelConfig):
     FSAM: bool = True             # run the factorized attention module. For ablation testing
 
 
+#: ``RATE_ESTIMATOR``: CardioConv's and CardioHydra's own spectral estimator.
+SPECTRAL_RATE = "Spectral"
+
+
 @dataclass
-class CardioConvConfig(ModelConfig):
-    """CardioConv's ablations (every one ``True`` in the model as designed)
-    and its training gate."""
+class CardioHydraConfig(ModelConfig):
+    """CardioHydra's ablations (every one ``True`` in the model as designed)
+    and its training gate; CardioConv's are these and one more."""
     PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a mask of ones
     PHASE_MASKER: bool = True         # learn the per-trace masks; false is masks of ones
-    TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
-    SUPERVISE_MASKS: bool = True      # the statistics head's pooled power trains the masks
+    SUPERVISE_MASKS: bool = True      # the statistics head's pooled features train the masks
     RATE_TOLERANCE_BPM: float = 0.0   # a sample whose estimated rate is further than this
                                       # from its label rate skips the stages after the estimator
+    RATE_ESTIMATOR: str = SPECTRAL_RATE   # what reads the heart rate: the model's own
+                                          # spectral estimator, or the NAME of a
+                                          # single-trace architecture to read it off
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
         other = [t for t in interface.TRACES if not is_cardiac(t)]
         if other:
             raise ConfigError(
-                f"{where}: CardioConv reads the clip at the harmonics of the heart "
+                f"{where}: {self.NAME} reads the clip at the harmonics of the heart "
                 f"rate, so it predicts cardiac traces only; TRACES has {other}")
         if self.RATE_TOLERANCE_BPM <= 0:
             raise ConfigError(
                 f"{where}: RATE_TOLERANCE_BPM must be positive, got {self.RATE_TOLERANCE_BPM}")
+        estimators = (SPECTRAL_RATE, *rate_architectures())
+        if self.RATE_ESTIMATOR not in estimators:
+            raise ConfigError(
+                f"{where}: RATE_ESTIMATOR must be one of {list(estimators)}, got "
+                f"{self.RATE_ESTIMATOR!r}")
+
+
+@dataclass
+class CardioConvConfig(CardioHydraConfig):
+    TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
 
 
 #: ``NAME`` -> the dataclass its section is parsed into. One line per
-#: architecture; its builder is the matching line of ``src.models.MODEL_BUILDERS``.
+#: architecture; what builds it is the matching line of ``src.models.SINGLE_TRACE``
+#: or, for a multi-trace one, of ``MODEL_BUILDERS``.
 MODEL_CONFIGS = {
     "CardioConv": CardioConvConfig,
+    "CardioHydra": CardioHydraConfig,
     "DeepPhys": ModelConfig,
     "EfficientPhys": TemporalShiftConfig,
     "FactorizePhys": FactorizePhysConfig,
@@ -177,6 +195,13 @@ MODEL_CONFIGS = {
     "TSCAN": TemporalShiftConfig,
     "iBVPNet": ModelConfig,
 }
+
+
+def rate_architectures() -> tuple:
+    """The architectures a ``RATE_ESTIMATOR`` may name: every single-trace
+    one, which is every one without a rate estimator of its own."""
+    return tuple(name for name, cls in MODEL_CONFIGS.items()
+                 if not issubclass(cls, CardioHydraConfig))
 
 
 def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):

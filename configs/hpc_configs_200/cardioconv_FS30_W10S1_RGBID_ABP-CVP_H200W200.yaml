@@ -6,6 +6,7 @@ MODEL:
   SUPERVISE_MASKS: true
   RATE_TOLERANCE_BPM: 6.0        # training gate on the learned heart rate: the
                                  # evaluation's SNR half-width, inside the 10 bpm wavelet buffer
+  RATE_ESTIMATOR: Spectral       # Spectral, or a single-trace model's NAME (FactorizePhys, ...)
   REGULARISATION:                # the mask priors, and the rate estimator's terms
     SPARSITY: 0.022
     PULSATILITY_TV: 0.44

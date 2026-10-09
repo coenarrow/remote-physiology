@@ -26,6 +26,12 @@
 #                                                   whose learned heart rate is further
 #                                                   than this from its label rate skips
 #                                                   the stages after the estimator
+#                          RATE_ESTIMATOR: <string>  what reads the heart rate:
+#                                                   Spectral (the model's own), or the
+#                                                   NAME of any single-trace model below,
+#                                                   one copy of which predicts a waveform
+#                                                   the rate is read off
+#   CardioHydra            CardioConv's, without TRACE_INDEPENDENT
 #   FactorizePhys          FSAM: <bool>              the factorized attention
 #                                                   module; false is the paper's ablation
 # One key is optional for every NAME and is normally left out:
@@ -36,10 +42,12 @@
 #                                                 means none. A term left out is
 #                                                 off, never zeroed. The terms a
 #                                                 backbone has are its REGULARISERS
-#                                                 (CardioConv's mask priors and rate
-#                                                 terms; no other model has any).
+#                                                 (CardioConv's and CardioHydra's mask
+#                                                 priors and rate terms, RATE_WAVEFORM
+#                                                 for a RATE_ESTIMATOR network; no other
+#                                                 model has any).
 MODEL:
-  NAME: <string>                 # CardioConv | DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
+  NAME: <string>                 # CardioConv | CardioHydra | DeepPhys | EfficientPhys | FactorizePhys | PhysFormer |
                                  # PhysMamba | PhysNet | RhythmFormer | TSCAN | iBVPNet
 
 # What every sample looks like when it reaches the model, and the loss. Every

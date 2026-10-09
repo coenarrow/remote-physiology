@@ -5,7 +5,9 @@ heart rate and differ in phase, so the clip is taken to the wavelet domain at
 the harmonics of the heart rate and read there:
 
 1. :class:`~neural_methods.model.cardioconv.rate_estimator.RateEstimator`
-   reads the heart rate off a learned fusion of the channels' spectra;
+   reads the heart rate off a learned fusion of the channels' spectra, or
+   :class:`~neural_methods.model.cardioconv.waveform_rate_estimator.WaveformRateEstimator`
+   reads it off the waveform of a single-trace network (``RATE_ESTIMATOR``);
 2. :class:`~neural_methods.model.cardioconv.wavelet_transformer.WaveletTransformer`
    gives the complex wavelet field of every pixel at the harmonics of that
    rate, in closed form, so the rate receives the waveform loss's gradient
@@ -30,8 +32,11 @@ names.
 
 **The rate is learned, and training gates on it.** The wrapper hands the
 model, in training mode only, the rate of each sample's fused cardiac
-labels (``src.models.label_rate``). The estimator's two terms are computed
-against it, and a sample whose estimate is more than ``rate_tolerance_bpm``
+traces, the ECG among them (``src.inputs.window_rate``), and one waveform
+fused from the same traces that beats at it (``src.inputs.window_waveform``).
+The estimator's terms are computed against them: ``rate`` and ``rate_error``
+against the rate, and ``rate_waveform``, which only the waveform estimator
+has, against the waveform. A sample whose estimate is more than ``rate_tolerance_bpm``
 from it does not go through the bank or anything after: its output is zero
 and ``sample_mask`` tells the wrapper to mask it out of the loss. Until the
 estimator is close, the field would be noise and the masks would learn
@@ -42,7 +47,7 @@ Differences from the CardioHydra repository's CardioConv, all asked by the
 contract: the batch dict and its per-channel dicts are one stacked tensor,
 every channel still processed on its own; the stages' supervised losses are
 the interface's ``LOSS`` on the output, and only the label-free mask priors
-stay, as ``REGULARISERS``, beside the estimator's two terms; the statistics
+stay, as ``REGULARISERS``, beside the estimator's terms; the statistics
 head's min and max outputs are gone (the ``MAX`` and ``MIN`` loss components
 supervise the waveform's own), its mean is the single-bias readout the
 trainer seeds, and its spread is relative to the mean instead of seeded from
@@ -66,6 +71,7 @@ from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
 from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
 from neural_methods.model.cardioconv.utils import shrink
+from neural_methods.model.cardioconv.waveform_rate_estimator import WaveformRateEstimator
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
 from neural_methods.model._shared_modules.utils import require_min_frame
 
@@ -86,7 +92,7 @@ MIN_FRAME = 3 * DOWNSCALE
 PULSATILITY_PRIORS = ("sparsity", "pulsatility_tv", "pulsatility_smoothness")
 PHASE_PRIORS = ("harmonic_coherence", "spatial_coherence", "temporal_consistency",
                 "phase_tv", "phase_smoothness")
-RATE_TERMS = ("rate", "rate_error")
+RATE_TERMS = ("rate", "rate_error", "rate_waveform")
 
 
 class CardioConv(nn.Module):
@@ -95,7 +101,8 @@ class CardioConv(nn.Module):
 
     def __init__(self, in_channels: int, traces: tuple, fs: float, pulsatility_masker: bool = True,
                  phase_masker: bool = True, trace_independent: bool = True,
-                 supervise_masks: bool = True, rate_tolerance_bpm: float = 6.0):
+                 supervise_masks: bool = True, rate_tolerance_bpm: float = 6.0,
+                 rate_network: nn.Module = None):
         """Definition of CardioConv.
 
         Args:
@@ -111,13 +118,17 @@ class CardioConv(nn.Module):
           rate_tolerance_bpm: in training, a sample whose estimated rate is
             further than this from its target skips everything after the
             estimator. Must be inside ``BUFFER_BPM``.
+          rate_network: one copy of a single-trace architecture to read the
+            rate off (``WaveformRateEstimator``); ``None`` is the spectral
+            ``RateEstimator``.
         """
         super().__init__()
         self.traces = tuple(traces)
         self.fs = fs
         self.rate_tolerance_bpm = rate_tolerance_bpm
         n_traces = len(self.traces)
-        self.rate_estimator = RateEstimator(in_channels, fs)
+        self.rate_estimator = (RateEstimator(in_channels, fs) if rate_network is None
+                               else WaveformRateEstimator(rate_network, fs))
         # The bank's pad covers the slowest kernel the estimator can ask for.
         self.wavelet_transformer = WaveletTransformer(
             fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, min_bpm=float(self.rate_estimator.bins[0]))
@@ -137,14 +148,16 @@ class CardioConv(nn.Module):
     def regularisers(self) -> dict:
         return self._regularisers
 
-    def forward(self, video: torch.Tensor, target_rate: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, video: torch.Tensor, target_rate: torch.Tensor = None,
+                target_waveform: torch.Tensor = None) -> torch.Tensor:
         """``(B, C_in, T, H, W)`` raw clip, and in training the ``(B,)`` target
-        bpm (NaN where a sample has none) -> ``(B, S, T)``. Sets
-        ``sample_mask``: the samples whose output counts."""
+        bpm and the ``(B, T)`` waveform beating at it (NaN where a sample has
+        none) -> ``(B, S, T)``. Sets ``sample_mask``: the samples whose
+        output counts."""
         require_min_frame("CardioConv", MIN_FRAME, video.shape[-2], video.shape[-1])
         present = reduce(video.abs(), "b c t h w -> b c", "max") > 0
         small = shrink(video, DOWNSCALE)
-        rate, logits = self.rate_estimator(small, present)
+        rate, logits = self.rate_estimator(video, small, present)
         zero = small.new_zeros(())
 
         keep = 1.0                                # weight of the mask priors
@@ -165,6 +178,7 @@ class CardioConv(nn.Module):
                 run[torch.nan_to_num(error, nan=float("inf")).argmin()] = True
                 keep = 0.0
             terms = rate_terms(logits, rate, target_rate, self.rate_estimator.bins)
+            terms["rate_waveform"] = self.rate_estimator.waveform_term(target_waveform)
         self.sample_mask = passed
 
         index = run.nonzero().squeeze(1)
