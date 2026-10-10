@@ -92,15 +92,22 @@ def agreement(frames: dict) -> pd.DataFrame:
 def waveform_agreement(frames: dict) -> pd.DataFrame:
     """One row per signal and waveform metric: the repeated-measures
     statistics of the metric across measurements, the participant as the
-    subject. Descriptive only: a score is not a signed error, so ``s_corr``
-    is its corrected spread, not a limit of agreement, and no criterion
-    applies."""
+    subject, with the median and quartiles beside the mean because a few
+    participants skew the per-measurement distribution. Descriptive only: a
+    score is not a signed error, so ``s_corr`` is its corrected spread, not
+    a limit of agreement, and no criterion applies."""
     rows = []
     for sig, frame in frames.items():
         for metric in WAVEFORM_METRICS:
             scored = frame.dropna(subset=[metric])
             stats = repeated_measures(scored[metric], scored["participant"])
-            rows.append({"signal": sig, "metric": metric,
-                         **{("mean" if k == "mean_error" else k): v
-                            for k, v in stats.items()}})
+            values = scored[metric].to_numpy(dtype=np.float64)
+            q1, median, q3 = (np.percentile(values, (25, 50, 75)) if values.size
+                              else (_NAN, _NAN, _NAN))
+            row = {"signal": sig, "metric": metric}
+            for k, v in stats.items():
+                row["mean" if k == "mean_error" else k] = v
+                if k == "mean_error":
+                    row.update({"median": float(median), "q1": float(q1), "q3": float(q3)})
+            rows.append(row)
     return pd.DataFrame(rows)

@@ -11,18 +11,20 @@ evaluated, or the one ``--epoch`` names; it is never chosen by test error.
 Each trace of each recording and camera is cut into paired measurements of
 ``--measurement-duration`` seconds (a trailing one kept while within
 ``--measurement-tolerance`` of that). Per measurement the waveform metrics
-(lag-aware MAE and RMSE, Lin's concordance at its best lag) and the derived
+(lag-aware MAE and RMSE, Lin's concordance at its best lag and its two
+factors, Pearson's r and the bias correction C_b) and the derived
 parameters (CVP mean; ABP mean, systolic, diastolic; the heart rate of the
 spectrally fused cardiac traces) are scored, then pooled over all subjects
 with the ISO 81060-3 repeated-measures statistics: mean error, corrected SD,
-ICC and the number of independent measurements.
+ICC and the number of independent measurements. The pooled waveform table
+also carries each metric's median and interquartile range.
 
 Written to ``RUN_DIR/evaluation/``, replacing what was there::
 
     measurements/waveform_<SIGNAL>.csv   one row per measurement and signal
     measurements/<PARAMETER>.csv         one row per measurement and parameter
     tables/demographics_<SIGNAL>.csv     who each signal was measured on
-    tables/waveform_agreement.csv        the waveform metrics pooled
+    tables/waveform_agreement.csv        the waveform metrics pooled, with median/IQR
     tables/agreement.csv                 the derived parameters pooled
     figures/*.png                        best waveforms, Bland-Altman plots
 

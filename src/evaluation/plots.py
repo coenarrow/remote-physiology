@@ -18,7 +18,7 @@ import pandas as pd
 import seaborn as sns
 
 from src.evaluation.agreement import limits, repeated_measures
-from src.evaluation.measurements import PARAMETERS, WAVEFORM_METRICS, pairs_of
+from src.evaluation.measurements import PARAMETERS, pairs_of
 from src.evaluation.pooling import MEASUREMENT_KEY
 from src.signal_transforms import signal_unit
 
@@ -139,6 +139,10 @@ def bland_altman_figure(pairs: pd.DataFrame, stats: dict, limits: tuple, unit: s
 # ---------------------------------------------------------------------------
 #: The share of the figure width the side panel takes.
 PANEL_WIDTH = 0.24
+#: The waveform metrics a larger value is better for; the rest are errors.
+HIGHER_IS_BETTER = frozenset({"ccc", "r", "cb"})
+#: The waveform metrics a best-measurement figure is drawn for.
+BEST_WAVEFORM_METRICS = ("mae", "rmse", "ccc")
 
 
 def with_panel(figure, lines: list):
@@ -152,16 +156,16 @@ def with_panel(figure, lines: list):
 
 
 def best_waveform_figures(measurements: pd.DataFrame, frames: dict) -> dict:
-    """``{figure name: Figure}``: per signal, the measurement each waveform
-    metric rates best (lowest MAE or RMSE, highest CCC), drawn as its label
-    and prediction over time."""
+    """``{figure name: Figure}``: per signal, the measurement each metric in
+    :data:`BEST_WAVEFORM_METRICS` rates best (lowest MAE or RMSE, highest
+    CCC), drawn as its label and prediction over time."""
     figures = {}
     for sig, frame in frames.items():
-        for metric in WAVEFORM_METRICS:
+        for metric in BEST_WAVEFORM_METRICS:
             scored = frame.dropna(subset=[metric])
             if scored.empty:
                 continue
-            best = scored.loc[scored[metric].idxmax() if metric == "ccc"
+            best = scored.loc[scored[metric].idxmax() if metric in HIGHER_IS_BETTER
                               else scored[metric].idxmin()]
             where = (measurements["signal"] == sig)
             for name in MEASUREMENT_KEY:
@@ -174,6 +178,8 @@ def best_waveform_figures(measurements: pd.DataFrame, frames: dict) -> dict:
                 f"mae  {best['mae']:.2f}",
                 f"rmse {best['rmse']:.2f}",
                 f"ccc  {best['ccc']:.3f}",
+                f"r    {best['r']:.3f}",
+                f"cb   {best['cb']:.3f}",
                 f"lag  {best['lag']:.2f} s",
             ])
     return figures
