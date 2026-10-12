@@ -1,0 +1,105 @@
+Job ID: 42686, node k177
+CPUs on node: 48, usable here: 48
+held out: every participant
+experiment: ibvpnet on ['neckflix_hpc'], 50 fold(s) holding out neckflix_hpc ['1', '2', '3', '4', '5', '7', '8', '9', '10', '11', '12', '13', '14', '15', '17', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '43', '44', '45', '46', '47', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58'], 2 at a time, 2 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200
+fold 1/50: holding out neckflix_hpc 1 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.1_202610040218
+fold 2/50: holding out neckflix_hpc 2 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.2_202610040218
+fold 1/50: done in 5825s, final loss 2.696
+fold 3/50: holding out neckflix_hpc 3 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.3_202610040355
+fold 2/50: done in 6258s, final loss 2.547
+fold 4/50: holding out neckflix_hpc 4 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.4_202610040402
+fold 3/50: done in 5751s, final loss 2.549
+fold 5/50: holding out neckflix_hpc 5 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.5_202610040530
+fold 4/50: done in 7252s, final loss 2.645
+fold 6/50: holding out neckflix_hpc 7 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.7_202610040603
+fold 5/50: done in 5737s, final loss 2.653
+fold 7/50: holding out neckflix_hpc 8 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.8_202610040706
+fold 6/50: done in 6390s, final loss 2.663
+fold 8/50: holding out neckflix_hpc 9 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.9_202610040749
+fold 7/50: done in 6239s, final loss 2.663
+fold 9/50: holding out neckflix_hpc 10 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.10_202610040850
+fold 8/50: done in 9717s, final loss 2.611
+fold 10/50: holding out neckflix_hpc 11 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.11_202610041031
+fold 9/50: done in 6105s, final loss 2.696
+fold 11/50: holding out neckflix_hpc 12 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.12_202610041032
+fold 11/50: done in 6319s, final loss 2.724
+fold 12/50: holding out neckflix_hpc 13 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.13_202610041217
+fold 10/50: done in 7302s, final loss 2.655
+fold 13/50: holding out neckflix_hpc 14 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.14_202610041233
+fold 12/50: done in 6388s, final loss 2.616
+fold 14/50: holding out neckflix_hpc 15 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.15_202610041404
+fold 13/50: done in 12061s, final loss 2.658
+fold 15/50: holding out neckflix_hpc 17 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.17_202610041554
+fold 14/50: done in 7247s, final loss 2.646
+fold 16/50: holding out neckflix_hpc 22 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.22_202610041604
+fold 16/50: done in 6377s, final loss 2.687
+fold 17/50: holding out neckflix_hpc 23 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.23_202610041751
+fold 15/50: done in 9445s, final loss 2.6
+fold 18/50: holding out neckflix_hpc 24 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.24_202610041831
+fold 17/50: done in 6553s, final loss 2.625
+fold 19/50: holding out neckflix_hpc 25 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.25_202610041940
+fold 18/50: done in 6951s, final loss 2.648
+fold 20/50: holding out neckflix_hpc 26 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.26_202610042027
+fold 19/50: done in 5996s, final loss 2.594
+fold 21/50: holding out neckflix_hpc 27 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.27_202610042120
+fold 20/50: done in 7342s, final loss 2.558
+fold 22/50: holding out neckflix_hpc 28 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.28_202610042230
+fold 21/50: done in 6329s, final loss 2.615
+fold 23/50: holding out neckflix_hpc 29 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.29_202610042305
+fold 22/50: done in 7045s, final loss 2.625
+fold 24/50: holding out neckflix_hpc 30 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.30_202610050027
+fold 23/50: done in 5716s, final loss 2.598
+fold 25/50: holding out neckflix_hpc 31 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.31_202610050041
+fold 25/50: done in 6372s, final loss 2.607
+fold 26/50: holding out neckflix_hpc 32 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.32_202610050227
+fold 24/50: done in 7299s, final loss 2.607
+fold 27/50: holding out neckflix_hpc 33 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.33_202610050229
+fold 26/50: done in 6515s, final loss 2.439
+fold 28/50: holding out neckflix_hpc 34 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.34_202610050415
+fold 27/50: done in 6928s, final loss 2.553
+fold 29/50: holding out neckflix_hpc 35 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.35_202610050424
+fold 28/50: done in 6341s, final loss 2.616
+fold 30/50: holding out neckflix_hpc 36 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.36_202610050601
+fold 29/50: done in 7166s, final loss 2.642
+fold 31/50: holding out neckflix_hpc 37 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.37_202610050623
+fold 30/50: done in 6316s, final loss 2.542
+fold 32/50: holding out neckflix_hpc 38 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.38_202610050746
+fold 31/50: done in 6345s, final loss 2.455
+fold 33/50: holding out neckflix_hpc 39 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.39_202610050809
+fold 32/50: done in 6214s, final loss 2.585
+fold 34/50: holding out neckflix_hpc 40 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.40_202610050930
+fold 33/50: done in 6277s, final loss 2.594
+fold 35/50: holding out neckflix_hpc 41 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.41_202610050954
+fold 34/50: done in 6361s, final loss 2.54
+fold 36/50: holding out neckflix_hpc 43 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.43_202610051116
+fold 35/50: done in 7575s, final loss 2.56
+fold 37/50: holding out neckflix_hpc 44 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.44_202610051200
+fold 36/50: done in 6373s, final loss 2.625
+fold 38/50: holding out neckflix_hpc 45 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.45_202610051302
+fold 37/50: done in 7101s, final loss 2.706
+fold 39/50: holding out neckflix_hpc 46 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.46_202610051358
+fold 38/50: done in 6657s, final loss 2.507
+fold 40/50: holding out neckflix_hpc 47 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.47_202610051453
+fold 39/50: done in 7318s, final loss 2.541
+fold 41/50: holding out neckflix_hpc 49 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.49_202610051600
+fold 40/50: done in 6357s, final loss 2.705
+fold 42/50: holding out neckflix_hpc 50 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.50_202610051639
+fold 41/50: done in 7035s, final loss 2.573
+fold 43/50: holding out neckflix_hpc 51 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.51_202610051758
+fold 42/50: done in 6299s, final loss 2.599
+fold 44/50: holding out neckflix_hpc 52 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.52_202610051824
+fold 44/50: done in 5850s, final loss 2.583
+fold 45/50: holding out neckflix_hpc 53 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.53_202610052002
+fold 43/50: done in 7453s, final loss 2.557
+fold 46/50: holding out neckflix_hpc 54 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.54_202610052002
+fold 45/50: done in 6409s, final loss 2.596
+fold 47/50: holding out neckflix_hpc 55 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.55_202610052148
+fold 46/50: done in 6775s, final loss 2.636
+fold 48/50: holding out neckflix_hpc 56 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.56_202610052155
+fold 47/50: done in 6418s, final loss 2.628
+fold 49/50: holding out neckflix_hpc 57 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.57_202610052335
+fold 48/50: done in 10763s, final loss 2.62
+fold 50/50: holding out neckflix_hpc 58 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_ibvpnet_H200W200/IBVPNET_NECKFLIX_HPC.58_202610060054
+fold 49/50: done in 6285s, final loss 2.714
+fold 50/50: done in 7980s, final loss 2.522
+experiment: 50 fold(s) done

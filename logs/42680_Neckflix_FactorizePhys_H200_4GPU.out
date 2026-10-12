@@ -46,3 +46,60 @@ fold 19/50: done in 6509s, final loss 2.542
 fold 23/50: holding out neckflix_hpc 29 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.29_202609300645
 fold 20/50: done in 6813s, final loss 2.757
 fold 24/50: holding out neckflix_hpc 30 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.30_202609300657
+fold 21/50: done in 6967s, final loss 2.759
+fold 25/50: holding out neckflix_hpc 31 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.31_202609300821
+fold 22/50: done in 6596s, final loss 2.478
+fold 26/50: holding out neckflix_hpc 32 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.32_202609300827
+fold 23/50: done in 6312s, final loss 2.738
+fold 27/50: holding out neckflix_hpc 33 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.33_202609300831
+fold 24/50: done in 6711s, final loss 2.611
+fold 28/50: holding out neckflix_hpc 34 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.34_202609300849
+fold 25/50: done in 6780s, final loss 2.658
+fold 29/50: holding out neckflix_hpc 35 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.35_202609301014
+fold 26/50: done in 6934s, final loss 2.726
+fold 30/50: holding out neckflix_hpc 36 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.36_202609301022
+fold 27/50: done in 6810s, final loss 2.547
+fold 31/50: holding out neckflix_hpc 37 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.37_202609301024
+fold 28/50: done in 7000s, final loss 2.719
+fold 32/50: holding out neckflix_hpc 38 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.38_202609301046
+fold 29/50: done in 6988s, final loss 2.738
+fold 33/50: holding out neckflix_hpc 39 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.39_202609301210
+fold 31/50: done in 6413s, final loss 2.303
+fold 34/50: holding out neckflix_hpc 40 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.40_202609301211
+fold 30/50: done in 6556s, final loss 2.77
+fold 35/50: holding out neckflix_hpc 41 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.41_202609301212
+fold 32/50: done in 6889s, final loss 2.27
+fold 36/50: holding out neckflix_hpc 43 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.43_202609301241
+fold 33/50: done in 6241s, final loss 2.42
+fold 37/50: holding out neckflix_hpc 44 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.44_202609301354
+fold 35/50: done in 6754s, final loss 2.728
+fold 38/50: holding out neckflix_hpc 45 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.45_202609301404
+fold 34/50: done in 6893s, final loss 2.387
+fold 39/50: holding out neckflix_hpc 46 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.46_202609301406
+fold 36/50: done in 7099s, final loss 2.546
+fold 40/50: holding out neckflix_hpc 47 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.47_202609301439
+fold 37/50: done in 6865s, final loss 2.418
+fold 41/50: holding out neckflix_hpc 49 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.49_202609301549
+fold 39/50: done in 6858s, final loss 2.367
+fold 42/50: holding out neckflix_hpc 50 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.50_202609301600
+fold 38/50: done in 7112s, final loss 2.713
+fold 43/50: holding out neckflix_hpc 51 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.51_202609301603
+fold 40/50: done in 6854s, final loss 2.499
+fold 44/50: holding out neckflix_hpc 52 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.52_202609301633
+fold 41/50: done in 7057s, final loss 2.725
+fold 45/50: holding out neckflix_hpc 53 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.53_202609301746
+fold 42/50: done in 6789s, final loss 2.492
+fold 46/50: holding out neckflix_hpc 54 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.54_202609301753
+fold 43/50: done in 6704s, final loss 2.463
+fold 47/50: holding out neckflix_hpc 55 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.55_202609301755
+fold 44/50: done in 6601s, final loss 2.762
+fold 48/50: holding out neckflix_hpc 56 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.56_202609301823
+fold 46/50: done in 6460s, final loss 2.773
+fold 49/50: holding out neckflix_hpc 57 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.57_202609301941
+fold 45/50: done in 7084s, final loss 2.684
+fold 50/50: holding out neckflix_hpc 58 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_factorizephys_H200W200/FACTORIZEPHYS_NECKFLIX_HPC.58_202609301944
+fold 47/50: done in 6796s, final loss 2.31
+fold 48/50: done in 9055s, final loss 2.752
+fold 49/50: done in 5404s, final loss 2.75
+fold 50/50: done in 5348s, final loss 2.452
+experiment: 50 fold(s) done

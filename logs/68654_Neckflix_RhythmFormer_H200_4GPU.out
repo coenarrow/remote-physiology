@@ -1,0 +1,105 @@
+Job ID: 68654, node k177
+CPUs on node: 48, usable here: 48
+held out: every participant
+experiment: rhythmformer on ['neckflix_hpc'], 50 fold(s) holding out neckflix_hpc ['1', '2', '3', '4', '5', '7', '8', '9', '10', '11', '12', '13', '14', '15', '17', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '43', '44', '45', '46', '47', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58'], 2 at a time, 2 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200
+fold 1/50: holding out neckflix_hpc 1 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.1_202610071135
+fold 2/50: holding out neckflix_hpc 2 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.2_202610071135
+fold 1/50: done in 5796s, final loss 2.481
+fold 3/50: holding out neckflix_hpc 3 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.3_202610071312
+fold 2/50: done in 6854s, final loss 2.476
+fold 4/50: holding out neckflix_hpc 4 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.4_202610071329
+fold 3/50: done in 5694s, final loss 2.447
+fold 5/50: holding out neckflix_hpc 5 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.5_202610071447
+fold 4/50: done in 7888s, final loss 2.414
+fold 6/50: holding out neckflix_hpc 7 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.7_202610071541
+fold 5/50: done in 5761s, final loss 2.424
+fold 7/50: holding out neckflix_hpc 8 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.8_202610071623
+fold 6/50: done in 7388s, final loss 2.447
+fold 8/50: holding out neckflix_hpc 9 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.9_202610071744
+fold 7/50: done in 6223s, final loss 2.454
+fold 9/50: holding out neckflix_hpc 10 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.10_202610071806
+fold 9/50: done in 6103s, final loss 2.478
+fold 10/50: holding out neckflix_hpc 11 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.11_202610071948
+fold 8/50: done in 10105s, final loss 2.456
+fold 11/50: holding out neckflix_hpc 12 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.12_202610072032
+fold 10/50: done in 6113s, final loss 2.476
+fold 12/50: holding out neckflix_hpc 13 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.13_202610072130
+fold 11/50: done in 7874s, final loss 2.458
+fold 13/50: holding out neckflix_hpc 14 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.14_202610072244
+fold 12/50: done in 6250s, final loss 2.459
+fold 14/50: holding out neckflix_hpc 15 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.15_202610072314
+fold 14/50: done in 7099s, final loss 2.487
+fold 15/50: holding out neckflix_hpc 17 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.17_202610080112
+fold 13/50: done in 11867s, final loss 2.545
+fold 16/50: holding out neckflix_hpc 22 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.22_202610080201
+fold 15/50: done in 7854s, final loss 2.459
+fold 17/50: holding out neckflix_hpc 23 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.23_202610080323
+fold 16/50: done in 7836s, final loss 2.469
+fold 18/50: holding out neckflix_hpc 24 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.24_202610080412
+fold 17/50: done in 6510s, final loss 2.451
+fold 19/50: holding out neckflix_hpc 25 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.25_202610080512
+fold 18/50: done in 7724s, final loss 2.451
+fold 20/50: holding out neckflix_hpc 26 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.26_202610080621
+fold 19/50: done in 6104s, final loss 2.478
+fold 21/50: holding out neckflix_hpc 27 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.27_202610080653
+fold 20/50: done in 8238s, final loss 2.447
+fold 22/50: holding out neckflix_hpc 28 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.28_202610080838
+fold 21/50: done in 6575s, final loss 2.519
+fold 23/50: holding out neckflix_hpc 29 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.29_202610080843
+fold 23/50: done in 5844s, final loss 2.447
+fold 24/50: holding out neckflix_hpc 30 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.30_202610081021
+fold 22/50: done in 7673s, final loss 2.388
+fold 25/50: holding out neckflix_hpc 31 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.31_202610081046
+fold 24/50: done in 6260s, final loss 2.463
+fold 26/50: holding out neckflix_hpc 32 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.32_202610081205
+fold 25/50: done in 7898s, final loss 2.498
+fold 27/50: holding out neckflix_hpc 33 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.33_202610081258
+fold 26/50: done in 6734s, final loss 2.388
+fold 28/50: holding out neckflix_hpc 34 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.34_202610081357
+fold 27/50: done in 7890s, final loss 2.428
+fold 29/50: holding out neckflix_hpc 35 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.35_202610081509
+fold 28/50: done in 6289s, final loss 2.473
+fold 30/50: holding out neckflix_hpc 36 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.36_202610081542
+fold 29/50: done in 7819s, final loss 2.48
+fold 31/50: holding out neckflix_hpc 37 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.37_202610081719
+fold 30/50: done in 6226s, final loss 2.273
+fold 32/50: holding out neckflix_hpc 38 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.38_202610081726
+fold 32/50: done in 6434s, final loss 2.477
+fold 33/50: holding out neckflix_hpc 39 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.39_202610081913
+fold 31/50: done in 7315s, final loss 2.477
+fold 34/50: holding out neckflix_hpc 40 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.40_202610081921
+fold 33/50: done in 5781s, final loss 2.426
+fold 35/50: holding out neckflix_hpc 41 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.41_202610082049
+fold 34/50: done in 7919s, final loss 2.464
+fold 36/50: holding out neckflix_hpc 43 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.43_202610082133
+fold 35/50: done in 6379s, final loss 2.379
+fold 37/50: holding out neckflix_hpc 44 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.44_202610082236
+fold 36/50: done in 8388s, final loss 2.474
+fold 38/50: holding out neckflix_hpc 45 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.45_202610082353
+fold 37/50: done in 6839s, final loss 2.466
+fold 39/50: holding out neckflix_hpc 46 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.46_202610090030
+fold 38/50: done in 8874s, final loss 2.411
+fold 40/50: holding out neckflix_hpc 47 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.47_202610090221
+fold 39/50: done in 6980s, final loss 2.465
+fold 41/50: holding out neckflix_hpc 49 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.49_202610090226
+fold 41/50: done in 6558s, final loss 2.45
+fold 42/50: holding out neckflix_hpc 50 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.50_202610090415
+fold 40/50: done in 8122s, final loss 2.397
+fold 43/50: holding out neckflix_hpc 51 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.51_202610090436
+fold 42/50: done in 6272s, final loss 2.464
+fold 44/50: holding out neckflix_hpc 52 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.52_202610090600
+fold 43/50: done in 7930s, final loss 2.466
+fold 45/50: holding out neckflix_hpc 53 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.53_202610090649
+fold 44/50: done in 5746s, final loss 2.439
+fold 46/50: holding out neckflix_hpc 54 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.54_202610090736
+fold 45/50: done in 8137s, final loss 2.509
+fold 47/50: holding out neckflix_hpc 55 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.55_202610090904
+fold 46/50: done in 5892s, final loss 2.427
+fold 48/50: holding out neckflix_hpc 56 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.56_202610090914
+fold 47/50: done in 8205s, final loss 2.449
+fold 49/50: holding out neckflix_hpc 57 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.57_202610091121
+fold 48/50: done in 8971s, final loss 2.423
+fold 50/50: holding out neckflix_hpc 58 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_rhythmformer_H200W200/RHYTHMFORMER_NECKFLIX_HPC.58_202610091143
+fold 50/50: done in 6333s, final loss 2.498
+fold 49/50: done in 7755s, final loss 2.451
+experiment: 50 fold(s) done
