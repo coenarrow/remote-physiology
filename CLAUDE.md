@@ -24,11 +24,6 @@ writing a parallel copy beside it; a second implementation of anything is a
 bug in the first one's design. This principle is why the per-model and
 per-dataset recipes below are short — keep them that way.
 
-## Overhaul In Progress
-
-The repo is mid-overhaul from the upstream single-signal design to the
-multi-signal contract.
-
 ## Cross-Cutting Rules
 
 - **Dependencies go through `uv add`, never pip.** `pyproject.toml` + `uv.lock`

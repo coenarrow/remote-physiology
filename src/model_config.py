@@ -108,29 +108,31 @@ def normalise_regularisation(weights, where: str) -> dict:
     return out
 
 
+def _require_positive(where: str, key: str, value) -> None:
+    """A switch that is a size or a rate: positive, or refused by name."""
+    if value <= 0:
+        raise ConfigError(f"{where}: {key} must be positive, got {value}")
+
+
 @dataclass
 class TemporalShiftConfig(ModelConfig):
     """EfficientPhys and TS-CAN: the segment length the temporal shift shifts within."""
-    FRAME_DEPTH: int = 0
+    FRAME_DEPTH: int = 10         # the paper's
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
-        if self.FRAME_DEPTH <= 0:
-            raise ConfigError(
-                f"{where}: FRAME_DEPTH must be positive, got {self.FRAME_DEPTH}")
+        _require_positive(where, "FRAME_DEPTH", self.FRAME_DEPTH)
 
 
 @dataclass
 class PhysMambaConfig(ModelConfig):
     """PhysMamba, PhysMamba2 and PhysMamba3: the Mamba layers' learning rate as
     a multiple of the recipe's; 1 is the paper."""
-    MAMBA_LR_SCALE: float = 0.0
+    MAMBA_LR_SCALE: float = 1.0
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
-        if self.MAMBA_LR_SCALE <= 0:
-            raise ConfigError(
-                f"{where}: MAMBA_LR_SCALE must be positive, got {self.MAMBA_LR_SCALE}")
+        _require_positive(where, "MAMBA_LR_SCALE", self.MAMBA_LR_SCALE)
 
 
 @dataclass
@@ -138,27 +140,66 @@ class FactorizePhysConfig(ModelConfig):
     FSAM: bool = True             # run the factorized attention module. For ablation testing
 
 
+#: ``RATE_ESTIMATOR``: CardioConv's and CardioHydra's own spectral estimator,
+#: the alternative to the NAME of a single-trace architecture.
+SPECTRAL_RATE = "Spectral"
+
+
 @dataclass
-class CardioConvConfig(ModelConfig):
-    """CardioConv's ablations; every one is ``True`` in the model as designed."""
-    PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a mask of ones
+class CardioBaseConfig(ModelConfig):
+    """What CardioConv and CardioHydra share: their ablations (every one
+    ``True`` in the model as designed), the training gate, the rate
+    estimator and the shrink. Each adds one key of its own below."""
+    PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a uniform one
     PHASE_MASKER: bool = True         # learn the per-trace masks; false is masks of ones
-    TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
-    SUPERVISE_MASKS: bool = True      # the statistics head's pooled power trains the masks
+    SUPERVISE_MASKS: bool = True      # the statistics head's pooled features train the masks
+    RATE_TOLERANCE_BPM: float = 0.0   # a sample whose estimated rate is further than this
+                                      # from its label rate skips the stages after the estimator
+    RATE_ESTIMATOR: str = "RhythmFormer"  # what reads the heart rate: the NAME of a
+                                          # single-trace architecture, or the model's own
+                                          # spectral estimator (SPECTRAL_RATE)
+    DOWNSCALE: int = 2                # area shrink of the frames before the wavelet; every
+                                      # mask lives on the shrunk grid; 1 is none
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
         other = [t for t in interface.TRACES if not is_cardiac(t)]
         if other:
             raise ConfigError(
-                f"{where}: CardioConv reads the clip at the harmonics of the heart "
+                f"{where}: {self.NAME} reads the clip at the harmonics of the heart "
                 f"rate, so it predicts cardiac traces only; TRACES has {other}")
+        _require_positive(where, "RATE_TOLERANCE_BPM", self.RATE_TOLERANCE_BPM)
+        if isinstance(self.DOWNSCALE, bool) or not isinstance(self.DOWNSCALE, int) \
+                or self.DOWNSCALE < 1:
+            raise ConfigError(
+                f"{where}: DOWNSCALE must be a whole number of at least 1, got {self.DOWNSCALE!r}")
+        estimators = (SPECTRAL_RATE, *rate_architectures())
+        if self.RATE_ESTIMATOR not in estimators:
+            raise ConfigError(
+                f"{where}: RATE_ESTIMATOR must be one of {list(estimators)}, got "
+                f"{self.RATE_ESTIMATOR!r}")
+
+
+@dataclass
+class CardioConvConfig(CardioBaseConfig):
+    TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
+
+
+@dataclass
+class CardioHydraConfig(CardioBaseConfig):
+    MAMBA_LR_SCALE: float = 0.1       # the trunks' Mamba blocks' rate as a multiple of TRAIN.LR
+
+    def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
+        _require_positive(where, "MAMBA_LR_SCALE", self.MAMBA_LR_SCALE)
 
 
 #: ``NAME`` -> the dataclass its section is parsed into. One line per
-#: architecture; its builder is the matching line of ``src.models.MODEL_BUILDERS``.
+#: architecture; what builds it is the matching line of ``src.models.SINGLE_TRACE``
+#: or, for a multi-trace one, of ``MODEL_BUILDERS``.
 MODEL_CONFIGS = {
     "CardioConv": CardioConvConfig,
+    "CardioHydra": CardioHydraConfig,
     "DeepPhys": ModelConfig,
     "EfficientPhys": TemporalShiftConfig,
     "FactorizePhys": FactorizePhysConfig,
@@ -171,6 +212,13 @@ MODEL_CONFIGS = {
     "TSCAN": TemporalShiftConfig,
     "iBVPNet": ModelConfig,
 }
+
+
+def rate_architectures() -> tuple:
+    """The architectures a ``RATE_ESTIMATOR`` may name: every single-trace
+    one, which is every one without a rate estimator of its own."""
+    return tuple(name for name, cls in MODEL_CONFIGS.items()
+                 if not issubclass(cls, CardioBaseConfig))
 
 
 def parse_model_config(mapping: dict, interface: InterfaceConfig, where: str):

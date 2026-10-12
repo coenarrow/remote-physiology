@@ -336,7 +336,7 @@ through) and refuses a mismatched `WINDOW_SECONDS` rather than truncating.
 ### A multi-trace architecture
 
 An architecture that was designed from the start to predict several traces
-(CardioConv is the first) is built once rather than copied. Everything above
+(CardioConv was the first, CardioHydra the second) is built once rather than copied. Everything above
 holds for it — the package layout, the raw clip in, the input normalisation
 as its own first stage, any frame size and window length, the house rules,
 no loss of its own — except where the text says "one trace":
@@ -362,7 +362,10 @@ network whose traces never meet is a single-trace network and is copied.
 - **`regularisers()`** returns `{trace: {term: () tensor}}`, every declared
   term under every trace. A term that belongs to one trace (a mask prior on
   that trace's mask) goes under it; a term the traces share goes, identical,
-  under each — the total is the mean over traces, so it counts once.
+  under each — the total is the mean over traces, so it counts once. A term
+  is usually label-free; it may instead be supervised by a target the
+  wrapper supplies, as CardioConv's rate terms are by the batch's `heart_rate` and
+  `rate_waveform`, in training mode only (`MultiTraceModel`'s docstring has the contract).
 - **The builder** wraps the one network directly instead of making copies:
 
   ```python
@@ -377,13 +380,6 @@ network whose traces never meet is a single-trace network and is copied.
   pressure traces, and its README command runs on Neckflix: the "nothing
   Neckflix-specific" rule is about the rPPG-Toolbox models, whose papers
   never saw it.
-
-One thing in CardioConv is a stopgap and not part of the form: it declares
-`NEEDS_HEART_RATE`, and the wrapper then passes it `heart_rate`, read from
-the label by `label_heart_rate` in [`src/models.py`](../src/models.py). That
-is label leakage at test time, stated in the model, its configs and the
-README, and it goes when CardioConv estimates the rate from the video. Do
-not build on it.
 
 This is the contract `MultiTraceModel` holds every backbone to. A
 single-trace architecture meets it through `PerTraceCopies`
@@ -438,23 +434,19 @@ config load refuses it.
 ### The builder
 
 ```python
-def _build_mynet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    width = len(interface.CHANNELS)
-    return _multi_trace(lambda: mynet.MyNet(in_channels=width), interface, cfg)
+def _make_mynet(cfg: ModelConfig, interface: InterfaceConfig) -> nn.Module:
+    return mynet.MyNet(in_channels=len(interface.CHANNELS))
 ```
 
-Inputs: the loaded config and the loaded interface. Output: a
-`MultiTraceModel`. The builder is where every width is derived and where any
-interface requirement beyond the config's is enforced (DeepPhys refuses an
-interface with no `RESIZE` here, because its dense layer is sized from the
-frame; the pooling backbones refuse a frame below `MIN_FRAME`).
-`_multi_trace` fills in the wrapper's arguments:
-
-| Argument | Meaning |
-| ---------- | --------- |
-| `make_copy` | zero-argument callable returning one fresh backbone; called once per trace |
-| `channels` | `interface.CHANNELS`, the order the channel axis is stacked in; `C_in = len(channels)` |
-| `traces` | `interface.TRACES`, the order copies are made and predictions keyed in |
+Inputs: the loaded config and the loaded interface. Output: one fresh copy
+of the network. It is where every width is derived and where any interface
+requirement beyond the config's is enforced (DeepPhys refuses an interface
+with no `RESIZE` here, because its dense layer is sized from the frame; the
+pooling backbones refuse a frame below `MIN_FRAME`). The shared
+`_build_single_trace` calls it once per entry of `interface.TRACES` and wraps
+the copies as a `MultiTraceModel`; CardioConv and CardioHydra call it once
+for the network their `RATE_ESTIMATOR` names, with the config's defaults, so
+a config class's defaults are the paper's switches.
 
 ### The two registry lines
 
@@ -468,9 +460,9 @@ MODEL_CONFIGS = {
 }
 
 # src/models.py
-MODEL_BUILDERS = {
-    "DeepPhys": _build_deepphys,
-    "MyNet": _build_mynet,
+SINGLE_TRACE = {
+    "DeepPhys": _make_deepphys,
+    "MyNet": _make_mynet,
 }
 ```
 

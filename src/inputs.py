@@ -25,6 +25,13 @@ Per sample, in this order — preprocess what the store has, then pad:
 4. pad every demanded channel or trace the store lacks with zeros and a
    False mask.
 
+The window's heart rate is read here too (:func:`window_rate`), from the
+interface's cardiac traces and ``RATE_ONLY_TRACES`` (the ECG), whichever
+the store carries, and with it one waveform that beats at that rate, fused
+from the same traces (:func:`window_waveform`). They are the targets a
+backbone that learns the rate trains against; the ECG itself never leaves
+this module.
+
 Frames are emitted raw: every backbone normalises its own input
 (``neural_methods.model._shared_modules``), so the dataset never standardises or
 differences a frame.
@@ -36,6 +43,8 @@ Emitted (``default_collate`` prepends the batch axis)::
      "label_stats":  {sig: {stat: () float32}},         # physical units
      "channel_mask": {ch:  () bool},
      "label_mask":   {sig: () bool},
+     "heart_rate":   () float32,                        # bpm, NaN without a cardiac trace
+     "rate_waveform": (T,) float32,                     # standardised, NaN likewise
      "metadata":     {"dataset", "recording", "participant", "perspective": str,
                       "start_frame": int}}
 
@@ -53,11 +62,12 @@ import numpy as np
 import torch
 import zarr
 
+from src.evaluation import rate
 from src.frame_transforms import resize_video
 from src.model_config import InterfaceConfig
 from src.signal_transforms import (
-    MODALITY_CHANNELS, STAT_NAMES, TRACE_KEYS, TRACE_KEYS_INVERSE, finite_stats,
-    normalise_label,
+    MODALITY_CHANNELS, RATE_ONLY_TRACES, STAT_NAMES, TRACE_KEYS, TRACE_KEYS_INVERSE,
+    finite_stats, is_cardiac, normalise_label,
 )
 
 MODES = ("random", "strided")
@@ -266,7 +276,7 @@ class WindowedDataset(torch.utils.data.Dataset):
                 frames[ch] = torch.zeros((self.interface.window_frames, *self._pad_hw(s)))
             channel_mask[ch] = torch.tensor(present)
 
-        labels, label_stats, label_mask = {}, {}, {}
+        labels, label_stats, label_mask, cardiac = {}, {}, {}, []
         for sig in self.interface.TRACES:
             copies = [self._trace(group[m], sig, start, end, s.plan) for m in s.traces.get(sig, [])]
             trace = torch.from_numpy(_finite_mean(copies)).float() if copies else None
@@ -276,15 +286,27 @@ class WindowedDataset(torch.utils.data.Dataset):
                 stats = finite_stats(trace)
                 normed = normalise_label(trace, stats, sig)
                 labels[sig] = torch.where(finite, normed, trace.new_zeros(()))
+                if is_cardiac(sig):
+                    cardiac.append(labels[sig].numpy())
             else:
                 labels[sig] = torch.zeros(self.interface.window_frames)
                 stats = {name: torch.zeros(()) for name in STAT_NAMES}
             label_stats[sig] = stats
             label_mask[sig] = torch.tensor(present)
+        for sig in RATE_ONLY_TRACES:
+            if sig in self.interface.TRACES:
+                continue
+            copies = [self._trace(group[m], sig, start, end, s.plan) for m in s.traces.get(sig, [])]
+            trace = _finite_mean(copies) if copies else None
+            if trace is not None and np.isfinite(trace).any():
+                cardiac.append(np.nan_to_num(trace - np.nanmean(trace)))
 
+        heart_rate = window_rate(cardiac, self.interface.FS)
         return {
             "frames": frames, "labels": labels, "label_stats": label_stats,
             "channel_mask": channel_mask, "label_mask": label_mask,
+            "heart_rate": torch.tensor(heart_rate),
+            "rate_waveform": window_waveform(cardiac, self.interface, heart_rate),
             "metadata": {"dataset": self.name, "recording": s.recording,
                          "participant": s.participant, "perspective": s.perspective,
                          "start_frame": s.plan.start_at_fs(start)},
@@ -307,6 +329,29 @@ class WindowedDataset(torch.utils.data.Dataset):
             return plan.take(sliced, axis=0)
         lo, hi = plan.offsets
         return sliced[lo] + (sliced[hi] - sliced[lo]) * plan.weights.astype(np.float64)
+
+
+def window_rate(traces: list[np.ndarray], fs: float) -> float:
+    """The heart rate of one window, in bpm, from its cardiac traces; NaN
+    when it has none or is too short to filter. The largest bin of the
+    traces' fused spectrum, read exactly as the evaluation reads a rate
+    (``src.evaluation.rate``), so the model trains towards the quantity it
+    is scored on."""
+    if not traces or len(traces[0]) < rate.MIN_FRAMES:
+        return float("nan")
+    spectra = [rate.spectrum(rate.clean(trace, fs), fs) for trace in traces]
+    freqs = spectra[0][0]
+    return rate.rate_of(freqs, rate.fuse(freqs, [power for _, power in spectra]))
+
+
+def window_waveform(traces: list[np.ndarray], interface: InterfaceConfig,
+                    heart_rate: float) -> torch.Tensor:
+    """``(T,)``: the window's cardiac traces fused into one waveform beating
+    at ``heart_rate`` (``src.evaluation.rate.fused_waveform``); NaN
+    throughout when the window has no cardiac trace or no rate."""
+    if not traces:
+        return torch.full((interface.window_frames,), float("nan"))
+    return torch.from_numpy(rate.fused_waveform(traces, interface.FS, heart_rate)).float()
 
 
 def _finite_mean(arrays: list[np.ndarray]) -> np.ndarray:

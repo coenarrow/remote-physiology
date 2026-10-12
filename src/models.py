@@ -16,12 +16,14 @@ several is built once. A model is a function from frames to predictions and
 nothing else — the loss is the trainer's.
 """
 
+import dataclasses
+
 import torch
 import torch.nn as nn
 
 from src.config import ConfigError
-from src.evaluation import rate
 from neural_methods.model.cardioconv import cardioconv
+from neural_methods.model.cardiohydra import cardiohydra
 from neural_methods.model.deepphys import deepphys
 from neural_methods.model.efficientphys import efficientphys
 from neural_methods.model.factorizephys import factorizephys
@@ -35,8 +37,8 @@ from neural_methods.model.rhythmformer import rhythmformer
 from neural_methods.model.tscan import tscan
 from neural_methods.model._shared_modules.utils import min_frame_message
 from src.model_config import (
-    CardioConvConfig, FactorizePhysConfig, InterfaceConfig, ModelConfig, PhysMambaConfig,
-    TemporalShiftConfig,
+    MODEL_CONFIGS, SPECTRAL_RATE, CardioBaseConfig, CardioConvConfig, CardioHydraConfig, FactorizePhysConfig,
+    InterfaceConfig, ModelConfig, PhysMambaConfig, ResizeConfig, TemporalShiftConfig,
 )
 
 
@@ -86,28 +88,6 @@ def _require_regularisers(cfg: ModelConfig, backbone: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 # The multi-trace model
 # ---------------------------------------------------------------------------
-def label_heart_rate(batch: dict, traces, fs: float) -> torch.Tensor:
-    """``(B,)`` bpm, read from each sample's first present trace, in traces order.
-
-    LABEL LEAKAGE, on purpose and for now: this hands a model the heart rate
-    of the very label it is scored against, at test time too. It exists for a
-    backbone that declares ``NEEDS_HEART_RATE`` (CardioConv) until that
-    backbone estimates the rate from the video itself, and it goes when that
-    does. The rate is the evaluation's own (``src.evaluation.rate``). A sample
-    with no trace present gets NaN, which the backbone clamps; its loss is
-    masked out anyway.
-    """
-    rates = []
-    for i in range(len(batch["labels"][traces[0]])):
-        found = next((t for t in traces if bool(batch["label_mask"][t][i])), None)
-        if found is None:
-            rates.append(float("nan"))
-            continue
-        trace = batch["labels"][found][i].detach().float().cpu().numpy()
-        rates.append(rate.rate_of(*rate.spectrum(rate.clean(trace, fs), fs)))
-    return torch.tensor(rates, dtype=torch.float32)
-
-
 class PerTraceCopies(nn.Module):
     """S complete copies of a single-trace architecture, as one multi-trace backbone.
 
@@ -172,8 +152,16 @@ class MultiTraceModel(nn.Module):
     ``output_layers()`` giving one activation-free readout per trace in the
     same order; one with regularisers also declares ``REGULARISERS`` and
     returns ``{trace: {term: () tensor}}`` from ``regularisers()`` after each
-    forward. Whatever preprocessing the published network was fed, the
-    backbone applies itself. An architecture designed to predict several
+    forward. A backbone that declares ``NEEDS_RATE_TARGET`` takes
+    ``forward(video, target_rate=None, target_waveform=None)`` and is handed,
+    in training mode only, each sample's heart rate as the dataset read it
+    off the store's cardiac traces and the waveform it fused from them
+    (``batch["heart_rate"]`` and ``batch["rate_waveform"]``,
+    ``src.inputs.window_rate`` and ``window_waveform``); one that sets a
+    ``sample_mask`` ``(B,)`` after its forward has that mask joined into
+    every trace's ``label_mask``, so a sample it chose not to predict is
+    out of the loss. Whatever preprocessing the published network was fed,
+    the backbone applies itself. An architecture designed to predict several
     traces is such a backbone as it stands; one designed for a single trace
     becomes one through :class:`PerTraceCopies`. ``C_in = len(channels)``:
     the interface's channels stacked in order. Channel and trace order is
@@ -215,14 +203,21 @@ class MultiTraceModel(nn.Module):
 
     def forward(self, batch: dict) -> dict:
         video = self.prepare_frames(batch)
-        if getattr(self.backbone, "NEEDS_HEART_RATE", False):
-            heart_rate = label_heart_rate(batch, self.traces, self.backbone.fs).to(video.device)
-            out = self.backbone(video, heart_rate=heart_rate)
+        if self.training and getattr(self.backbone, "NEEDS_RATE_TARGET", False):
+            out = self.backbone(video, target_rate=batch["heart_rate"].to(video.device),
+                                target_waveform=batch["rate_waveform"].to(video.device))
         else:
             out = self.forward_video(video)
         predictions = {trace: out[:, i] for i, trace in enumerate(self.traces)}
-        return {**batch, "predictions": predictions,
-                "regularisers": self.collect_regularisers()}
+        result = {**batch, "predictions": predictions,
+                  "regularisers": self.collect_regularisers()}
+        # A backbone that gates samples says which outputs count; the loss
+        # already masks a trace per sample, so the gate joins that mask.
+        sample_mask = getattr(self.backbone, "sample_mask", None)
+        if sample_mask is not None:
+            result["label_mask"] = {trace: mask & sample_mask
+                                    for trace, mask in batch["label_mask"].items()}
+        return result
 
     def collect_regularisers(self) -> dict:
         """``{trace: {term: () tensor}}``: every term the backbone declares in
@@ -260,116 +255,144 @@ def _wrap(backbone: nn.Module, interface: InterfaceConfig, cfg: ModelConfig) -> 
                            traces=interface.TRACES)
 
 
-def _multi_trace(make_copy, interface: InterfaceConfig, cfg: ModelConfig) -> MultiTraceModel:
+def _require_rate_tolerance(cfg: CardioBaseConfig, buffer_bpm: float) -> None:
+    if not cfg.RATE_TOLERANCE_BPM < buffer_bpm:
+        raise ConfigError(
+            f"{cfg.NAME}: RATE_TOLERANCE_BPM must be inside the wavelet buffer of "
+            f"{buffer_bpm:g} bpm either side of each harmonic, got "
+            f"{cfg.RATE_TOLERANCE_BPM:g}")
+
+
+# -- single-trace architectures: (model config, interface) -> one copy --------
+def _make_deepphys(cfg: ModelConfig, interface: InterfaceConfig) -> nn.Module:
+    size = _require_frame_size(interface, "DeepPhys")
+    return deepphys.DeepPhys(in_channels=len(interface.CHANNELS), img_size=size)
+
+
+def _make_efficientphys(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> nn.Module:
+    size = _require_frame_size(interface, "EfficientPhys")
+    return efficientphys.EfficientPhys(in_channels=len(interface.CHANNELS), img_size=size,
+                                       frame_depth=cfg.FRAME_DEPTH)
+
+
+def _make_factorizephys(cfg: FactorizePhysConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "FactorizePhys", factorizephys.MIN_FRAME)
+    return factorizephys.FactorizePhys(in_channels=len(interface.CHANNELS), use_fsam=cfg.FSAM)
+
+
+def _make_physformer(cfg: ModelConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "PhysFormer", physformer.MIN_FRAME)
+    return physformer.PhysFormer(in_channels=len(interface.CHANNELS))
+
+
+def _make_physmamba(cfg: PhysMambaConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "PhysMamba", physmamba.MIN_FRAME)
+    return physmamba.PhysMamba(in_channels=len(interface.CHANNELS),
+                               mamba_lr_scale=cfg.MAMBA_LR_SCALE)
+
+
+def _make_physmamba2(cfg: PhysMambaConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "PhysMamba2", physmamba2.MIN_FRAME)
+    return physmamba2.PhysMamba2(in_channels=len(interface.CHANNELS),
+                                 mamba_lr_scale=cfg.MAMBA_LR_SCALE)
+
+
+def _make_physmamba3(cfg: PhysMambaConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "PhysMamba3", physmamba3.MIN_FRAME)
+    return physmamba3.PhysMamba3(in_channels=len(interface.CHANNELS),
+                                 mamba_lr_scale=cfg.MAMBA_LR_SCALE)
+
+
+def _make_physnet(cfg: ModelConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "PhysNet", physnet.MIN_FRAME)
+    return physnet.PhysNet(in_channels=len(interface.CHANNELS))
+
+
+def _make_rhythmformer(cfg: ModelConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "RhythmFormer", rhythmformer.MIN_FRAME)
+    return rhythmformer.RhythmFormer(in_channels=len(interface.CHANNELS))
+
+
+def _make_tscan(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> nn.Module:
+    size = _require_frame_size(interface, "TSCAN")
+    return tscan.TSCAN(in_channels=len(interface.CHANNELS), img_size=size,
+                       frame_depth=cfg.FRAME_DEPTH)
+
+
+def _make_ibvpnet(cfg: ModelConfig, interface: InterfaceConfig) -> nn.Module:
+    _require_min_frame(interface, "iBVPNet", ibvpnet.MIN_FRAME)
+    return ibvpnet.IBVPNet(in_channels=len(interface.CHANNELS))
+
+
+#: ``NAME`` -> what makes one copy of a single-trace architecture. One line
+#: per architecture, matching its line in ``src.model_config.MODEL_CONFIGS``.
+SINGLE_TRACE = {
+    "DeepPhys": _make_deepphys,
+    "EfficientPhys": _make_efficientphys,
+    "FactorizePhys": _make_factorizephys,
+    "PhysFormer": _make_physformer,
+    "PhysMamba": _make_physmamba,
+    "PhysMamba2": _make_physmamba2,
+    "PhysMamba3": _make_physmamba3,
+    "PhysNet": _make_physnet,
+    "RhythmFormer": _make_rhythmformer,
+    "TSCAN": _make_tscan,
+    "iBVPNet": _make_ibvpnet,
+}
+
+
+def _build_single_trace(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
     """A single-trace architecture: one copy per trace."""
-    return _wrap(PerTraceCopies(make_copy, interface.TRACES), interface, cfg)
+    make = SINGLE_TRACE[cfg.NAME]
+    return _wrap(PerTraceCopies(lambda: make(cfg, interface), interface.TRACES), interface, cfg)
+
+
+# -- multi-trace architectures ------------------------------------------------
+def _rate_network(cfg: CardioBaseConfig, interface: InterfaceConfig) -> nn.Module | None:
+    """One copy of the architecture ``RATE_ESTIMATOR`` names, at its paper's
+    switches (its config's defaults), for the model to read the heart rate
+    off; ``None`` for the model's own spectral estimator. The copy is built
+    for the frame it will see, the interface's frame shrunk by ``DOWNSCALE``
+    (what the masks read too), so a dense layer is sized to it and a stem's
+    floor is checked against it."""
+    name = cfg.RATE_ESTIMATOR
+    if name == SPECTRAL_RATE:
+        return None
+    shrunk = dataclasses.replace(interface, RESIZE=ResizeConfig(      # 0 (no resize) stays 0
+        H=interface.RESIZE.H // cfg.DOWNSCALE, W=interface.RESIZE.W // cfg.DOWNSCALE))
+    return SINGLE_TRACE[name](MODEL_CONFIGS[name](NAME=name), shrunk)
 
 
 def _build_cardioconv(cfg: CardioConvConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "CardioConv", cardioconv.MIN_FRAME)
+    _require_min_frame(interface, "CardioConv", cardioconv.min_frame(cfg.DOWNSCALE))
+    _require_rate_tolerance(cfg, cardioconv.BUFFER_BPM)
     backbone = cardioconv.CardioConv(
         in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
         pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
-        trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS)
+        trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS,
+        rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM, downscale=cfg.DOWNSCALE,
+        rate_network=_rate_network(cfg, interface))
     return _wrap(backbone, interface, cfg)
 
 
-def _build_deepphys(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    size = _require_frame_size(interface, "DeepPhys")
-    width = len(interface.CHANNELS)
-    return _multi_trace(lambda: deepphys.DeepPhys(in_channels=width, img_size=size),
-                        interface, cfg)
+def _build_cardiohydra(cfg: CardioHydraConfig, interface: InterfaceConfig) -> MultiTraceModel:
+    _require_min_frame(interface, "CardioHydra", cardiohydra.min_frame(cfg.DOWNSCALE))
+    _require_rate_tolerance(cfg, cardiohydra.BUFFER_BPM)
+    backbone = cardiohydra.CardioHydra(
+        in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
+        pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
+        supervise_masks=cfg.SUPERVISE_MASKS, rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM,
+        downscale=cfg.DOWNSCALE, mamba_lr_scale=cfg.MAMBA_LR_SCALE,
+        rate_network=_rate_network(cfg, interface))
+    return _wrap(backbone, interface, cfg)
 
 
-def _build_efficientphys(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    size = _require_frame_size(interface, "EfficientPhys")
-    width = len(interface.CHANNELS)
-    return _multi_trace(
-        lambda: efficientphys.EfficientPhys(in_channels=width, img_size=size,
-                                            frame_depth=cfg.FRAME_DEPTH),
-        interface, cfg)
-
-
-def _build_factorizephys(cfg: FactorizePhysConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "FactorizePhys", factorizephys.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(
-        lambda: factorizephys.FactorizePhys(in_channels=width, use_fsam=cfg.FSAM),
-        interface, cfg)
-
-
-def _build_physformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "PhysFormer", physformer.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physformer.PhysFormer(in_channels=width), interface, cfg)
-
-
-def _build_physmamba(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "PhysMamba", physmamba.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(
-        lambda: physmamba.PhysMamba(in_channels=width, mamba_lr_scale=cfg.MAMBA_LR_SCALE),
-        interface, cfg)
-
-
-def _build_physmamba2(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "PhysMamba2", physmamba2.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(
-        lambda: physmamba2.PhysMamba2(in_channels=width, mamba_lr_scale=cfg.MAMBA_LR_SCALE),
-        interface, cfg)
-
-
-def _build_physmamba3(cfg: PhysMambaConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "PhysMamba3", physmamba3.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(
-        lambda: physmamba3.PhysMamba3(in_channels=width, mamba_lr_scale=cfg.MAMBA_LR_SCALE),
-        interface, cfg)
-
-
-def _build_physnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "PhysNet", physnet.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(lambda: physnet.PhysNet(in_channels=width), interface, cfg)
-
-
-def _build_rhythmformer(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "RhythmFormer", rhythmformer.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(lambda: rhythmformer.RhythmFormer(in_channels=width), interface, cfg)
-
-
-def _build_tscan(cfg: TemporalShiftConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    size = _require_frame_size(interface, "TSCAN")
-    width = len(interface.CHANNELS)
-    return _multi_trace(
-        lambda: tscan.TSCAN(in_channels=width, img_size=size,
-                            frame_depth=cfg.FRAME_DEPTH),
-        interface, cfg)
-
-
-def _build_ibvpnet(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "iBVPNet", ibvpnet.MIN_FRAME)
-    width = len(interface.CHANNELS)
-    return _multi_trace(lambda: ibvpnet.IBVPNet(in_channels=width), interface, cfg)
-
-
-#: ``NAME`` -> builder. One line per architecture, matching its line in
-#: ``src.model_config.MODEL_CONFIGS``.
+#: ``NAME`` -> builder: the multi-trace architectures' own, and one shared
+#: builder for every line of ``SINGLE_TRACE``.
 MODEL_BUILDERS = {
     "CardioConv": _build_cardioconv,
-    "DeepPhys": _build_deepphys,
-    "EfficientPhys": _build_efficientphys,
-    "FactorizePhys": _build_factorizephys,
-    "PhysFormer": _build_physformer,
-    "PhysMamba": _build_physmamba,
-    "PhysMamba2": _build_physmamba2,
-    "PhysMamba3": _build_physmamba3,
-    "PhysNet": _build_physnet,
-    "RhythmFormer": _build_rhythmformer,
-    "TSCAN": _build_tscan,
-    "iBVPNet": _build_ibvpnet,
+    "CardioHydra": _build_cardiohydra,
+    **dict.fromkeys(SINGLE_TRACE, _build_single_trace),
 }
 
 

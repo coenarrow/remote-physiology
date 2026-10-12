@@ -39,11 +39,13 @@ class StatisticsHead(nn.Module):
     output is the mixed waveform z-scored over the window, times the spread,
     plus the mean, which makes the mixer's own numeric scale irrelevant.
 
-    Mask mass is always read detached: its gradient could only say "make the
-    mask bigger", against the sparsity and total-variation priors. Pooled
-    power is normalised by the mask's area, so its gradient says "put the
-    mask on better pixels"; ``supervise_masks=False`` detaches that too and
-    leaves the head a read-only probe of the masks.
+    Mask mass is always read detached: its gradient could only say "give
+    this trace more of the pulsatile pixels", which is the phase masker's
+    softmax's to decide, not the level's. The heart rate is read detached
+    too: the rate network trains on its own terms. Pooled power is
+    normalised by the mask's area, so its gradient says "put the mask on
+    better pixels"; ``supervise_masks=False`` detaches that too and leaves
+    the head a read-only probe of the masks.
 
     Args:
       in_channels: video channels ``C``.
@@ -52,14 +54,16 @@ class StatisticsHead(nn.Module):
       hidden: width of each trace's hidden layer.
       supervise_masks: let the pooled-power path train the masks.
       relative_spread: the spread the head starts at, as a fraction of the mean.
+      n_extra: further features a model hands ``forward`` as ``extra``, already
+        conditioned (CardioHydra's pooled wave speed); CardioConv has none.
     """
 
     def __init__(self, in_channels: int, n_traces: int, n_harmonics: int, hidden: int = 64,
-                 supervise_masks: bool = True, relative_spread: float = 0.15):
+                 supervise_masks: bool = True, relative_spread: float = 0.15, n_extra: int = 0):
         super().__init__()
         self.n_harmonics = n_harmonics
         self.supervise_masks = supervise_masks
-        n_features = in_channels * (3 + n_traces * (n_harmonics + 1) + 1) + 1
+        n_features = in_channels * (3 + n_traces * (n_harmonics + 1) + 1) + 1 + n_extra
         self.trunks = nn.ModuleList(
             nn.Sequential(nn.Linear(n_features, hidden), nn.ReLU()) for _ in range(n_traces))
         self.means = nn.ModuleList(nn.Linear(hidden, 1) for _ in range(n_traces))
@@ -70,7 +74,8 @@ class StatisticsHead(nn.Module):
                 spread.weight.mul_(READOUT_WEIGHT_SCALE)
                 spread.bias.fill_(softplus_inverse(relative_spread))
 
-    def features(self, power, small, pulsatility, phase_masks, heart_rate, present) -> torch.Tensor:
+    def features(self, power, small, pulsatility, phase_masks, heart_rate, present,
+                 extra=None) -> torch.Tensor:
         """The ``(B, n_features)`` summary; absent channels contribute zeros."""
         here = rearrange(present.to(small.dtype), "b c -> b c 1")
         intensity = torch.stack([reduce(small, "b c t h w -> b c", kind)
@@ -78,7 +83,9 @@ class StatisticsHead(nn.Module):
         intensity = torch.log1p(intensity.clamp_min(0.0)) * here                      # (B, C, 3)
 
         weight = rearrange(pulsatility, "b c t h w -> b c t h w 1") * phase_masks      # (B, C, T, h, w, S)
-        mass = reduce(weight.detach(), "b c t h w s -> b c s", "mean") * here
+        # The pulsatility distribution sums to one per frame, so the mass is the
+        # share of the pulsatile pixels the trace claims, averaged over frames.
+        mass = reduce(weight.detach(), "b c t h w s -> b c s", "sum") / weight.shape[2] * here
         if not self.supervise_masks:
             weight = weight.detach()
         area = reduce(weight, "b c t h w s -> b c s 1", "sum").clamp_min(EPS)
@@ -86,20 +93,24 @@ class StatisticsHead(nn.Module):
         harmonics = reduce(pooled, "b c s (n j) -> b c s n", "mean", n=self.n_harmonics)
         harmonics = torch.log1p(harmonics) * rearrange(here, "b c 1 -> b c 1 1")
 
+        extras = [] if extra is None else [extra.to(small.dtype)]
         return torch.cat([
             rearrange(intensity, "b c f -> b (c f)"),
             rearrange(harmonics, "b c s n -> b (c s n)"),
             rearrange(mass, "b c s -> b (c s)"),
             rearrange(here, "b c 1 -> b c"),
-            rearrange(heart_rate.to(small.dtype), "b -> b 1") / 100.0,
+            rearrange(heart_rate.detach().to(small.dtype), "b -> b 1") / 100.0,   # a feature, not a path
+            *extras,
         ], dim=-1)
 
-    def forward(self, mixed, power, small, pulsatility, phase_masks, heart_rate, present) -> torch.Tensor:
+    def forward(self, mixed, power, small, pulsatility, phase_masks, heart_rate, present,
+                extra=None) -> torch.Tensor:
         """``(B, S, T)`` shape-only waveforms -> ``(B, S, T)`` in each trace's
         physical units. The rest are the stages' outputs: ``(B, C, T, h, w, K)``
         power, ``(B, C, T, h, w)`` shrunk clip and pulsatility mask,
-        ``(B, C, T, h, w, S)`` trace masks, ``(B,)`` bpm, ``(B, C)`` presence."""
-        features = self.features(power, small, pulsatility, phase_masks, heart_rate, present)
+        ``(B, C, T, h, w, S)`` trace masks, ``(B,)`` bpm, ``(B, C)`` presence,
+        and the ``(B, n_extra)`` extra features if the head was built with any."""
+        features = self.features(power, small, pulsatility, phase_masks, heart_rate, present, extra)
         hidden = [trunk(features) for trunk in self.trunks]
         mean = torch.cat([layer(h) for layer, h in zip(self.means, hidden)], dim=-1)          # (B, S)
         spread = torch.cat([layer(h) for layer, h in zip(self.spreads, hidden)], dim=-1)

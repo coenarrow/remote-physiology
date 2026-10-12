@@ -50,6 +50,7 @@ one it flags ``_lr_scale`` trains at that multiple of the recipe's rate.
 """
 
 import csv
+import math
 import time
 from pathlib import Path
 
@@ -75,6 +76,8 @@ DEFAULT_RUNS_DIR = REPO_ROOT / "runs"
 CHECKPOINT_NAME = "model.pt"
 LOSS_LOG_NAME = "losses.csv"
 CONFIG_NAME = "config.yaml"
+#: Steps a run may refuse for a non-finite loss or gradient before it stops.
+MAX_REFUSED_STEPS = 10
 
 #: The recipe's ``PRECISION`` -> autocast dtype (float32 = autocast off).
 PRECISION_DTYPES = {
@@ -267,6 +270,7 @@ class Trainer:
         self.scaler = torch.amp.GradScaler(
             self.device.type, enabled=self.dtype is torch.float16)
         self.epoch = 0                   # epochs finished; ``fit`` advances it
+        self.skipped = 0                 # steps refused for a non-finite loss or gradient
 
     # -- helpers ------------------------------------------------------------
     def _loader(self, dataset: Dataset, sampler=None, shuffle: bool = False) -> DataLoader:
@@ -335,16 +339,51 @@ class Trainer:
         the weighted loss, backward through the scaler, update. Returns the
         total as a float and the per-trace per-component floats. The
         scheduler is ``fit``'s to advance; this is the step alone, so a
-        memory probe can take exactly one."""
+        memory probe can take exactly one. A step whose loss or gradient is
+        not finite is not taken and returns ``None`` (:meth:`_refuse_step`)."""
         batch = move_to_device(batch, self.device, non_blocking=True)
         with self._autocast():
             out = self.net(batch)
             total, weighted = self._losses(out)
         self.optimizer.zero_grad(set_to_none=True)
         self.scaler.scale(total).backward()
+        if not self._finite_step(total):
+            self._refuse_step(batch, total, weighted)
+            return None
         self.scaler.step(self.optimizer)
         self.scaler.update()
         return float(total.detach()), weighted
+
+    def _finite_step(self, total: torch.Tensor) -> bool:
+        grads = [torch.isfinite(p.grad).all() for p in self.model.parameters()
+                 if p.grad is not None]
+        return bool(torch.isfinite(total)) and bool(torch.stack(grads).all())
+
+    def _refuse_step(self, batch: dict, total: torch.Tensor, weighted: dict) -> None:
+        """A step that would write NaN into every weight is not taken: the
+        gradients are dropped, the batch and the loss terms are saved under
+        ``RUN_DIR/nonfinite_steps/`` for whoever traces it, and it is said
+        out loud. More than ``MAX_REFUSED_STEPS`` in a run is not a rare
+        input but a broken model, and stops the run."""
+        self.optimizer.zero_grad(set_to_none=True)
+        self.skipped += 1
+        terms = {f"{trace}/{name}": value for trace, components in weighted.items()
+                 for name, value in components.items() if not math.isfinite(value)}
+        meta = batch["metadata"]
+        windows = list(zip(meta["recording"], meta["perspective"],
+                           (int(s) for s in meta["start_frame"])))
+        out_dir = self.run_dir / "nonfinite_steps"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        torch.save({"batch": detach_to_cpu(batch), "total": float(total), "weighted": weighted,
+                    "epoch": self.epoch + 1},
+                   out_dir / f"step_{self.skipped:03d}.pt")
+        print(f"\nnon-finite step refused ({self.skipped} so far): loss {float(total)}, "
+              f"non-finite terms {terms or 'none (the gradient)'}, windows {windows}; "
+              f"saved under {out_dir}")
+        if self.skipped > MAX_REFUSED_STEPS:
+            raise RuntimeError(
+                f"{self.skipped} training steps had a non-finite loss or gradient; "
+                f"the batches are under {out_dir}")
 
     def fit(self, train_dataset: Dataset, after_epoch=None) -> list:
         """Train for the run's epochs; returns the per-epoch loss log.
@@ -381,8 +420,11 @@ class Trainer:
             sums = {"batches": 0.0}
             progress = self._progress(loader, f"epoch {epoch + 1}/{last}")
             for batch in progress:
-                total, weighted = self.step(batch)
+                taken = self.step(batch)
                 scheduler.step()
+                if taken is None:
+                    continue
+                total, weighted = taken
                 if memory and runtime.is_main:
                     progress.write(f"gpu: {describe_peak(peak_memory(self.device), memory)}")
                     memory = None

@@ -45,6 +45,11 @@ MODALITY_CHANNELS = {
 TRACE_KEYS = {"ecg": "ECG", "abp": "ABP", "cvp": "CVP", "ppg": "PPG", "rr": "RESP"}
 TRACE_KEYS_INVERSE = {signal: key for key, signal in TRACE_KEYS.items()}
 
+#: Traces a window's heart rate is read from beside the interface's own
+#: cardiac traces, where the store carries them (``src.inputs.window_rate``).
+#: They are never predicted and never reach a loss.
+RATE_ONLY_TRACES = ("ECG","PPG")
+
 
 # ---------------------------------------------------------------------------
 # The registry

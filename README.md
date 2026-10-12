@@ -287,21 +287,19 @@ uv run python main.py \
 
 ### Evaluating a finished run
 
-Once the folds have trained and scored their held-out participants, pool them into one report:
+Training only records and draws each held-out participant; scoring is a separate step over the finished run:
 
 ```bash
-# the last epoch of every fold; recordings covered for 20 to 30 s count
-uv run scripts/evaluate.py runs/synthetic_benchmark_physmamba
+# the last epoch of every fold, cut into 10 s paired measurements
+uv run scripts/evaluate.py runs/neckflix_hpc_factorizephys_H200W200
 
-# or a specific epoch, other bounds, and further attributes to describe
-uv run scripts/evaluate.py runs/synthetic_benchmark_physmamba \
---epoch 8 \
---segment-min 20 --segment-max 30 \
---additional-params abp_site synthetic_neck.traces.heart_rate_bpm
+# or a specific epoch and another measurement length
+uv run scripts/evaluate.py runs/neckflix_hpc_factorizephys_H200W200 \
+--epoch 8 --measurement-duration 10 --measurement-tolerance 1
 ```
 
-The report lands in `runs/synthetic_benchmark_physmamba/evaluation/` as `report.md` and `report.html`, with every table and figure beside it.
-It covers who was tested, the clinical accuracy of each parameter (ISO 81060-3 statistics, Bland-Altman plots) and the usual deep-learning metrics; `docs/evaluation.md` lists what each table holds.
+Every trace of every recording and camera is cut into paired measurements of that length. Each is scored for waveform agreement (lag-aware MAE, RMSE, Lin's concordance) and the derived parameters (CVP mean; ABP mean, systolic, diastolic; heart rate from the fused cardiac spectra), then everything is pooled with the ISO 81060-3 repeated-measures statistics.
+The results land in `runs/<run>/evaluation/`: the per-measurement tables under `measurements/`, each row tagged with the recording's sex, age, skin tone and posture; the pooled agreement and demographics tables under `tables/`; the best waveforms and Bland-Altman plots under `figures/`. The script's docstring lists every file.
 Every fold must have finished at least one epoch, so run it once the experiment is complete.
 
 ### Train on dataset(s) A, B..., test on dataset X
@@ -367,6 +365,29 @@ uv run main.py --datasets synthetic_neck synthetic_neck_high_snr synthetic_neck_
 
 # TS-CAN
 uv run main.py --datasets synthetic_neck synthetic_neck_high_snr synthetic_neck_demo --test-participant-dataset synthetic_neck --config configs/default_configs/tscan_FS30_W10S1_RGBID_ABP-CVP-PPG_H72W72.yaml --epochs 10 --batch-size 2 --num-workers 4 --experiment synthetic_benchmark_tscan
+```
+
+## CardioConv and CardioHydra
+
+The two multi-trace models of this repository (rate estimator, wavelet bank,
+pulsatility mask, phase masks, [kinematics], prediction module). Their
+design and the experiments behind it are in
+`cardioconv_cardiohydra_development_notes/`. The synthetic split trains on
+the high-SNR and demo sets and tests on the base set; `scripts/visualise.py`
+draws what a run looked at, scored against the synthetic vessel map.
+
+```bash
+# CardioConv on the synthetic split (128 px, batch 1 fits the 16 GB dev card)
+uv run python scripts/run.py --datasets synthetic_neck_high_snr synthetic_neck_demo --config configs/experiment_configs/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H128W128.yaml --epochs 30 --batch-size 1 --num-workers 4 --run-dir runs/cardioconv_synth
+uv run scripts/test.py --checkpoint runs/cardioconv_synth --test-dataset synthetic_neck
+uv run scripts/evaluate.py runs/cardioconv_synth
+uv run scripts/visualise.py --checkpoint runs/cardioconv_synth --dataset synthetic_neck --windows 6
+
+# CardioHydra, the same way (CUDA only: Mamba3)
+uv run python scripts/run.py --datasets synthetic_neck_high_snr synthetic_neck_demo --config configs/experiment_configs/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H128W128.yaml --epochs 30 --batch-size 1 --num-workers 4 --run-dir runs/cardiohydra_synth
+
+# Neckflix, participant 33 held out, the 72 px interface the other models were benchmarked on
+uv run python scripts/run.py --datasets neckflix --config configs/experiment_configs/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 15 --batch-size 2 --num-workers 4 --test-participant-dataset neckflix --test-participant-id 33
 ```
 
 ## Tips for running on HPC/GPUs
