@@ -22,7 +22,7 @@ from src.signal_transforms import is_cardiac
 
 #: The waveform metrics summarised across measurements; ``lag`` is not one,
 #: its mean across measurements meaning nothing.
-WAVEFORM_METRICS = ("mae", "rmse", "ccc")
+WAVEFORM_METRICS = ("mae", "rmse", "ccc", "r", "cb")
 _NAN = float("nan")
 
 
@@ -45,6 +45,20 @@ def ccc(a, b) -> float:
     va, vb = a.var(ddof=1), b.var(ddof=1)
     denominator = va + vb + (a.mean() - b.mean()) ** 2
     return float(2 * r * np.sqrt(va * vb) / denominator) if denominator > 0 else _NAN
+
+
+def bias_correction(a, b) -> float:
+    """Lin's bias-correction factor ``C_b``: the agreement in level alone, so
+    that ``ccc == pearson * bias_correction`` exactly. Computed directly
+    rather than as that quotient, which is unstable near zero correlation."""
+    a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    if a.size < 2:
+        return _NAN
+    va, vb = a.var(ddof=1), b.var(ddof=1)
+    denominator = va + vb + (a.mean() - b.mean()) ** 2
+    if va == 0 or vb == 0 or not denominator > 0:
+        return _NAN
+    return float(2 * np.sqrt(va * vb) / denominator)
 
 
 def lagged_ccc(ref: np.ndarray, pred: np.ndarray, fs: float) -> tuple:
@@ -98,17 +112,21 @@ def rate_measurements(measurements: pd.DataFrame, fs: float, desc: str) -> pd.Da
 # ---------------------------------------------------------------------------
 def score_waveform(label: np.ndarray, pred: np.ndarray, fs: float) -> dict:
     """Sample-wise agreement over one measurement: Lin's concordance at its
-    best lag within half a second (:func:`lagged_ccc`),
-    that lag in seconds, and the mean absolute error and RMSE of the
-    prediction against the reference once shifted by that lag, over the
-    samples both still cover."""
+    best lag within half a second (:func:`lagged_ccc`), that lag in
+    seconds, and, with the prediction shifted by that one lag against the
+    reference over the samples both still cover, the mean absolute error,
+    the RMSE, Pearson's ``r`` and the bias-correction factor ``C_b`` whose
+    product the concordance is. The one lag serves every metric."""
     concordance, lag = lagged_ccc(label, pred, fs)
     shift = int(round(lag * fs)) if np.isfinite(lag) else 0
     aligned_pred, aligned_label = lagged_pair(pred, label, shift)
     error = aligned_pred - aligned_label
     return {"mae": float(np.abs(error).mean()),
             "rmse": float(np.sqrt((error ** 2).mean())),
-            "ccc": concordance, "lag": lag}
+            "ccc": concordance,
+            "r": pearson(aligned_pred, aligned_label),
+            "cb": bias_correction(aligned_pred, aligned_label),
+            "lag": lag}
 
 
 def waveform_measurements(measurements: pd.DataFrame, fs: float) -> dict:
