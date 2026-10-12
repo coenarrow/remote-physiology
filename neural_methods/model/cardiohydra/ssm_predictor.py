@@ -86,7 +86,7 @@ class SSMPredictor(nn.Module):
         length = torch.sqrt(real ** 2 + imag ** 2 + EPS ** 2)
 
         here = rearrange(present.to(pooled.dtype), "b c -> b 1 1 c 1")
-        mass = reduce(weight.detach(), "b c t h w s -> b s t c 1", "mean") * here
+        mass = reduce(weight.detach(), "b c t h w s -> b s t c 1", "sum") * here  # share of the pulsatile pixels
         out = torch.cat([scalars, real / length, imag / length, intensity, mass,
                          here.expand_as(mass)], dim=-1)
         return rearrange(out, "b s t c f -> b s t (c f)")

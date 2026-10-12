@@ -1,5 +1,5 @@
 """Functions CardioConv's modules share: the wavelet centre frequencies of a
-heart rate, the spatial shrink, circular statistics of wrapped phase, and
+heart rate, the spatial shrink, circular statistics of a complex field, and
 presence-masked reduction."""
 
 import math
@@ -23,7 +23,9 @@ def centre_frequencies(rate: torch.Tensor, fs: float, n_harmonics: int, buffer_b
     Harmonic ``k`` contributes the rates ``k * rate +- buffer_bpm`` in
     ``step_bpm`` steps. Ordered by harmonic, the fundamental first, so the
     last axis of the transform folds into ``(harmonic, step)``. A torch
-    function of the rate, so the field carries ``d(field) / d(rate)``.
+    function of the rate, so a field computed with autograd on would carry
+    ``d(field) / d(rate)``; the models compute theirs without it, the rate
+    training on the estimator's own terms.
     """
     offsets = torch.linspace(-buffer_bpm, buffer_bpm, buffer_steps(buffer_bpm, step_bpm),
                              device=rate.device, dtype=rate.dtype)
@@ -35,7 +37,9 @@ def shrink(video: torch.Tensor, factor: int) -> torch.Tensor:
     """``(B, C, T, H, W)`` -> ``(B, C, T, H // factor, W // factor)``, each output
     pixel the mean of its ``factor x factor`` block, in float32. An area
     average, not a sample: pulse is weak and averaging the block is the
-    gain a shrink is for."""
+    gain a shrink is for. A factor of 1 is the clip itself."""
+    if factor == 1:
+        return video.float()
     b = video.shape[0]
     flat = rearrange(video.float(), "b c t h w -> (b c) t h w")
     small = F.interpolate(flat, scale_factor=1.0 / factor, mode="area")
@@ -64,63 +68,34 @@ def present_mean(values: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
-# Circular statistics: phase is wrapped to [-pi, pi], so every statistic goes
-# through the unit vector and no unwrapping is needed.
+# Circular statistics of a complex field: every statistic goes through the
+# unit vector, so no phase is ever unwrapped and no wrap is ever crossed.
 # ---------------------------------------------------------------------------
-def circular_mean(angles: torch.Tensor, dim: int) -> torch.Tensor:
-    return torch.atan2(torch.sin(angles).mean(dim=dim), torch.cos(angles).mean(dim=dim))
+def unit(z: torch.Tensor) -> torch.Tensor:
+    """A complex tensor on the unit circle; zero stays near zero."""
+    return z / z.abs().clamp_min(EPS)
 
 
-def circular_variance(angles: torch.Tensor, dim: int) -> torch.Tensor:
-    """``1 - R`` in ``[0, 1]``: 0 when every angle agrees, 1 when they are spread evenly."""
-    resultant = torch.sqrt(torch.sin(angles).mean(dim=dim) ** 2 + torch.cos(angles).mean(dim=dim) ** 2)
-    return 1.0 - resultant
-
-
-def _neighbourhood_weight(height: int, width: int, kernel_size: int, like: torch.Tensor) -> torch.Tensor:
-    """``(1, 1, H, W, k, k)``: 1 for a real, non-centre neighbour, 0 for padding and the centre."""
-    pad = kernel_size // 2
-    valid = F.pad(like.new_ones(1, 1, height, width), [pad, pad, pad, pad])
-    valid = valid.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
-    centre = like.new_ones(kernel_size, kernel_size)
-    centre[pad, pad] = 0.0
-    return valid * centre
-
-
-def spatial_confidence(height: int, width: int, kernel_size: int, like: torch.Tensor) -> torch.Tensor:
-    """``(H, W)``: the fraction of its neighbourhood each pixel really has, 1 in
-    the interior and less on the border (5/8 on an edge, 3/8 in a corner at
-    ``kernel_size=3``). A border pixel's coherence is an estimate over fewer
-    neighbours, so it is trusted that much less."""
-    weight = _neighbourhood_weight(height, width, kernel_size, like)
-    return (weight.sum(dim=(-2, -1)) / (kernel_size ** 2 - 1))[0, 0]
-
-
-def neighbour_circular_difference(phase: torch.Tensor, kernel_size: int) -> torch.Tensor:
-    """``(B, C, T, H, W)`` -> the same: each pixel's mean absolute circular
-    difference, in ``[0, pi]``, from the real neighbours in its ``k x k``
-    neighbourhood. The phase is replicate-padded only to keep the lookups
-    finite; padded positions carry no weight, so a border pixel is never
-    compared with a copy of itself."""
-    b, c = phase.shape[:2]
-    height, width = phase.shape[-2:]
-    pad = kernel_size // 2
-    flat = rearrange(phase, "b c t h w -> (b c t) 1 h w")
-    patches = F.pad(flat, [pad, pad, pad, pad], mode="replicate")
-    patches = patches.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)     # (N, 1, H, W, k, k)
-    delta = patches - rearrange(flat, "n 1 h w -> n 1 h w 1 1")
-    difference = torch.atan2(torch.sin(delta), torch.cos(delta)).abs()
-    weight = _neighbourhood_weight(height, width, kernel_size, flat)
-    mean = (difference * weight).sum(dim=(-2, -1)) / weight.sum(dim=(-2, -1)).clamp_min(1.0)
-    return rearrange(mean, "(b c t) 1 h w -> b c t h w", b=b, c=c)
-
-
-def sliding_circular_variance(phase: torch.Tensor, window: int) -> torch.Tensor:
-    """``(B, C, T, H, W)`` -> the same: the circular variance of the ``window``
-    frames centred on each frame, the ends replicate-padded, so any window and
-    any ``T`` give exactly ``T`` values."""
-    b, height = phase.shape[0], phase.shape[3]
+def temporal_resultant(units: torch.Tensor, window: int) -> torch.Tensor:
+    """``(B, C, T, h, w, N)`` unit complex -> the same, real in ``[0, 1]``: the
+    length of the mean unit vector over the ``window`` frames centred on each
+    frame, which is one minus the circular variance there. The ends are
+    replicate-padded, so any window and any ``T`` give exactly ``T`` values."""
+    b, c, _, h, w, n = units.shape
+    flat = rearrange(torch.stack([units.real, units.imag], dim=-1),
+                     "b c t h w n r -> (b c h w n) r t")
     left = (window - 1) // 2
-    flat = rearrange(phase, "b c t h w -> (b c) (h w) t")
-    windows = F.pad(flat, [left, window - 1 - left], mode="replicate").unfold(-1, window, 1)
-    return rearrange(circular_variance(windows, dim=-1), "(b c) (h w) t -> b c t h w", b=b, h=height)
+    mean = F.avg_pool1d(F.pad(flat, [left, window - 1 - left], mode="replicate"), window, stride=1)
+    return rearrange(mean.norm(dim=1), "(b c h w n) t -> b c t h w n", b=b, c=c, h=h, w=w, n=n)
+
+
+def spatial_resultant(units: torch.Tensor, kernel: int) -> torch.Tensor:
+    """``(B, C, T, h, w, N)`` unit complex -> the same, real in ``[0, 1]``: the
+    length of the mean unit vector over each pixel's ``kernel x kernel``
+    neighbourhood, real pixels only, so a border pixel is judged on the
+    neighbours it has."""
+    b, c, t, _, _, n = units.shape
+    flat = rearrange(torch.stack([units.real, units.imag], dim=-1),
+                     "b c t h w n r -> (b c t n) r h w")
+    mean = F.avg_pool2d(flat, kernel, stride=1, padding=kernel // 2, count_include_pad=False)
+    return rearrange(mean.norm(dim=1), "(b c t n) h w -> b c t h w n", b=b, c=c, t=t, n=n)

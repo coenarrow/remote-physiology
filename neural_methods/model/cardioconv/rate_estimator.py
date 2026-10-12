@@ -31,8 +31,10 @@ def rate_terms(logits: torch.Tensor, rate: torch.Tensor, target: torch.Tensor, b
     has a target.
     """
     has = torch.isfinite(target)
-    zero = logits.new_zeros(())
     if not bool(has.any()):
+        # Zero, but through the logits, so the estimator stays in the graph
+        # on a step without a target (a distributed run refuses unused parameters).
+        zero = 0.0 * logits.sum()
         return {"rate": zero, "rate_error": zero}
     goal = target[has]
     # A target off the grid is aimed at the nearest bin: left where it is,

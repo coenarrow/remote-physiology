@@ -367,6 +367,29 @@ uv run main.py --datasets synthetic_neck synthetic_neck_high_snr synthetic_neck_
 uv run main.py --datasets synthetic_neck synthetic_neck_high_snr synthetic_neck_demo --test-participant-dataset synthetic_neck --config configs/default_configs/tscan_FS30_W10S1_RGBID_ABP-CVP-PPG_H72W72.yaml --epochs 10 --batch-size 2 --num-workers 4 --experiment synthetic_benchmark_tscan
 ```
 
+## CardioConv and CardioHydra
+
+The two multi-trace models of this repository (rate estimator, wavelet bank,
+pulsatility mask, phase masks, [kinematics], prediction module). Their
+design and the experiments behind it are in
+`cardioconv_cardiohydra_development_notes/`. The synthetic split trains on
+the high-SNR and demo sets and tests on the base set; `scripts/visualise.py`
+draws what a run looked at, scored against the synthetic vessel map.
+
+```bash
+# CardioConv on the synthetic split (128 px, batch 1 fits the 16 GB dev card)
+uv run python scripts/run.py --datasets synthetic_neck_high_snr synthetic_neck_demo --config configs/experiment_configs/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H128W128.yaml --epochs 30 --batch-size 1 --num-workers 4 --run-dir runs/cardioconv_synth
+uv run scripts/test.py --checkpoint runs/cardioconv_synth --test-dataset synthetic_neck
+uv run scripts/evaluate.py runs/cardioconv_synth
+uv run scripts/visualise.py --checkpoint runs/cardioconv_synth --dataset synthetic_neck --windows 6
+
+# CardioHydra, the same way (CUDA only: Mamba3)
+uv run python scripts/run.py --datasets synthetic_neck_high_snr synthetic_neck_demo --config configs/experiment_configs/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H128W128.yaml --epochs 30 --batch-size 1 --num-workers 4 --run-dir runs/cardiohydra_synth
+
+# Neckflix, participant 33 held out, the 72 px interface the other models were benchmarked on
+uv run python scripts/run.py --datasets neckflix --config configs/experiment_configs/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H72W72.yaml --epochs 15 --batch-size 2 --num-workers 4 --test-participant-dataset neckflix --test-participant-id 33
+```
+
 ## Tips for running on HPC/GPUs
 
 GPUs are dealt to the running folds through `CUDA_VISIBLE_DEVICES`: one each,

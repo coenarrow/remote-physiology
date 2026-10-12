@@ -333,9 +333,15 @@ class WindowedDataset(torch.utils.data.Dataset):
 
 def window_rate(traces: list[np.ndarray], fs: float) -> float:
     """The heart rate of one window, in bpm, from its cardiac traces; NaN
-    when it has none. The period the traces repeat at, not their largest
-    spectral bin (``src.evaluation.rate.periodicity_rate``)."""
-    return rate.periodicity_rate(traces, fs)
+    when it has none or is too short to filter. The largest bin of the
+    traces' fused spectrum, read exactly as the evaluation reads a rate
+    (``src.evaluation.rate``), so the model trains towards the quantity it
+    is scored on."""
+    if not traces or len(traces[0]) < rate.MIN_FRAMES:
+        return float("nan")
+    spectra = [rate.spectrum(rate.clean(trace, fs), fs) for trace in traces]
+    freqs = spectra[0][0]
+    return rate.rate_of(freqs, rate.fuse(freqs, [power for _, power in spectra]))
 
 
 def window_waveform(traces: list[np.ndarray], interface: InterfaceConfig,

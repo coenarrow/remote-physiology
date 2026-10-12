@@ -36,16 +36,12 @@ import functools
 
 import numpy as np
 from scipy.linalg import solveh_banded
-from scipy.signal import butter, filtfilt, hilbert, periodogram, resample, sosfiltfilt
+from scipy.signal import butter, filtfilt, hilbert, periodogram, sosfiltfilt
 from scipy.sparse import diags as sparse_diags
 
 #: The heart-rate band in Hz, 30–240 bpm.
 BAND = (0.5, 4.0)
 DETREND_LAMBDA = 100
-#: :func:`periodicity_rate`: how many times finer than a frame its lags are, and
-#: how close to the strongest autocorrelation peak the period's own must be.
-AUTOCORR_UPSAMPLE = 4
-AUTOCORR_THRESHOLD = 0.7
 #: :func:`fused_waveform`: the band kept either side of the heart rate, in bpm.
 FUSED_HALF_WIDTH_BPM = 15
 #: Half-width of the harmonic bins counted as signal in the SNR, in bpm.
@@ -143,52 +139,6 @@ def fuse(freqs, powers) -> np.ndarray:
         weights = np.ones(len(powers))
     weights = weights / weights.sum()
     return np.exp(weights @ np.log(np.maximum(stacked, SPECTRUM_FLOOR)))
-
-
-def periodicity_rate(traces, fs: float) -> float:
-    """The heart rate of one stretch, in bpm, from the period its cardiac
-    traces repeat at; NaN when there are none or the stretch is too short.
-
-    The largest spectral bin (:func:`rate_of`) is the wrong reading of a
-    trace whose strongest component is a harmonic: a CVP with several waves
-    per beat reads double, an ECG's spike train double or triple, and fusing
-    two such spectra agrees on the wrong answer. A trace that repeats every
-    beat matches itself best at a lag of one beat, and worse at half a beat
-    unless its two halves are alike, so the period is read off the
-    autocorrelation instead.
-
-    Each trace is detrended only (every harmonic kept), standardised, and
-    upsampled ``AUTOCORR_UPSAMPLE`` times so a lag is finer than a frame;
-    its normalised autocorrelation is taken at the lags of the band, and the
-    traces' curves are averaged. The period is the shortest lag at a local
-    maximum within ``AUTOCORR_THRESHOLD`` of the largest one, which is what
-    keeps two beats from being taken for one, refined by a parabola through
-    its neighbours. On Neckflix's 10 s windows it is within 6 bpm of the
-    clinician's counted rate on 91.5% against the spectral peak's 86.1%, and
-    on 95.2% against 78.0% where there is no arterial line.
-    """
-    curves = []
-    for trace in traces:
-        x = detrend(np.asarray(trace, dtype=np.float64), DETREND_LAMBDA)
-        x = resample((x - x.mean()) / (x.std() + 1e-12), len(x) * AUTOCORR_UPSAMPLE)
-        step = 1.0 / (fs * AUTOCORR_UPSAMPLE)
-        lags = np.arange(int(np.floor(1.0 / BAND[1] / step)), int(np.ceil(1.0 / BAND[0] / step)) + 1)
-        lags = lags[lags < len(x) // 2]
-        if lags.size < 3:
-            return _NAN
-        curves.append(np.array([
-            np.dot(x[:-k], x[k:]) / (np.linalg.norm(x[:-k]) * np.linalg.norm(x[k:]) + 1e-12)
-            for k in lags]))
-    if not curves:
-        return _NAN
-    r = np.mean(curves, axis=0)
-    peaks = np.where((r[1:-1] >= r[:-2]) & (r[1:-1] >= r[2:]))[0] + 1
-    if peaks.size == 0:
-        return float(60.0 / (lags[np.argmax(r)] * step))
-    k = peaks[r[peaks] >= AUTOCORR_THRESHOLD * r[peaks].max()][0]
-    curvature = r[k - 1] - 2 * r[k] + r[k + 1]
-    shift = 0.0 if curvature == 0 else 0.5 * (r[k - 1] - r[k + 1]) / curvature
-    return float(60.0 / ((lags[k] + shift) * step))
 
 
 def fused_waveform(traces, fs: float, hr_bpm: float) -> np.ndarray:

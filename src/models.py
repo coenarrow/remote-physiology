@@ -16,6 +16,8 @@ several is built once. A model is a function from frames to predictions and
 nothing else — the loss is the trainer's.
 """
 
+import dataclasses
+
 import torch
 import torch.nn as nn
 
@@ -35,8 +37,8 @@ from neural_methods.model.rhythmformer import rhythmformer
 from neural_methods.model.tscan import tscan
 from neural_methods.model._shared_modules.utils import min_frame_message
 from src.model_config import (
-    MODEL_CONFIGS, SPECTRAL_RATE, CardioConvConfig, CardioHydraConfig, FactorizePhysConfig,
-    InterfaceConfig, ModelConfig, PhysMambaConfig, TemporalShiftConfig,
+    MODEL_CONFIGS, SPECTRAL_RATE, CardioBaseConfig, CardioConvConfig, CardioHydraConfig, FactorizePhysConfig,
+    InterfaceConfig, ModelConfig, PhysMambaConfig, ResizeConfig, TemporalShiftConfig,
 )
 
 
@@ -253,7 +255,7 @@ def _wrap(backbone: nn.Module, interface: InterfaceConfig, cfg: ModelConfig) -> 
                            traces=interface.TRACES)
 
 
-def _require_rate_tolerance(cfg: CardioHydraConfig, buffer_bpm: float) -> None:
+def _require_rate_tolerance(cfg: CardioBaseConfig, buffer_bpm: float) -> None:
     if not cfg.RATE_TOLERANCE_BPM < buffer_bpm:
         raise ConfigError(
             f"{cfg.NAME}: RATE_TOLERANCE_BPM must be inside the wavelet buffer of "
@@ -346,34 +348,41 @@ def _build_single_trace(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTr
 
 
 # -- multi-trace architectures ------------------------------------------------
-def _rate_network(cfg: CardioHydraConfig, interface: InterfaceConfig) -> nn.Module | None:
+def _rate_network(cfg: CardioBaseConfig, interface: InterfaceConfig) -> nn.Module | None:
     """One copy of the architecture ``RATE_ESTIMATOR`` names, at its paper's
     switches (its config's defaults), for the model to read the heart rate
-    off; ``None`` for the model's own spectral estimator."""
+    off; ``None`` for the model's own spectral estimator. The copy is built
+    for the frame it will see, the interface's frame shrunk by ``DOWNSCALE``
+    (what the masks read too), so a dense layer is sized to it and a stem's
+    floor is checked against it."""
     name = cfg.RATE_ESTIMATOR
     if name == SPECTRAL_RATE:
         return None
-    return SINGLE_TRACE[name](MODEL_CONFIGS[name](NAME=name), interface)
+    shrunk = dataclasses.replace(interface, RESIZE=ResizeConfig(      # 0 (no resize) stays 0
+        H=interface.RESIZE.H // cfg.DOWNSCALE, W=interface.RESIZE.W // cfg.DOWNSCALE))
+    return SINGLE_TRACE[name](MODEL_CONFIGS[name](NAME=name), shrunk)
 
 
 def _build_cardioconv(cfg: CardioConvConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "CardioConv", cardioconv.MIN_FRAME)
+    _require_min_frame(interface, "CardioConv", cardioconv.min_frame(cfg.DOWNSCALE))
     _require_rate_tolerance(cfg, cardioconv.BUFFER_BPM)
     backbone = cardioconv.CardioConv(
         in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
         pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
         trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS,
-        rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM, rate_network=_rate_network(cfg, interface))
+        rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM, downscale=cfg.DOWNSCALE,
+        rate_network=_rate_network(cfg, interface))
     return _wrap(backbone, interface, cfg)
 
 
 def _build_cardiohydra(cfg: CardioHydraConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "CardioHydra", cardiohydra.MIN_FRAME)
+    _require_min_frame(interface, "CardioHydra", cardiohydra.min_frame(cfg.DOWNSCALE))
     _require_rate_tolerance(cfg, cardiohydra.BUFFER_BPM)
     backbone = cardiohydra.CardioHydra(
         in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
         pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
         supervise_masks=cfg.SUPERVISE_MASKS, rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM,
+        downscale=cfg.DOWNSCALE, mamba_lr_scale=cfg.MAMBA_LR_SCALE,
         rate_network=_rate_network(cfg, interface))
     return _wrap(backbone, interface, cfg)
 

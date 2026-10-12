@@ -39,11 +39,13 @@ class StatisticsHead(nn.Module):
     output is the mixed waveform z-scored over the window, times the spread,
     plus the mean, which makes the mixer's own numeric scale irrelevant.
 
-    Mask mass is always read detached: its gradient could only say "make the
-    mask bigger", against the sparsity and total-variation priors. Pooled
-    power is normalised by the mask's area, so its gradient says "put the
-    mask on better pixels"; ``supervise_masks=False`` detaches that too and
-    leaves the head a read-only probe of the masks.
+    Mask mass is always read detached: its gradient could only say "give
+    this trace more of the pulsatile pixels", which is the phase masker's
+    softmax's to decide, not the level's. The heart rate is read detached
+    too: the rate network trains on its own terms. Pooled power is
+    normalised by the mask's area, so its gradient says "put the mask on
+    better pixels"; ``supervise_masks=False`` detaches that too and leaves
+    the head a read-only probe of the masks.
 
     Args:
       in_channels: video channels ``C``.
@@ -81,7 +83,9 @@ class StatisticsHead(nn.Module):
         intensity = torch.log1p(intensity.clamp_min(0.0)) * here                      # (B, C, 3)
 
         weight = rearrange(pulsatility, "b c t h w -> b c t h w 1") * phase_masks      # (B, C, T, h, w, S)
-        mass = reduce(weight.detach(), "b c t h w s -> b c s", "mean") * here
+        # The pulsatility distribution sums to one per frame, so the mass is the
+        # share of the pulsatile pixels the trace claims, averaged over frames.
+        mass = reduce(weight.detach(), "b c t h w s -> b c s", "sum") / weight.shape[2] * here
         if not self.supervise_masks:
             weight = weight.detach()
         area = reduce(weight, "b c t h w s -> b c s 1", "sum").clamp_min(EPS)
@@ -95,7 +99,7 @@ class StatisticsHead(nn.Module):
             rearrange(harmonics, "b c s n -> b (c s n)"),
             rearrange(mass, "b c s -> b (c s)"),
             rearrange(here, "b c 1 -> b c"),
-            rearrange(heart_rate.to(small.dtype), "b -> b 1") / 100.0,
+            rearrange(heart_rate.detach().to(small.dtype), "b -> b 1") / 100.0,   # a feature, not a path
             *extras,
         ], dim=-1)
 

@@ -1,0 +1,43 @@
+MODEL:
+  NAME: CardioConv
+  PULSATILITY_MASKER: true
+  PHASE_MASKER: true
+  TRACE_INDEPENDENT: true
+  SUPERVISE_MASKS: true
+  RATE_TOLERANCE_BPM: 8.0        # training gate on the learned heart rate, inside the 10 bpm wavelet buffer
+  RATE_ESTIMATOR: RhythmFormer          # the single-trace network the rate is read off, or Spectral
+  DOWNSCALE: 2                   # area shrink before the wavelet; the masks live on the shrunk grid; 1 is none
+  REGULARISATION:                # the mask priors, and the rate estimator's terms
+    PULSATILITY_TV: 0.005        # the attention over a region, not a speckle
+    PULSATILITY_SATURATION: 1.0  # pull the map's raw correction back inside its bound
+    BACKGROUND_PULSATILE: 0.5    # the traces claim what pulses; the background keeps at most an even share
+    PHASE_SATURATION: 1.0        # pull the phase masks' raw correction back inside its bound
+    HARMONIC_COHERENCE: 0.02     # no trace weight on scale-incoherent pixels
+    SPATIAL_COHERENCE: 0.02      # ... or on pixels out of phase with their neighbours
+    TEMPORAL_CONSISTENCY: 0.02   # ... or on pixels whose relative phase drifts
+    PHASE_TV: 0.01
+    RATE_WAVEFORM: 1.0           # 1 - Pearson of the rate network's waveform to the fused label waveform, best lag;
+                                 # the only rate term: an L1 on the rate itself left the fit worse (notes, experiment 2)
+
+# The Neckflix blood-pressure interface of this directory's 72 px configs at
+# 128 px, the dev box's cache size (cardioconv_cardiohydra_development_notes/):
+# same channels, traces, window and loss weights, no shrink of the frame.
+INTERFACE:
+  FS: 30.0                       # frame rate the model sees
+  UPSAMPLING: refuse             # slower stores: refuse | interpolate
+  WINDOW_SECONDS: 10.0           # 300 frames
+  WINDOW_STRIDE: 1.0             # seconds the test set steps between windows
+  CHANNELS: [R, G, B, I, D]      # colour, infrared and depth, stacked in this order
+  TRACES: [ABP, CVP]             # arterial and central venous pressure, in mmHg
+  RESIZE: {H: 128, W: 128}       # the local caches' native size, so the masks see every pixel
+  LOSS:                          # CCC for shape and level, L1 on the window
+    ABP: {CCC: 1.0, MEAN: 0.05, MAX: 0.05, MIN: 0.05}   # mean and the soft
+    CVP: {CCC: 1.0, MEAN: 0.20, MAX: 0.20, MIN: 0.20}   # systolic / diastolic
+
+# The recipe of the 72 px experiment config: --epochs 30 --batch-size 1 on the 16 GB dev card
+TRAIN:
+  OPTIMIZER: Adam
+  LR: 1e-3
+  WEIGHT_DECAY: 0.0
+  SCHEDULER: Constant
+  PRECISION: float32

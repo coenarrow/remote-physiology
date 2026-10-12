@@ -18,7 +18,7 @@ class WaveformRateEstimator(nn.Module):
     """Which rate the clip pulses at, read off the waveform of a single-trace network.
 
     ``network`` is one copy of any single-trace architecture of this
-    repository: raw clip ``(B, C, T, H, W)`` in, one waveform ``(B, 1, T)``
+    repository: the shrunk clip ``(B, C, T, h, w)`` in, one waveform ``(B, 1, T)``
     out. Its waveform is trained against the window's fused cardiac waveform
     (``src.evaluation.rate.fused_waveform``) by :meth:`waveform_term`; the
     rate is the centroid of that waveform's power on a fixed grid of 1 bpm
@@ -51,7 +51,7 @@ class WaveformRateEstimator(nn.Module):
         target took its phase from."""
         has = torch.isfinite(target).all(dim=-1)
         if not bool(has.any()):
-            return target.new_zeros(())
+            return 0.0 * self.waveform.sum()          # zero, with the network kept in the graph
         waveform, goal = self.waveform[has], target[has].to(self.waveform.dtype)
         max_lag = min(self.max_lag, waveform.shape[-1] - 2)
         correlations = torch.stack([
@@ -60,12 +60,13 @@ class WaveformRateEstimator(nn.Module):
         return (1.0 - correlations.max(dim=0).values).mean()
 
     def forward(self, video: torch.Tensor, small: torch.Tensor, present: torch.Tensor) -> tuple:
-        """``(B, C, T, H, W)`` raw clip -> the rate ``(B,)`` in bpm and the
-        logits ``(B, n_bins)`` it was read from. The shrunk clip and the
-        presence are not read: the network takes the clip as it is."""
+        """``(B, C, T, h, w)`` shrunk clip -> the rate ``(B,)`` in bpm and the
+        logits ``(B, n_bins)`` it was read from. The network reads the shrunk
+        clip, which is what the masks read too; the raw clip and the presence
+        are not read."""
         # Float32 whatever autocast made of the network: the rate should not
         # be quantised by half precision.
-        self.waveform = rearrange(self.network(video), "b 1 t -> b t").float()
+        self.waveform = rearrange(self.network(small), "b 1 t -> b t").float()
         centred = self.waveform - self.waveform.mean(dim=-1, keepdim=True)
         logits = PEAK_SHARPNESS * grid_power(centred, self.fs, self.bins).clamp_min(EPS).log()
         rate = (logits.softmax(dim=-1) * self.bins).sum(dim=-1)
