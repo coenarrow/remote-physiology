@@ -93,16 +93,36 @@ OPTIMIZERS = {
     "AdamW": lambda groups, cfg: torch.optim.AdamW(groups, lr=cfg.LR),
 }
 
+#: ``HoldCosine`` holds the recipe's rate for all but this share of the
+#: run's steps, then lowers it to zero along a half cosine over the rest.
+COSINE_TAIL = 1.0 / 3.0
+
+
+def hold_cosine(step: int, total_steps: int) -> float:
+    """The ``HoldCosine`` multiple of the rate at ``step``: 1 until the last
+    :data:`COSINE_TAIL` of ``total_steps``, then ``0.5 (1 + cos(pi x))`` as
+    ``x`` runs from 0 to 1 over them."""
+    start = total_steps * (1.0 - COSINE_TAIL)
+    if step <= start:
+        return 1.0
+    x = min((step - start) / max(total_steps - start, 1.0), 1.0)
+    return 0.5 * (1.0 + math.cos(math.pi * x))
+
+
 #: The recipe's ``SCHEDULER`` -> constructor, stepped once per batch;
-#: ``total_steps`` is known at fit. ``Constant`` is the rate the recipe
-#: states, every step (what an upstream ``StepLR`` that never fires inside
-#: the run's epochs amounts to).
+#: ``total_steps`` is known at fit, and counts the run's own epochs (a run
+#: continued with ``--init-from`` starts its schedule afresh). ``Constant``
+#: is the rate the recipe states, every step (what an upstream ``StepLR``
+#: that never fires inside the run's epochs amounts to); ``HoldCosine`` is
+#: that rate, decayed over the run's last third (:func:`hold_cosine`).
 SCHEDULERS = {
     "OneCycle": lambda optimizer, cfg, total_steps: torch.optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=[group["lr"] for group in optimizer.param_groups],
         total_steps=total_steps),
     "Constant": lambda optimizer, cfg, total_steps: torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda step: 1.0),
+    "HoldCosine": lambda optimizer, cfg, total_steps: torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda step: hold_cosine(step, total_steps)),
 }
 
 
