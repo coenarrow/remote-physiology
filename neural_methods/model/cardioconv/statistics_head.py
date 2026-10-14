@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, reduce
 
-from neural_methods.model.cardioconv.utils import EPS, softplus_inverse
+from neural_methods.model.cardioconv.utils import softplus_inverse
+from neural_methods.model._shared_modules.utils import EPS
 
 #: Shrinks the mean readout's initial weights, so the bias the trainer seeds
 #: with the trace's physiological prior is the starting prediction and the
@@ -21,7 +22,7 @@ class StatisticsHead(nn.Module):
 
     The waveform path is shape-only by design — min-max scaled pixels under
     soft masks — so what it discards is read back here: per channel the
-    shrunk clip's min, max and mean, the wavelet power pooled under each
+    clip's min, max and mean, the wavelet power pooled under each
     trace's mask per harmonic, the mask's mass and the channel's presence,
     and the heart rate. Those summaries arrive on very different scales and
     bit depths (8-bit colour, 16-bit infrared and depth, unbounded power), so
@@ -55,7 +56,7 @@ class StatisticsHead(nn.Module):
       supervise_masks: let the pooled-power path train the masks.
       relative_spread: the spread the head starts at, as a fraction of the mean.
       n_extra: further features a model hands ``forward`` as ``extra``, already
-        conditioned (CardioHydra's pooled wave speed); CardioConv has none.
+        conditioned (both models' pooled wave speed).
     """
 
     def __init__(self, in_channels: int, n_traces: int, n_harmonics: int, hidden: int = 64,
@@ -74,11 +75,11 @@ class StatisticsHead(nn.Module):
                 spread.weight.mul_(READOUT_WEIGHT_SCALE)
                 spread.bias.fill_(softplus_inverse(relative_spread))
 
-    def features(self, power, small, pulsatility, phase_masks, heart_rate, present,
+    def features(self, power, clip, pulsatility, phase_masks, heart_rate, present,
                  extra=None) -> torch.Tensor:
         """The ``(B, n_features)`` summary; absent channels contribute zeros."""
-        here = rearrange(present.to(small.dtype), "b c -> b c 1")
-        intensity = torch.stack([reduce(small, "b c t h w -> b c", kind)
+        here = rearrange(present.to(clip.dtype), "b c -> b c 1")
+        intensity = torch.stack([reduce(clip, "b c t h w -> b c", kind)
                                  for kind in ("min", "max", "mean")], dim=-1)
         intensity = torch.log1p(intensity.clamp_min(0.0)) * here                      # (B, C, 3)
 
@@ -93,24 +94,24 @@ class StatisticsHead(nn.Module):
         harmonics = reduce(pooled, "b c s (n j) -> b c s n", "mean", n=self.n_harmonics)
         harmonics = torch.log1p(harmonics) * rearrange(here, "b c 1 -> b c 1 1")
 
-        extras = [] if extra is None else [extra.to(small.dtype)]
+        extras = [] if extra is None else [extra.to(clip.dtype)]
         return torch.cat([
             rearrange(intensity, "b c f -> b (c f)"),
             rearrange(harmonics, "b c s n -> b (c s n)"),
             rearrange(mass, "b c s -> b (c s)"),
             rearrange(here, "b c 1 -> b c"),
-            rearrange(heart_rate.detach().to(small.dtype), "b -> b 1") / 100.0,   # a feature, not a path
+            rearrange(heart_rate.detach().to(clip.dtype), "b -> b 1") / 100.0,   # a feature, not a path
             *extras,
         ], dim=-1)
 
-    def forward(self, mixed, power, small, pulsatility, phase_masks, heart_rate, present,
+    def forward(self, mixed, power, clip, pulsatility, phase_masks, heart_rate, present,
                 extra=None) -> torch.Tensor:
         """``(B, S, T)`` shape-only waveforms -> ``(B, S, T)`` in each trace's
         physical units. The rest are the stages' outputs: ``(B, C, T, h, w, K)``
-        power, ``(B, C, T, h, w)`` shrunk clip and pulsatility mask,
+        power, ``(B, C, T, h, w)`` clip and pulsatility mask,
         ``(B, C, T, h, w, S)`` trace masks, ``(B,)`` bpm, ``(B, C)`` presence,
         and the ``(B, n_extra)`` extra features if the head was built with any."""
-        features = self.features(power, small, pulsatility, phase_masks, heart_rate, present, extra)
+        features = self.features(power, clip, pulsatility, phase_masks, heart_rate, present, extra)
         hidden = [trunk(features) for trunk in self.trunks]
         mean = torch.cat([layer(h) for layer, h in zip(self.means, hidden)], dim=-1)          # (B, S)
         spread = torch.cat([layer(h) for layer, h in zip(self.spreads, hidden)], dim=-1)

@@ -5,9 +5,9 @@ local-extrema map and a temperature softmax, after the legacy
 ``PhysHydraLoss``), not from a second head, so a waveform can never disagree
 with its own systolic and diastolic values.
 
-The evaluation's counterparts are ``err_max`` and ``err_min``
-(``src/evaluation/recording.py``), the per-beat extremes of the hard beat
-detector averaged over the beats. This is a surrogate for them, not the same
+The evaluation's counterparts are ABP systolic and diastolic, the per-beat
+extremes of the hard beat detector averaged over the beats, and CVP max and
+min, the 95th and 5th percentiles (``src/evaluation/measurements.py``). This is a surrogate for them, not the same
 number: at ``TEMPERATURE = 0.03`` the softmax is close to the window's single
 most extreme beat. Measured on cached Neckflix labels in 10 s windows, the
 soft systolic sits 5.6 mmHg above the beat-mean systolic on ABP (the hard

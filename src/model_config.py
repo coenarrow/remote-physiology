@@ -114,6 +114,12 @@ def _require_positive(where: str, key: str, value) -> None:
         raise ConfigError(f"{where}: {key} must be positive, got {value}")
 
 
+def _require_factor(where: str, key: str, value) -> None:
+    """A shrink factor: a whole number of at least 1, or refused by name."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ConfigError(f"{where}: {key} must be a whole number of at least 1, got {value!r}")
+
+
 @dataclass
 class TemporalShiftConfig(ModelConfig):
     """EfficientPhys and TS-CAN: the segment length the temporal shift shifts within."""
@@ -149,7 +155,7 @@ SPECTRAL_RATE = "Spectral"
 class CardioBaseConfig(ModelConfig):
     """What CardioConv and CardioHydra share: their ablations (every one
     ``True`` in the model as designed), the training gate, the rate
-    estimator and the shrink. Each adds one key of its own below."""
+    estimator and the two shrinks. Each adds one key of its own below."""
     PULSATILITY_MASKER: bool = True   # learn the pulsatility mask; false is a uniform one
     PHASE_MASKER: bool = True         # learn the per-trace masks; false is masks of ones
     SUPERVISE_MASKS: bool = True      # the statistics head's pooled features train the masks
@@ -158,8 +164,11 @@ class CardioBaseConfig(ModelConfig):
     RATE_ESTIMATOR: str = "RhythmFormer"  # what reads the heart rate: the NAME of a
                                           # single-trace architecture, or the model's own
                                           # spectral estimator (SPECTRAL_RATE)
-    DOWNSCALE: int = 2                # area shrink of the frames before the wavelet; every
-                                      # mask lives on the shrunk grid; 1 is none
+    RATE_DOWNSCALE: int = 2           # area shrink of the frames the rate estimator reads;
+                                      # 1 is none
+    WAVELET_DOWNSCALE: int = 2        # area shrink of the frames the wavelet transform reads;
+                                      # its field is upscaled back, so the masks and every
+                                      # later stage work at the input's resolution; 1 is none
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
@@ -169,10 +178,8 @@ class CardioBaseConfig(ModelConfig):
                 f"{where}: {self.NAME} reads the clip at the harmonics of the heart "
                 f"rate, so it predicts cardiac traces only; TRACES has {other}")
         _require_positive(where, "RATE_TOLERANCE_BPM", self.RATE_TOLERANCE_BPM)
-        if isinstance(self.DOWNSCALE, bool) or not isinstance(self.DOWNSCALE, int) \
-                or self.DOWNSCALE < 1:
-            raise ConfigError(
-                f"{where}: DOWNSCALE must be a whole number of at least 1, got {self.DOWNSCALE!r}")
+        _require_factor(where, "RATE_DOWNSCALE", self.RATE_DOWNSCALE)
+        _require_factor(where, "WAVELET_DOWNSCALE", self.WAVELET_DOWNSCALE)
         estimators = (SPECTRAL_RATE, *rate_architectures())
         if self.RATE_ESTIMATOR not in estimators:
             raise ConfigError(
@@ -330,7 +337,7 @@ def parse_interface(mapping: dict, where: str) -> InterfaceConfig:
 #: The names the trainer implements (``src.trainer.OPTIMIZERS`` / ``SCHEDULERS``
 #: / ``PRECISION_DTYPES``); adding one is a line there and a name here.
 OPTIMIZERS = ("Adam", "AdamW")
-SCHEDULERS = ("OneCycle", "Constant")
+SCHEDULERS = ("OneCycle", "Constant", "HoldCosine")
 PRECISIONS = ("float32", "bfloat16", "float16")
 
 

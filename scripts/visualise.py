@@ -149,7 +149,7 @@ def scores(captured: dict, maps: dict, channels: list, traces: list) -> list:
 
 def draw_panel(out: Path, captured: dict, batch: dict, result: dict, maps: dict | None,
                channels: list, traces: list, fs: float) -> None:
-    small = captured["small"][0]                                               # (C, T, h, w)
+    clip = captured["clip"][0]                                               # (C, T, h, w)
     pulsatility = captured["pulsatility"][0].mean(dim=1)
     masks = (captured["pulsatility"][0, ..., None] * captured["phase_masks"][0]).mean(dim=1)
     background = (captured["pulsatility"][0] * captured["background"][0]).mean(dim=1)
@@ -157,7 +157,7 @@ def draw_panel(out: Path, captured: dict, batch: dict, result: dict, maps: dict 
     fig, axes = plt.subplots(len(channels) + 1, n_cols, figsize=(3.2 * n_cols, 3.0 * (len(channels) + 1)))
     titles = ["mean frame", "pulsatility"] + [f"{t} mask x pulsatility" for t in traces] + ["background x pulsatility"]
     for c, (channel, row) in enumerate(zip(channels, health(captured, channels, traces))):
-        images = [small[c].mean(dim=0), pulsatility[c], *[masks[c, ..., s] for s in range(len(traces))], background[c]]
+        images = [clip[c].mean(dim=0), pulsatility[c], *[masks[c, ..., s] for s in range(len(traces))], background[c]]
         # Every map is drawn at its own colour scale; the title says how much
         # mass it holds, so a vanished map cannot pass for a sharp one.
         amounts = ["", f"{row['pulsatility_effective_px']:.0f} px",
@@ -174,7 +174,7 @@ def draw_panel(out: Path, captured: dict, batch: dict, result: dict, maps: dict 
             ax.axis("off")
     for col in range(n_cols):
         axes[-1, col].axis("off")
-    t = np.arange(small.shape[1]) / fs
+    t = np.arange(clip.shape[1]) / fs
     for s, trace in enumerate(traces):
         ax = fig.add_subplot(len(channels) + 1, n_cols, (len(channels)) * n_cols + 1 + s)
         ax.plot(t, batch["labels"][trace][0].cpu().numpy(), "k", lw=0.8, label="label")
@@ -195,8 +195,8 @@ def draw_gif(out: Path, captured: dict, channel_index: int, traces: list, fs: fl
     the first two traces' pulsatile masks (red, blue) over them, at the
     interface's frame rate (the masks are one map per window, so only the
     frame underneath moves)."""
-    small = captured["small"][0, channel_index]                                # (T, h, w)
-    frame = (small - small.min()) / (small.max() - small.min() + 1e-6)
+    clip = captured["clip"][0, channel_index]                                # (T, h, w)
+    frame = (clip - clip.min()) / (clip.max() - clip.min() + 1e-6)
     weight = captured["pulsatility"][0, channel_index, ..., None] * captured["phase_masks"][0, channel_index]
     def norm(x):
         return (x / (x.amax(dim=(-2, -1), keepdim=True) + 1e-9)).clamp(0, 1)
@@ -204,7 +204,7 @@ def draw_gif(out: Path, captured: dict, channel_index: int, traces: list, fs: fl
     red = norm(weight[..., 0]) if len(traces) > 0 else torch.zeros_like(pulse)
     blue = norm(weight[..., 1]) if len(traces) > 1 else torch.zeros_like(pulse)
     frames = []
-    for i in range(0, small.shape[0], GIF_FRAME_STEP):
+    for i in range(0, clip.shape[0], GIF_FRAME_STEP):
         grey = frame[i]
         rgb = torch.stack([grey * 0.5 + 0.5 * red[i], grey * 0.5 + 0.5 * pulse[i], grey * 0.5 + 0.5 * blue[i]], dim=-1)
         image = Image.fromarray((rgb.clamp(0, 1).cpu().numpy() * 255).astype(np.uint8))

@@ -179,6 +179,30 @@ def score_diastolic(label: np.ndarray, pred: np.ndarray, fs: float) -> dict:
     return _extremum_level(label, pred, fs, -1, "diastolic")
 
 
+#: CVP's maximum and minimum are read as percentiles of the measurement, not
+#: at detected beats: a CVP beat has three peaks (the a, c and v waves) and
+#: no single systolic point, so ABP's beat detection does not transfer.
+UPPER_PERCENTILE = 95.0
+LOWER_PERCENTILE = 5.0
+
+
+def _percentile_level(label: np.ndarray, pred: np.ndarray, q: float, name: str) -> dict:
+    """The ``q``-th percentile of one measurement, reference and prediction,
+    and the error (prediction minus reference)."""
+    ref, predicted = float(np.percentile(label, q)), float(np.percentile(pred, q))
+    return {f"ref_{name}": ref, f"pred_{name}": predicted, f"err_{name}": predicted - ref}
+
+
+def score_upper(label: np.ndarray, pred: np.ndarray, fs: float) -> dict:
+    """The measurement's upper level, its :data:`UPPER_PERCENTILE`."""
+    return _percentile_level(label, pred, UPPER_PERCENTILE, "max")
+
+
+def score_lower(label: np.ndarray, pred: np.ndarray, fs: float) -> dict:
+    """The measurement's lower level, its :data:`LOWER_PERCENTILE`."""
+    return _percentile_level(label, pred, LOWER_PERCENTILE, "min")
+
+
 def score_rate(traces: dict, fs: float) -> dict:
     """The heart rate of one measurement from its cardiac traces fused in
     the spectrum (``src.evaluation.rate.fuse``), each side from its own
@@ -218,6 +242,8 @@ class Parameter(NamedTuple):
 
 PARAMETERS = (
     Parameter("CVP mean", "CVP_mean", "mmHg", "CVP", score_mean, "mean", "sample mean"),
+    Parameter("CVP max", "CVP_max", "mmHg", "CVP", score_upper, "max", "95th percentile"),
+    Parameter("CVP min", "CVP_min", "mmHg", "CVP", score_lower, "min", "5th percentile"),
     Parameter("ABP mean", "ABP_mean", "mmHg", "ABP", score_mean, "mean", "sample mean"),
     Parameter("ABP systolic", "ABP_systolic", "mmHg", "ABP", score_systolic, "systolic",
               "peaks detected on both sides"),

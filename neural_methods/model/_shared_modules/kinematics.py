@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from neural_methods.model.cardiohydra.utils import collapse_harmonics, phase_gradient
+from neural_methods.model._shared_modules.utils import collapse_harmonics, phase_gradient
 
 #: The axes of the ``(B, C, T, h, w, N)`` field.
 TIME, ROWS, COLUMNS = 2, 3, 4

@@ -298,7 +298,7 @@ uv run scripts/evaluate.py runs/neckflix_hpc_factorizephys_H200W200 \
 --epoch 8 --measurement-duration 10 --measurement-tolerance 1
 ```
 
-Every trace of every recording and camera is cut into paired measurements of that length. Each is scored for waveform agreement (lag-aware MAE, RMSE, Lin's concordance) and the derived parameters (CVP mean; ABP mean, systolic, diastolic; heart rate from the fused cardiac spectra), then everything is pooled with the ISO 81060-3 repeated-measures statistics.
+Every trace of every recording and camera is cut into paired measurements of that length. Each is scored for waveform agreement (lag-aware MAE, RMSE, Lin's concordance) and the derived parameters (CVP mean, max and min, the last two as the 95th and 5th percentiles; ABP mean, systolic, diastolic; heart rate from the fused cardiac spectra), then everything is pooled with the ISO 81060-3 repeated-measures statistics and with descriptive level-tracking columns (the SD of the reference and the prediction, and the correlation and slope between and within subjects), which show a model that predicts only the average level.
 The results land in `runs/<run>/evaluation/`: the per-measurement tables under `measurements/`, each row tagged with the recording's sex, age, skin tone and posture; the pooled agreement and demographics tables under `tables/`; the best waveforms and Bland-Altman plots under `figures/`. The script's docstring lists every file.
 Every fold must have finished at least one epoch, so run it once the experiment is complete.
 
@@ -370,8 +370,11 @@ uv run main.py --datasets synthetic_neck synthetic_neck_high_snr synthetic_neck_
 ## CardioConv and CardioHydra
 
 The two multi-trace models of this repository (rate estimator, wavelet bank,
-pulsatility mask, phase masks, [kinematics], prediction module). Their
-design and the experiments behind it are in
+pulsatility mask, phase masks, kinematics, prediction module). Each of the
+two expensive front-end stages reads the clip shrunk by its own factor
+(`RATE_DOWNSCALE`, `WAVELET_DOWNSCALE`); the wavelet field is upscaled back,
+so the masks and everything after them work at the input's resolution.
+Their design and the experiments behind it are in
 `cardioconv_cardiohydra_development_notes/`. The synthetic split trains on
 the high-SNR and demo sets and tests on the base set; `scripts/visualise.py`
 draws what a run looked at, scored against the synthetic vessel map.

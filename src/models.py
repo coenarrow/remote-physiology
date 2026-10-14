@@ -352,37 +352,38 @@ def _rate_network(cfg: CardioBaseConfig, interface: InterfaceConfig) -> nn.Modul
     """One copy of the architecture ``RATE_ESTIMATOR`` names, at its paper's
     switches (its config's defaults), for the model to read the heart rate
     off; ``None`` for the model's own spectral estimator. The copy is built
-    for the frame it will see, the interface's frame shrunk by ``DOWNSCALE``
-    (what the masks read too), so a dense layer is sized to it and a stem's
+    for the frame it will see, the interface's frame shrunk by
+    ``RATE_DOWNSCALE``, so a dense layer is sized to it and a stem's
     floor is checked against it."""
     name = cfg.RATE_ESTIMATOR
     if name == SPECTRAL_RATE:
         return None
     shrunk = dataclasses.replace(interface, RESIZE=ResizeConfig(      # 0 (no resize) stays 0
-        H=interface.RESIZE.H // cfg.DOWNSCALE, W=interface.RESIZE.W // cfg.DOWNSCALE))
+        H=interface.RESIZE.H // cfg.RATE_DOWNSCALE, W=interface.RESIZE.W // cfg.RATE_DOWNSCALE))
     return SINGLE_TRACE[name](MODEL_CONFIGS[name](NAME=name), shrunk)
 
 
 def _build_cardioconv(cfg: CardioConvConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "CardioConv", cardioconv.min_frame(cfg.DOWNSCALE))
+    _require_min_frame(interface, "CardioConv", cardioconv.min_frame(cfg.WAVELET_DOWNSCALE))
     _require_rate_tolerance(cfg, cardioconv.BUFFER_BPM)
     backbone = cardioconv.CardioConv(
         in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
         pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
         trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS,
-        rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM, downscale=cfg.DOWNSCALE,
-        rate_network=_rate_network(cfg, interface))
+        rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM, rate_downscale=cfg.RATE_DOWNSCALE,
+        wavelet_downscale=cfg.WAVELET_DOWNSCALE, rate_network=_rate_network(cfg, interface))
     return _wrap(backbone, interface, cfg)
 
 
 def _build_cardiohydra(cfg: CardioHydraConfig, interface: InterfaceConfig) -> MultiTraceModel:
-    _require_min_frame(interface, "CardioHydra", cardiohydra.min_frame(cfg.DOWNSCALE))
+    _require_min_frame(interface, "CardioHydra", cardiohydra.min_frame(cfg.WAVELET_DOWNSCALE))
     _require_rate_tolerance(cfg, cardiohydra.BUFFER_BPM)
     backbone = cardiohydra.CardioHydra(
         in_channels=len(interface.CHANNELS), traces=interface.TRACES, fs=interface.FS,
         pulsatility_masker=cfg.PULSATILITY_MASKER, phase_masker=cfg.PHASE_MASKER,
         supervise_masks=cfg.SUPERVISE_MASKS, rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM,
-        downscale=cfg.DOWNSCALE, mamba_lr_scale=cfg.MAMBA_LR_SCALE,
+        rate_downscale=cfg.RATE_DOWNSCALE, wavelet_downscale=cfg.WAVELET_DOWNSCALE,
+        mamba_lr_scale=cfg.MAMBA_LR_SCALE,
         rate_network=_rate_network(cfg, interface))
     return _wrap(backbone, interface, cfg)
 

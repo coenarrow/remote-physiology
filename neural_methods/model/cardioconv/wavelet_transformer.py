@@ -7,11 +7,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from neural_methods.model.cardioconv.utils import buffer_steps, centre_frequencies
+from neural_methods.model.cardioconv.utils import buffer_steps, centre_frequencies, shrink, upscale
 
 
 class WaveletTransformer(nn.Module):
-    """The complex wavelet field of a shrunk clip at the harmonics of its heart rate.
+    """The complex wavelet field of a clip at the harmonics of its heart rate.
+
+    The transform is taken on the clip shrunk by ``downscale`` (an area
+    average, :func:`~neural_methods.model.cardioconv.utils.shrink`) and the
+    field is upscaled bilinearly back to the clip's frame, so every stage
+    after this one works at the input's resolution while the transform, the
+    expensive step, runs on ``downscale ** 2`` fewer pixels.
 
     The continuous wavelet transform with the complex Morlet
     ``psi(t) = (pi B)^-1/2 exp(2 pi i C t) exp(-t^2 / B)`` has, at scale ``a``
@@ -37,12 +43,15 @@ class WaveletTransformer(nn.Module):
       buffer_bpm, step_bpm: the scales sit ``+-buffer_bpm`` around each
         harmonic, ``step_bpm`` apart.
       min_bpm: the lowest rate the model can be asked for; sets the pad.
+      downscale: the area shrink before the transform; 1 is none.
     """
 
     def __init__(self, fs: float, n_harmonics: int, bandwidth: float = 1.5, centre: float = 1.0,
-                 buffer_bpm: float = 10.0, step_bpm: float = 1.0, min_bpm: float = 30.0):
+                 buffer_bpm: float = 10.0, step_bpm: float = 1.0, min_bpm: float = 30.0,
+                 downscale: int = 1):
         super().__init__()
         self.fs = fs
+        self.downscale = downscale
         self.n_harmonics = n_harmonics
         self.bandwidth = bandwidth
         self.centre = centre
@@ -54,9 +63,10 @@ class WaveletTransformer(nn.Module):
         sigma_frames = (centre / slowest) * math.sqrt(bandwidth / 2.0)
         self.pad = math.ceil(4.0 * sigma_frames)
 
-    def forward(self, small: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
-        """``(B, C, T, h, w)`` shrunk clip and ``(B,)`` bpm -> the complex field
-        ``(B, C, T, h, w, K)``, ``K = n_scales``, harmonic-major."""
+    def forward(self, video: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
+        """``(B, C, T, H, W)`` clip and ``(B,)`` bpm -> the complex field
+        ``(B, C, T, H, W, K)``, ``K = n_scales``, harmonic-major."""
+        small = shrink(video, self.downscale)
         b, c, t, h, w = small.shape
         traces = rearrange(small.float(), "b c t h w -> b (c h w) t")
         traces = traces - traces.mean(dim=-1, keepdim=True)
@@ -74,4 +84,5 @@ class WaveletTransformer(nn.Module):
             # inverse transform alive until the harmonics are joined.
             fields.append(torch.fft.ifft(product, dim=-1)[..., self.pad:self.pad + t].clone())
         field = torch.cat(fields, dim=2)                                                # (B, P, K, T)
-        return rearrange(field, "b (c h w) k t -> b c t h w k", c=c, h=h, w=w)
+        field = rearrange(field, "b (c h w) k t -> b c t h w k", c=c, h=h, w=w)
+        return upscale(field, video.shape[-2:])

@@ -31,9 +31,12 @@
 #                                                   (RhythmFormer by default), one copy of
 #                                                   which predicts a waveform the rate is
 #                                                   read off, or Spectral (the model's own)
-#                          DOWNSCALE: <int >= 1>     area shrink of the frames before the
-#                                                   wavelet; the masks live on the shrunk
-#                                                   grid; 1 is none
+#                          RATE_DOWNSCALE: <int >= 1>  area shrink of the frames
+#                                                   the rate estimator reads; 1 is none
+#                          WAVELET_DOWNSCALE: <int >= 1>  area shrink of the frames
+#                                                   the wavelet transform reads; its field
+#                                                   is upscaled back, so the masks work at
+#                                                   the input's resolution; 1 is none
 #   CardioHydra            CardioConv's, without TRACE_INDEPENDENT, plus
 #                          MAMBA_LR_SCALE: <number > 0>  the Mamba trunks' rate as a
 #                                                   multiple of TRAIN.LR (0.1 in its configs)
@@ -117,7 +120,7 @@ TRAIN:
   OPTIMIZER: <string>            # Adam | AdamW (src/trainer.py OPTIMIZERS)
   LR: <number > 0>               # the learning rate, and OneCycle's peak
   WEIGHT_DECAY: <number >= 0>    # 0.0 = no decay
-  SCHEDULER: <string>            # OneCycle | Constant, stepped once per batch
+  SCHEDULER: <string>            # OneCycle | Constant | HoldCosine (constant, then cosine to 0 over the last third), stepped once per batch
                                  # (OneCycle over every step of the run;
                                  # Constant holds LR)
   PRECISION: <string>            # float32 | bfloat16 | float16 (autocast dtype;

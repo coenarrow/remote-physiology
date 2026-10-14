@@ -6,7 +6,8 @@ MODEL:
   SUPERVISE_MASKS: true
   RATE_TOLERANCE_BPM: 8.0        # training gate on the learned heart rate, inside the 10 bpm wavelet buffer
   RATE_ESTIMATOR: RhythmFormer          # the single-trace network the rate is read off, or Spectral
-  DOWNSCALE: 2                   # area shrink before the wavelet; the masks live on the shrunk grid; 1 is none
+  RATE_DOWNSCALE: 2              # area shrink of the clip the rate estimator reads; 1 is none
+  WAVELET_DOWNSCALE: 2           # area shrink before the wavelet, its field upscaled back; 1 is none
   REGULARISATION:                # the mask priors, and the rate estimator's terms
     PULSATILITY_TV: 0.005        # the attention over a region, not a speckle
     PULSATILITY_SATURATION: 1.0  # pull the map's raw correction back inside its bound
@@ -40,5 +41,5 @@ TRAIN:
   OPTIMIZER: Adam
   LR: 1e-3
   WEIGHT_DECAY: 0.0
-  SCHEDULER: Constant
+  SCHEDULER: HoldCosine           # the rate held, then a cosine to 0 over the last third: a constant rate left the held-out score swinging by 0.1 between epochs (notes, experiment 11)
   PRECISION: float32

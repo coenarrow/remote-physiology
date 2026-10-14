@@ -1,5 +1,5 @@
 """Functions CardioConv's modules share: the wavelet centre frequencies of a
-heart rate, the spatial shrink, circular statistics of a complex field, and
+heart rate, the spatial shrink and its inverse, circular statistics of a complex field, and
 presence-masked reduction."""
 
 import math
@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 
-EPS = 1e-6
+from neural_methods.model._shared_modules.utils import EPS
 
 
 def buffer_steps(buffer_bpm: float, step_bpm: float) -> int:
@@ -44,6 +44,23 @@ def shrink(video: torch.Tensor, factor: int) -> torch.Tensor:
     flat = rearrange(video.float(), "b c t h w -> (b c) t h w")
     small = F.interpolate(flat, scale_factor=1.0 / factor, mode="area")
     return rearrange(small, "(b c) t h w -> b c t h w", b=b)
+
+
+def upscale(field: torch.Tensor, size: tuple) -> torch.Tensor:
+    """``(B, C, T, h, w, K)`` complex -> ``(B, C, T, H, W, K)``: the field
+    resampled to ``size`` bilinearly, real and imaginary parts alike, one
+    harmonic group of scales at a time to bound the peak. The inverse of
+    :func:`shrink` for a smooth field; a field already at ``size`` is
+    returned as it is."""
+    b, c, t, h, w, k = field.shape
+    if (h, w) == tuple(size):
+        return field
+    parts = []
+    for part in torch.view_as_real(field).split(max(1, k // 3), dim=-2):
+        flat = rearrange(part, "b c t h w k r -> (b c t) (k r) h w")
+        big = F.interpolate(flat, size=tuple(size), mode="bilinear", align_corners=False)
+        parts.append(rearrange(big, "(b c t) (k r) h w -> b c t h w k r", b=b, c=c, r=2))
+    return torch.view_as_complex(torch.cat(parts, dim=-2).contiguous())
 
 
 def pearson(pred: torch.Tensor, label: torch.Tensor) -> torch.Tensor:

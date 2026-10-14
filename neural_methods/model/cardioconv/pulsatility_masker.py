@@ -6,7 +6,8 @@ import torch.nn.functional as F
 from einops import rearrange, reduce
 from torch.utils.checkpoint import checkpoint
 
-from neural_methods.model.cardioconv.utils import EPS, present_mean
+from neural_methods.model.cardioconv.utils import present_mean
+from neural_methods.model._shared_modules.utils import EPS
 
 
 class PulsatilityMasker(nn.Module):
@@ -68,8 +69,8 @@ class PulsatilityMasker(nn.Module):
             nn.Conv3d(hidden, 1, kernel_size=1),
         )
 
-    def forward(self, field: torch.Tensor, small: torch.Tensor, present: torch.Tensor) -> tuple:
-        """``(B, C, T, h, w, K)`` complex field, ``(B, C, T, h, w)`` shrunk clip
+    def forward(self, field: torch.Tensor, clip: torch.Tensor, present: torch.Tensor) -> tuple:
+        """``(B, C, T, h, w, K)`` complex field, ``(B, C, T, h, w)`` clip
         and ``(B, C)`` presence -> the mask ``(B, C, T, h, w)`` (one map per
         window, expanded over the frames), summing to one over ``(h, w)``,
         and its priors ``{term: ()}``."""
@@ -80,7 +81,7 @@ class PulsatilityMasker(nn.Module):
         with torch.no_grad():
             power = field.abs()
             scale = reduce(power, "b c t h w k -> b c 1 1 1 1", "mean").clamp_min(EPS)
-            variance = small.float().var(dim=2, keepdim=True)                         # (B, C, 1, h, w)
+            variance = clip.float().var(dim=2, keepdim=True)                         # (B, C, 1, h, w)
             band = reduce(power ** 2, "b c t h w k -> b c t h w", "sum")
             # Floors relative to the channel, the band's far below the
             # variance's, so a static pixel (no band power, no variance)

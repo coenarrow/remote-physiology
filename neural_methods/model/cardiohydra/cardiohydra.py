@@ -2,7 +2,8 @@
 and a state-space trunk per trace.
 
 CardioConv's front end with a different reading of what the masks select.
-The first four stages are CardioConv's own modules, loaded from its package:
+The first four stages are CardioConv's own modules, loaded from its package,
+and the fifth is the kinematics both models share:
 
 1. :class:`~neural_methods.model.cardioconv.waveform_rate_estimator.WaveformRateEstimator`
    reads the heart rate off the waveform of a single-trace network
@@ -17,7 +18,7 @@ The first four stages are CardioConv's own modules, loaded from its package:
 4. :class:`~neural_methods.model.cardioconv.phase_masker.PhaseMasker` turns
    its phase, relative to the channel's own pulse, into one mask per trace
    plus background, per window, in one softmax;
-5. :class:`~neural_methods.model.cardiohydra.kinematics.Kinematics` reads how
+5. :class:`~neural_methods.model._shared_modules.kinematics.Kinematics` reads how
    the pulse travels off the field's phase gradient: per pixel, its
    wavenumber, speed and heading (not learned);
 6. :class:`~neural_methods.model.cardiohydra.ssm_predictor.SSMPredictor`
@@ -34,8 +35,7 @@ softmax. Cardiac traces only.
 
 The rate is learned and training gates on it, exactly as in CardioConv; see
 that module's docstring, which also has the mask redesign of 2026-10-10 and
-the ``capture`` switch for the visualiser (here the captured dict also holds
-the kinematics' speed and heading). The regularisers are CardioConv's too:
+the ``capture`` switch for the visualiser. The regularisers are CardioConv's too:
 the mask priors and the estimator's terms.
 
 Differences from the CardioHydra repository's model, beside those CardioConv
@@ -46,7 +46,7 @@ is one-sided at the borders of the grid and the window instead of wrapping
 around them.
 
 Any window length is accepted. Frames may be any size from
-``min_frame(downscale)``. CUDA only: Mamba3's kernels are Triton. All
+``min_frame(wavelet_downscale)``. CUDA only: Mamba3's kernels are Triton. All
 reshaping is einops.
 """
 
@@ -56,9 +56,7 @@ import torch
 import torch.nn as nn
 from einops import reduce
 
-from neural_methods.model.cardiohydra.kinematics import Kinematics
 from neural_methods.model.cardiohydra.ssm_predictor import SSMPredictor
-from neural_methods.model.cardiohydra.utils import pooled_speed
 from neural_methods.model.cardioconv.cardioconv import (
     BUFFER_BPM, N_HARMONICS, PHASE_BOUND, PHASE_PRIORS, PULSATILITY_BOUND, PULSATILITY_PRIORS, RATE_TERMS,
     STEP_BPM, CardioConv, capture, min_frame,
@@ -67,10 +65,10 @@ from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
 from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
-from neural_methods.model.cardioconv.utils import shrink
 from neural_methods.model.cardioconv.waveform_rate_estimator import WaveformRateEstimator
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
-from neural_methods.model._shared_modules.utils import require_min_frame
+from neural_methods.model._shared_modules.kinematics import Kinematics
+from neural_methods.model._shared_modules.utils import pooled_speed, require_min_frame
 
 __all__ = ["BUFFER_BPM", "CardioHydra", "min_frame"]
 
@@ -95,7 +93,8 @@ class CardioHydra(nn.Module):
 
     def __init__(self, in_channels: int, traces: tuple, fs: float, pulsatility_masker: bool = True,
                  phase_masker: bool = True, supervise_masks: bool = True,
-                 rate_tolerance_bpm: float = 8.0, downscale: int = 2,
+                 rate_tolerance_bpm: float = 8.0, rate_downscale: int = 2,
+                 wavelet_downscale: int = 2,
                  mamba_lr_scale: float = 0.1, rate_network: nn.Module = None):
         """Definition of CardioHydra.
 
@@ -112,8 +111,11 @@ class CardioHydra(nn.Module):
           rate_tolerance_bpm: in training, a sample whose estimated rate is
             further than this from its target skips everything after the
             estimator. Must be inside ``BUFFER_BPM``.
-          downscale: the area shrink before the estimator and the wavelet;
-            every mask lives on the shrunk grid. 1 is none.
+          rate_downscale: the area shrink of the clip the rate estimator
+            reads. 1 is none.
+          wavelet_downscale: the area shrink of the clip the wavelet
+            transform reads; its field is upscaled back, so the masks and
+            everything after them work at the input's resolution. 1 is none.
           mamba_lr_scale: the trunks' Mamba blocks train at this multiple of
             the recipe's learning rate (the trainer reads the ``_lr_scale``
             flag), as PhysMamba's layers do. On Neckflix the CVP phase mask
@@ -128,15 +130,15 @@ class CardioHydra(nn.Module):
         self.fs = fs
         self.rate_tolerance_bpm = rate_tolerance_bpm
         self.supervise_masks = supervise_masks
-        self.downscale = downscale
-        self.min_frame = min_frame(downscale)
+        self.min_frame = min_frame(wavelet_downscale)
         n_traces = len(self.traces)
-        self.rate_estimator = (RateEstimator(in_channels, fs) if rate_network is None
-                               else WaveformRateEstimator(rate_network, fs))
+        self.rate_estimator = (RateEstimator(in_channels, fs, downscale=rate_downscale)
+                               if rate_network is None
+                               else WaveformRateEstimator(rate_network, fs, downscale=rate_downscale))
         # The bank's pad covers the slowest kernel the estimator can ask for.
         self.wavelet_transformer = WaveletTransformer(
             fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, step_bpm=STEP_BPM,
-            min_bpm=float(self.rate_estimator.bins[0]))
+            min_bpm=float(self.rate_estimator.bins[0]), downscale=wavelet_downscale)
         self.pulsatility_masker = (
             PulsatilityMasker(self.wavelet_transformer.n_scales, PULSATILITY_BOUND)
             if pulsatility_masker else None)
@@ -177,9 +179,9 @@ class CardioHydra(nn.Module):
                 "CardioHydra runs on CUDA only: Mamba3's kernels are Triton. "
                 "Drop --no-gpu, or use CardioConv, which has a CPU path.")
         present = reduce(video.abs(), "b c t h w -> b c", "max") > 0
-        small = shrink(video, self.downscale)
-        rate, logits = self.rate_estimator(video, small, present)
-        zero = small.new_zeros(())
+        clip = video.float()
+        rate, logits = self.rate_estimator(clip, present)
+        zero = clip.new_zeros(())
 
         keep = 1.0                                # weight of the mask priors
         if target_rate is None:
@@ -203,36 +205,33 @@ class CardioHydra(nn.Module):
         self.sample_mask = passed
 
         index = run.nonzero().squeeze(1)
-        subset, priors = self.predict(small[index], present[index], rate[index])
-        out = small.new_zeros(video.shape[0], len(self.traces), video.shape[2])
+        subset, priors = self.predict(clip[index], present[index], rate[index])
+        out = clip.new_zeros(video.shape[0], len(self.traces), video.shape[2])
         out[index] = subset.to(out.dtype)       # autocast may have left the head in half precision
         self._regularisers = {trace: {**{term: value * keep for term, value in own.items()}, **terms}
                               for trace, own in zip(self.traces, priors)}
         return out
 
-    def predict(self, small: torch.Tensor, present: torch.Tensor, rate: torch.Tensor) -> tuple:
-        """Everything after the estimator, on the samples that run: ``(b, C, T, h, w)``
-        shrunk clip, ``(b, C)`` presence and ``(b,)`` bpm -> ``(b, S, T)`` and
+    def predict(self, clip: torch.Tensor, present: torch.Tensor, rate: torch.Tensor) -> tuple:
+        """Everything after the estimator, on the samples that run: ``(b, C, T, H, W)``
+        clip, ``(b, C)`` presence and ``(b,)`` bpm -> ``(b, S, T)`` and
         each trace's mask priors, ``[{term: ()}]`` in traces order."""
         with torch.no_grad():                     # a feature, not a path (see CardioConv.predict)
-            field = self.wavelet_transformer(small, rate)
+            field = self.wavelet_transformer(clip, rate)
             power = field.abs()
-        pulsatility, phase_masks, background, shared, per_trace = self.masks(small, field, present)
+        pulsatility, phase_masks, background, shared, per_trace = self.masks(clip, field, present)
         # The shared priors belong to every trace alike, so each trace
         # reports them: the trainer's total is the mean over traces.
         priors = [{**shared, **own} for own in per_trace]
 
         kinematics = self.kinematics(field)
-        shapes = self.ssm_predictor(field, power, small, pulsatility, phase_masks, kinematics,
+        shapes = self.ssm_predictor(field, power, clip, pulsatility, phase_masks, kinematics,
                                     present)
         speed = pooled_speed(kinematics["phase_speed"], pulsatility, phase_masks, present,
                              self.supervise_masks)
-        out = self.statistics_head(shapes, power, small, pulsatility, phase_masks, rate, present,
+        out = self.statistics_head(shapes, power, clip, pulsatility, phase_masks, rate, present,
                                    extra=speed)
         if self.capture:
-            self.captured = {
-                **capture(small, rate, power, pulsatility, phase_masks, background, N_HARMONICS),
-                "phase_speed": kinematics["phase_speed"],
-                "direction_x": kinematics["direction_x"], "direction_y": kinematics["direction_y"],
-            }
+            self.captured = capture(clip, rate, power, pulsatility, phase_masks, background,
+                                    N_HARMONICS, kinematics, speed)
         return out, priors

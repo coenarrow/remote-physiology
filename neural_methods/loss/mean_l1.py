@@ -1,8 +1,8 @@
 """Absolute error of the window mean: mean arterial pressure, in mmHg.
 
-The evaluation's counterpart is ``err_mean`` (``src/evaluation/recording.py``),
-the per-beat mean averaged over the recording's beats; over a window of many
-beats the two differ only by the partial beats at its edges.
+The evaluation's counterparts are ABP mean and CVP mean
+(``src/evaluation/measurements.py``), the sample mean of each 10 s
+measurement; the two differ only in the span they average over.
 """
 
 import torch.nn as nn

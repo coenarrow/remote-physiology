@@ -1,10 +1,11 @@
-"""Shrunk clip -> the heart rate, as a softmax over 1 bpm bins."""
+"""Clip -> the heart rate, as a softmax over 1 bpm bins, read off the clip shrunk."""
 
 import torch
 import torch.nn as nn
 from einops import einsum, rearrange, reduce
 
-from neural_methods.model.cardioconv.utils import EPS
+from neural_methods.model._shared_modules.utils import EPS
+from neural_methods.model.cardioconv.utils import shrink
 
 #: The two per-pixel statistics the spatial attention reads.
 N_STATISTICS = 2
@@ -87,12 +88,14 @@ class RateEstimator(nn.Module):
       low_bpm, high_bpm: the grid, inclusive, 1 bpm apart.
       hidden: width of the head.
       attention_hidden: width of the attention's hidden layer.
+      downscale: the area shrink of the clip the estimator reads; 1 is none.
     """
 
     def __init__(self, in_channels: int, fs: float, low_bpm: float = 30.0, high_bpm: float = 200.0,
-                 hidden: int = 16, attention_hidden: int = 8):
+                 hidden: int = 16, attention_hidden: int = 8, downscale: int = 1):
         super().__init__()
         self.fs = fs
+        self.downscale = downscale
         self.register_buffer("bins", torch.arange(low_bpm, high_bpm + 1.0, dtype=torch.float32))
         self.attention = nn.Sequential(
             nn.Conv2d(N_STATISTICS, attention_hidden, kernel_size=3, padding=1, padding_mode="replicate"),
@@ -128,11 +131,12 @@ class RateEstimator(nn.Module):
         """Zero: this estimator predicts no waveform to compare with one."""
         return target.new_zeros(())
 
-    def forward(self, video: torch.Tensor, small: torch.Tensor, present: torch.Tensor) -> tuple:
-        """``(B, C, T, h, w)`` shrunk clip and ``(B, C)`` presence -> the rate
-        ``(B,)`` in bpm and the logits ``(B, n_bins)`` it was read from. The
-        full clip ``video`` is not read."""
-        spectra = self.spectra(self.traces(small)) * rearrange(present.float(), "b c -> b c 1")
+    def forward(self, video: torch.Tensor, present: torch.Tensor) -> tuple:
+        """``(B, C, T, H, W)`` clip and ``(B, C)`` presence -> the rate ``(B,)``
+        in bpm and the logits ``(B, n_bins)`` it was read from, off the clip
+        shrunk by ``downscale``."""
+        traces = self.traces(shrink(video, self.downscale))
+        spectra = self.spectra(traces) * rearrange(present.float(), "b c -> b c 1")
         logits = rearrange(self.head(spectra), "b 1 k -> b k").float()
         # Elementwise, not a matmul: autocast would run the matmul in half
         # precision and quantise the rate to half a bpm.

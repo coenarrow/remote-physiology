@@ -17,12 +17,30 @@ which it reduces when every subject contributes equally. Errors are
 prediction minus reference. :func:`repeated_measures` and :func:`limits`
 take arrays and return numbers; :func:`agreement` and
 :func:`waveform_agreement` run them over the scored frames into one table.
+
+Beside the ISO statistics, which see only the error, :func:`tracking` says
+whether the prediction follows the reference's level at all. A model that
+predicts the population average scores a fair mean error and SD on a narrow
+test set while carrying no information about the subject. These columns are
+descriptive, not ISO statistics:
+
+- ``ref_sd`` and ``pred_sd``: the spread of each side across measurements. A
+  prediction far narrower than its reference is shrinking towards a mean.
+- ``r_between`` and ``slope_between``: Pearson's r and the least-squares
+  slope of the per-subject mean prediction on the per-subject mean
+  reference, one point per subject. They need three subjects.
+- ``r_within`` and ``slope_within``: the same on values centred within each
+  subject, which is how each subject's own changes are followed.
+
+A slope of 1 tracks the level, 0 is a constant predictor, and in between
+the prediction shrinks towards the mean. ``tracking_note`` says why a value
+is not estimable.
 """
 
 import numpy as np
 import pandas as pd
 
-from src.evaluation.measurements import PARAMETERS, WAVEFORM_METRICS, pairs_of
+from src.evaluation.measurements import PARAMETERS, WAVEFORM_METRICS, pairs_of, pearson
 
 #: Limits of agreement are the mean error plus and minus this many s_corr.
 LIMIT_Z = 1.96
@@ -71,6 +89,48 @@ def repeated_measures(error, subject) -> dict:
     return out
 
 
+def _slope(x: np.ndarray, y: np.ndarray) -> float:
+    """The least-squares slope of ``y`` on ``x``, both already centred."""
+    denominator = float((x ** 2).sum())
+    return float((x * y).sum() / denominator) if denominator > 0 else _NAN
+
+
+def tracking(ref, pred, subject) -> dict:
+    """The level-tracking columns of the module docstring."""
+    ref = np.asarray(ref, dtype=np.float64)
+    pred = np.asarray(pred, dtype=np.float64)
+    ids, index = np.unique(np.asarray(subject, dtype=str), return_inverse=True)
+    n, k = ref.size, ids.size
+    out = {"ref_sd": float(ref.std(ddof=1)) if n > 1 else _NAN,
+           "pred_sd": float(pred.std(ddof=1)) if n > 1 else _NAN,
+           "r_between": _NAN, "slope_between": _NAN,
+           "r_within": _NAN, "slope_within": _NAN}
+    notes = []
+    if n == 0:
+        out["tracking_note"] = "no paired measurements"
+        return out
+    counts = np.bincount(index, minlength=k).astype(np.float64)
+    ref_mean = np.bincount(index, weights=ref, minlength=k) / counts
+    pred_mean = np.bincount(index, weights=pred, minlength=k) / counts
+    if k < 3:
+        notes.append("fewer than three subjects: no between-subject tracking")
+    else:
+        out["r_between"] = pearson(ref_mean, pred_mean)
+        out["slope_between"] = _slope(ref_mean - ref_mean.mean(), pred_mean - pred_mean.mean())
+        if not np.isfinite(out["slope_between"]):
+            notes.append("the subjects' mean references do not vary")
+    if n == k:
+        notes.append("one measurement per subject: no within-subject tracking")
+    else:
+        ref_centred, pred_centred = ref - ref_mean[index], pred - pred_mean[index]
+        out["r_within"] = pearson(ref_centred, pred_centred)
+        out["slope_within"] = _slope(ref_centred, pred_centred)
+        if not np.isfinite(out["slope_within"]):
+            notes.append("the reference does not vary within any subject")
+    out["tracking_note"] = "; ".join(notes)
+    return out
+
+
 def limits(stats: dict) -> tuple:
     """The 95 % limits of agreement, on the corrected SD."""
     half = LIMIT_Z * stats["s_corr"]
@@ -80,12 +140,13 @@ def limits(stats: dict) -> tuple:
 def agreement(frames: dict) -> pd.DataFrame:
     """One row per parameter: the repeated-measures accuracy statistics of
     its errors over the measurements that have one, the participant as the
-    subject."""
+    subject, and the level-tracking columns of :func:`tracking`."""
     rows = []
     for p in PARAMETERS:
         pairs = pairs_of(frames[p.name], p)
         rows.append({"parameter": p.name,
-                     **repeated_measures(pairs["error"], pairs["subject"])})
+                     **repeated_measures(pairs["error"], pairs["subject"]),
+                     **tracking(pairs["ref"], pairs["pred"], pairs["subject"])})
     return pd.DataFrame(rows)
 
 

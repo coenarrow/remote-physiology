@@ -1,5 +1,15 @@
 # CardioConv and CardioHydra, 2026-10-10 overnight: summary
 
+**2026-10-12 (experiment 8, `experiment_8.md`):**
+- **Changes.**
+  - The evaluator scores level tracking and CVP max/min.
+  - CardioConv runs the kinematics.
+  - `RATE_DOWNSCALE` and `WAVELET_DOWNSCALE` replace `DOWNSCALE`, and the
+    masks work at input resolution.
+- **Fit probe.** At Neckflix 72 px, batch 2, both models fit with rate 2 /
+  wavelet 1, CardioHydra only by 0.1 GB. At 128 px nothing fits.
+- **Not trained yet.**
+
 **Superseded in part on 2026-10-11 afternoon (experiment 7):** the masks
 described below collapsed under long training (end of `experiment_6.md`)
 and were redesigned with bounded corrections (`experiment_7.md`): no mask
