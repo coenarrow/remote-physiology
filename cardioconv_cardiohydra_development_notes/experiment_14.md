@@ -316,3 +316,18 @@ The rate is right (0.1 bpm).
 models is the design, not the tuning: a linear mixer over masked means
 cannot do what the Mamba trunk does with the per-frame power, phase and
 kinematic features, on either participant.
+
+## Addendum: arm 7, CardioConv (dense mixer) at `LR` 5e-4 (`cardioconv_lr5e-4`), 17:17-19:09, stopped after epoch 6
+
+Run last, on the shipped dense mixer, against the dense arm's own P033 curve:
+
+| Epoch | ABP CCC / r | dense at 1e-3 | CVP CCC / r | dense at 1e-3 |
+| --- | --- | --- | --- | --- |
+| 2 | 0.20 / 0.27 | 0.36 / 0.47 | 0.17 / 0.29 | 0.18 / 0.29 |
+| 4 | 0.24 / 0.38 | 0.39 / 0.54 | 0.14 / 0.23 | 0.16 / 0.27 |
+| 6 | 0.29 / 0.47 | 0.38 / 0.59 | 0.14 / 0.23 | 0.23 / 0.39 |
+
+**Verdict: not shipped; 1e-3 stands for CardioConv too.** Half the rate is
+behind at every epoch on both traces, with the training loss in the usual
+band (0.42 at epoch 4). The last of the day's seven arms; the chain ended
+with its queue empty.
