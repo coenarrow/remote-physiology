@@ -1,0 +1,11 @@
+# CardioConv tuning arm: the channel mixer at 31 taps and 32 hidden channels
+# per trace (15 and 16 at the baseline), each trace from its own candidates
+# as the baseline then was. Verdict: nothing moved (every held-out score
+# within 0.05 of the baseline's, training ABP CCC loss 0.38 against 0.40 at
+# epoch 6); the mixer's capacity is not CardioConv's limit (notes,
+# experiment 14, arm 3).
+BASE: ../hpc_configs_200/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+MODEL:
+  TRACE_INDEPENDENT: true
+  MIXER_TAPS: 31
+  MIXER_HIDDEN: 32

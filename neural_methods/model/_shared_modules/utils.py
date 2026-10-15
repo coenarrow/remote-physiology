@@ -26,6 +26,9 @@ consumer:
   of a wavelet field (:class:`Kinematics`) and the two ways a model reads
   them: per frame under its masks, and as a speed pooled per window. Used by
   CardioConv and CardioHydra.
+* :func:`window_weight` and :func:`mask_area` — the pooling weight of the
+  per-window masks, the one map every pooling site of CardioConv and
+  CardioHydra contracts per-frame tensors against, and the mass under it.
 """
 
 import torch
@@ -77,11 +80,17 @@ def collapse_harmonics(field: torch.Tensor, n_harmonics: int, sharpness: float) 
     across the narrow buffer, is kept. The magnitudes are scaled to their
     per-harmonic maximum first, so the power cannot overflow."""
     grouped = rearrange(field, "b c t h w (n j) -> b c t h w n j", n=n_harmonics)
-    magnitude = grouped.abs()
-    magnitude = magnitude / magnitude.amax(dim=-1, keepdim=True).clamp_min(1e-12)
-    weights = magnitude ** sharpness
-    weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-    return (grouped * weights).sum(dim=-1)
+    # One harmonic at a time, written into the output: the temporaries are a
+    # harmonic's scales, not the whole field's.
+    out = field.new_empty(grouped.shape[:-1])
+    for n in range(n_harmonics):
+        scales = grouped[..., n, :]
+        weights = scales.abs()
+        weights = weights / weights.amax(dim=-1, keepdim=True).clamp_min(1e-12)
+        weights = weights ** sharpness
+        weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        out[..., n] = (scales * weights).sum(dim=-1)
+    return out
 
 
 def phase_gradient(field: torch.Tensor, dim: int) -> torch.Tensor:
@@ -108,16 +117,31 @@ def kinematic_features(kinematics: dict) -> list:
     ]
 
 
-def pooled_speed(speed: torch.Tensor, pulsatility: torch.Tensor, phase_masks: torch.Tensor,
-                 present: torch.Tensor, supervise_masks: bool) -> torch.Tensor:
-    """``(B, C, T, h, w, N)`` phase speed -> ``(B, C * S * N)``: ``log1p`` of its
-    magnitude, averaged under each trace's mask per channel and harmonic,
-    zero for an absent channel. Normalised by the mask's area, like the
-    statistics head's pooled power, and detached from the masks with it."""
-    weight = rearrange(pulsatility, "b c t h w -> b c t h w 1") * phase_masks
+def window_weight(pulsatility: torch.Tensor, phase_masks: torch.Tensor) -> torch.Tensor:
+    """``(B, C, h, w)`` pulsatility and ``(B, C, h, w, S)`` trace masks, one
+    map per window each -> ``(B, C, h, w, S)``, the pooling weight
+    ``pulsatility * trace mask``. Every pooling site contracts its per-frame
+    tensor against this one map, so the weight is never materialised over
+    the frames."""
+    return rearrange(pulsatility, "b c h w -> b c h w 1") * phase_masks
+
+
+def mask_area(weight: torch.Tensor) -> torch.Tensor:
+    """``(B, C, h, w, S)`` pooling weight -> ``(B, C, S)``: the mass under each
+    trace's weight, floored at ``EPS`` so a mean over it is finite."""
+    return reduce(weight, "b c h w s -> b c s", "sum").clamp_min(EPS)
+
+
+def pooled_speed(speed: torch.Tensor, weight: torch.Tensor, present: torch.Tensor,
+                 supervise_masks: bool) -> torch.Tensor:
+    """``(B, C, T, h, w, N)`` phase speed and the pooling weight ``(B, C, h, w, S)``
+    on its grid -> ``(B, C * S * N)``: ``log1p`` of the speed's magnitude,
+    averaged under each trace's mask per channel and harmonic, zero for an
+    absent channel. Normalised by the mask's area, like the statistics
+    head's pooled power, and detached from the masks with it."""
     if not supervise_masks:
         weight = weight.detach()
-    area = reduce(weight, "b c t h w s -> b c s 1", "sum").clamp_min(EPS)
-    pooled = einsum(torch.log1p(speed.abs()), weight, "b c t h w n, b c t h w s -> b c s n") / area
+    area = rearrange(mask_area(weight), "b c s -> b c s 1") * speed.shape[2]
+    pooled = einsum(torch.log1p(speed.abs()), weight, "b c t h w n, b c h w s -> b c s n") / area
     pooled = pooled * rearrange(present.to(pooled.dtype), "b c -> b c 1 1")
     return rearrange(pooled, "b c s n -> b (c s n)")

@@ -76,9 +76,12 @@ per-label constants; a channel's presence is read off the clip (an absent
 channel is a zero-filled plane) instead of a mask in the batch; and the clip
 is shrunk only where it is expensive to read, by a factor each (the rate
 estimator's ``rate_downscale``, the wavelet transform's
-``wavelet_downscale``), the field upscaled back, so the masks and every
-stage after them work at the input's resolution (2026-10-12; until then one
-shrink at the top put every stage on the shrunk grid). The masks were
+``wavelet_downscale``); the masks, the kinematics and every reading of the
+field work on the wavelet's grid, and only the masks are read at the input's
+resolution, upscaled bilinearly, to pool the clip (2026-10-14; from 2026-10-12 the field itself was upscaled and every later
+stage ran at the input's resolution, which put the step's memory peak in
+the mask networks; until then one shrink at the top put every stage on the
+shrunk grid). The masks were
 redesigned on 2026-10-10 after both had collapsed in every training run
 (``cardioconv_cardiohydra_development_notes/``): the pulsatility mask is a
 softmax over pixels instead of a sigmoid, the phase masker reads the phase
@@ -105,7 +108,7 @@ einops.
 
 import torch
 import torch.nn as nn
-from einops import reduce
+from einops import rearrange, reduce
 
 from neural_methods.model.cardioconv.channel_mixer import ChannelMixer
 from neural_methods.model.cardioconv.channel_predictor import ChannelPredictor
@@ -113,11 +116,12 @@ from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
 from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
+from neural_methods.model.cardioconv.utils import shrink, upscale
 from neural_methods.model.cardioconv.waveform_rate_estimator import WaveformRateEstimator
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
 from neural_methods.model._shared_modules.kinematics import Kinematics
 from neural_methods.model._shared_modules.utils import (
-    KINEMATIC_FEATURES, kinematic_features, pooled_speed, require_min_frame,
+    EPS, KINEMATIC_FEATURES, kinematic_features, pooled_speed, require_min_frame, window_weight,
 )
 
 #: Harmonics of the heart rate the wavelet scales cover.
@@ -139,14 +143,15 @@ MIN_GRID = 3
 #: (2026-10-11, experiments 5, 6a, 6b). The pulsatility map's: two pixels'
 #: weights move against each other by at most e^(2 x 1.5), about 20, relative
 #: to the pulsatility index's. The phase masks': two classes' logits move
-#: against each other by at most 2 x 0.9 nats, under the phase bins' 2 nats
-#: between a coherent trace pixel and the background (``PHASE_GAIN``), so
-#: where the phase holds the phase decides.
+#: against each other by at most 2 x 0.9 nats, under the phase bins' 4 nats
+#: between a coherent trace pixel and the background (``PHASE_GAIN`` each
+#: way, since the background's bin falls with coherence), so where the phase
+#: holds the phase decides.
 PULSATILITY_BOUND = 1.5
 PHASE_BOUND = 0.9
 
 PULSATILITY_PRIORS = ("pulsatility_tv", "pulsatility_saturation")
-PHASE_PRIORS = ("background_pulsatile", "phase_saturation", "harmonic_coherence", "spatial_coherence",
+PHASE_PRIORS = ("phase_saturation", "harmonic_coherence", "spatial_coherence",
                 "temporal_consistency", "phase_tv")
 RATE_TERMS = ("rate", "rate_error", "rate_waveform")
 
@@ -165,7 +170,7 @@ class CardioConv(nn.Module):
                  phase_masker: bool = True, trace_independent: bool = True,
                  supervise_masks: bool = True, rate_tolerance_bpm: float = 8.0,
                  rate_downscale: int = 2, wavelet_downscale: int = 2,
-                 rate_network: nn.Module = None):
+                 rate_network: nn.Module = None, mixer_hidden: int = 16, mixer_taps: int = 15):
         """Definition of CardioConv.
 
         Args:
@@ -185,16 +190,21 @@ class CardioConv(nn.Module):
           rate_downscale: the area shrink of the clip the rate estimator
             reads. 1 is none.
           wavelet_downscale: the area shrink of the clip the wavelet
-            transform reads; its field is upscaled back, so the masks and
-            everything after them work at the input's resolution. 1 is none.
+            transform reads; the masks, the kinematics and every reading of
+            the field work on that grid, and the masks are read at the
+            input's resolution only to pool the clip. 1 is none.
           rate_network: one copy of a single-trace architecture to read the
             rate off (``WaveformRateEstimator``); ``None`` is the spectral
             ``RateEstimator``.
+          mixer_hidden: channels of each trace's temporal layer in the
+            channel mixer.
+          mixer_taps: taps of that layer; odd. 15 is half a beat at 30 fps.
         """
         super().__init__()
         self.traces = tuple(traces)
         self.fs = fs
         self.rate_tolerance_bpm = rate_tolerance_bpm
+        self.wavelet_downscale = wavelet_downscale
         self.min_frame = min_frame(wavelet_downscale)
         n_traces = len(self.traces)
         self.rate_estimator = (RateEstimator(in_channels, fs, downscale=rate_downscale)
@@ -203,16 +213,18 @@ class CardioConv(nn.Module):
         # The bank's pad covers the slowest kernel the estimator can ask for.
         self.wavelet_transformer = WaveletTransformer(
             fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, step_bpm=STEP_BPM,
-            min_bpm=float(self.rate_estimator.bins[0]), downscale=wavelet_downscale)
+            min_bpm=float(self.rate_estimator.bins[0]))
         self.pulsatility_masker = (
             PulsatilityMasker(self.wavelet_transformer.n_scales, PULSATILITY_BOUND)
             if pulsatility_masker else None)
-        self.phase_masker = (PhaseMasker(in_channels, n_traces, N_HARMONICS, PHASE_BOUND)
+        self.phase_masker = (PhaseMasker(in_channels, n_traces, N_HARMONICS, PHASE_BOUND,
+                                         self.wavelet_transformer.bandwidth)
                              if phase_masker else None)
-        self.kinematics = Kinematics(N_HARMONICS)
+        self.kinematics = Kinematics(N_HARMONICS, pixel=wavelet_downscale)
         self.channel_predictor = ChannelPredictor()
         self.channel_mixer = ChannelMixer(in_channels, n_traces,
-                                          N_HARMONICS * len(KINEMATIC_FEATURES), trace_independent)
+                                          N_HARMONICS * len(KINEMATIC_FEATURES), trace_independent,
+                                          hidden=mixer_hidden, kernel=mixer_taps)
         self.statistics_head = StatisticsHead(in_channels, n_traces, N_HARMONICS,
                                               supervise_masks=supervise_masks,
                                               n_extra=in_channels * n_traces * N_HARMONICS)
@@ -268,26 +280,42 @@ class CardioConv(nn.Module):
                               for trace, own in zip(self.traces, priors)}
         return out
 
-    def masks(self, clip: torch.Tensor, field: torch.Tensor, present: torch.Tensor) -> tuple:
-        """The two mask stages on the field: the pulsatility distribution
-        ``(b, C, T, h, w)``, the trace masks ``(b, C, T, h, w, S)``, the
-        background mask ``(b, C, T, h, w)`` and the priors shared by every
-        trace and each trace's own, ``({term: ()}, [{term: ()}])``. An
-        ablated stage returns its neutral mask and zero priors."""
-        zero = clip.new_zeros(())
+    def masks(self, small: torch.Tensor, field: torch.Tensor, power: torch.Tensor,
+              present: torch.Tensor, size: tuple, rate: torch.Tensor) -> tuple:
+        """The two mask stages on the field and its power, on the field's grid
+        ``(h, w)``: the pulsatility distribution ``(b, C, h, w)``, the trace
+        masks ``(b, C, h, w, S)`` and the background mask ``(b, C, h, w)``;
+        the same three read at the input's grid ``size``, upscaled
+        bilinearly (the distribution renormalised; the classes a convex
+        blend, so they still sum to one), which is what pools the clip; and
+        the priors shared by every trace and each trace's own,
+        ``({term: ()}, [{term: ()}])``. An ablated stage returns its neutral
+        mask and zero priors."""
+        b, c, _, h, w = small.shape
+        zero = small.new_zeros(())
         if self.pulsatility_masker is None:
-            pulsatility = torch.full_like(clip, 1.0 / (clip.shape[-2] * clip.shape[-1]))
+            pulsatility = small.new_full((b, c, h, w), 1.0 / (h * w))
             shared = dict.fromkeys(PULSATILITY_PRIORS, zero)
         else:
-            pulsatility, shared = self.pulsatility_masker(field, clip, present)
+            pulsatility, shared = self.pulsatility_masker(power, small, present)
+        fine = upscale(rearrange(pulsatility, "b c h w -> b c h w 1"), size)[..., 0]
+        pulsatility_fine = fine / reduce(fine, "b c h w -> b c 1 1", "sum").clamp_min(EPS)
         if self.phase_masker is None:
-            phase_masks = clip.new_ones(*clip.shape, len(self.traces))
-            background = torch.zeros_like(clip)
+            phase_masks = small.new_ones(b, c, h, w, len(self.traces))
+            background = small.new_zeros(b, c, h, w)
+            phase_fine = small.new_ones(b, c, *size, len(self.traces))
+            background_fine = small.new_zeros(b, c, *size)
             per_trace = [dict.fromkeys(PHASE_PRIORS, zero) for _ in self.traces]
         else:
-            phase_masks, background, per_trace, also = self.phase_masker(field, pulsatility, present)
+            # Beats in the window at the estimated rate, a feature not a path:
+            # the rate network trains on its own terms (see predict).
+            beats = field.shape[2] * rate.detach() / (60.0 * self.fs)    # (b,)
+            phase_masks, background, per_trace, also = self.phase_masker(field, pulsatility, present, beats)
             shared = {**shared, **also}
-        return pulsatility, phase_masks, background, shared, per_trace
+            classes = upscale(torch.cat([phase_masks, background[..., None]], dim=-1), size)
+            phase_fine, background_fine = classes[..., :-1], classes[..., -1]
+        return ((pulsatility, phase_masks, background), (pulsatility_fine, phase_fine, background_fine),
+                shared, per_trace)
 
     def predict(self, clip: torch.Tensor, present: torch.Tensor, rate: torch.Tensor) -> tuple:
         """Everything after the estimator, on the samples that run: ``(b, C, T, H, W)``
@@ -295,38 +323,43 @@ class CardioConv(nn.Module):
         each trace's mask priors, ``[{term: ()}]`` in traces order."""
         # The field is a feature of the clip at the estimated rate, not a path:
         # the rate network trains on its own terms, and nothing of the field
-        # is kept for the backward pass (at the input's grid it is the largest
-        # tensor in the model).
+        # is kept for the backward pass (it is the largest tensor in the model).
         with torch.no_grad():
-            field = self.wavelet_transformer(clip, rate)
+            small = shrink(clip, self.wavelet_downscale)
+            field = self.wavelet_transformer(small, rate)
             power = field.abs()
-        pulsatility, phase_masks, background, shared, per_trace = self.masks(clip, field, present)
+        coarse, fine, shared, per_trace = self.masks(small, field, power, present, clip.shape[-2:], rate)
+        pulsatility, phase_masks, _ = coarse
+        weight = window_weight(pulsatility, phase_masks)          # (b, C, h, w, S): pools what the field gives
+        weight_fine = window_weight(fine[0], fine[1])             # (b, C, H, W, S): pools the clip
         # The shared priors belong to every trace alike, so each trace
         # reports them: the trainer's total is the mean over traces.
         priors = [{**shared, **own} for own in per_trace]
 
         kinematics = self.kinematics(field)
         planes = torch.cat(kinematic_features(kinematics), dim=-1)          # (b, C, T, h, w, N F)
-        candidates = self.channel_predictor(clip, pulsatility, phase_masks, planes)
+        candidates = self.channel_predictor(clip, weight_fine, planes, weight)
         mixed = self.channel_mixer(candidates)
-        speed = pooled_speed(kinematics["phase_speed"], pulsatility, phase_masks, present,
+        speed = pooled_speed(kinematics["phase_speed"], weight, present,
                              self.statistics_head.supervise_masks)
-        out = self.statistics_head(mixed, power, clip, pulsatility, phase_masks, rate, present,
-                                   extra=speed)
+        out = self.statistics_head(mixed, power, clip, weight, rate, present, extra=speed)
         if self.capture:
-            self.captured = capture(clip, rate, power, pulsatility, phase_masks, background,
-                                    N_HARMONICS, kinematics, speed)
+            self.captured = capture(clip, rate, power, *fine, N_HARMONICS, kinematics, speed)
         return out, priors
 
 
 def capture(clip, rate, power, pulsatility, phase_masks, background, n_harmonics: int,
             kinematics: dict, speed: torch.Tensor) -> dict:
-    """What a forward looked at, detached, for the visualiser."""
+    """What a forward looked at, detached, for the visualiser: the clip and
+    the masks read at its grid (one map per window, expanded over the frames
+    as views), the per-harmonic magnitude and the kinematics on the field's grid."""
+    t = clip.shape[2]
     return {
         "clip": clip.detach(), "rate": rate.detach(),
         "power": reduce(power, "b c t h w (n j) -> b c t h w n", "mean", n=n_harmonics).detach(),
-        "pulsatility": pulsatility.detach(), "phase_masks": phase_masks.detach(),
-        "background": background.detach(),
+        "pulsatility": rearrange(pulsatility.detach(), "b c h w -> b c 1 h w").expand(-1, -1, t, -1, -1),
+        "phase_masks": rearrange(phase_masks.detach(), "b c h w s -> b c 1 h w s").expand(-1, -1, t, -1, -1, -1),
+        "background": rearrange(background.detach(), "b c h w -> b c 1 h w").expand(-1, -1, t, -1, -1),
         "phase_speed": kinematics["phase_speed"].detach(),
         "direction_x": kinematics["direction_x"].detach(),
         "direction_y": kinematics["direction_y"].detach(),

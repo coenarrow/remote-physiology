@@ -3,15 +3,16 @@ MODEL:
   PULSATILITY_MASKER: true
   PHASE_MASKER: true
   TRACE_INDEPENDENT: true
+  MIXER_HIDDEN: 16               # channels of each trace's temporal layer in the mixer
+  MIXER_TAPS: 15                 # its taps (odd); half a beat at 30 fps. 31 x 32 changed nothing (notes, experiment 14)
   SUPERVISE_MASKS: true
   RATE_TOLERANCE_BPM: 8.0        # training gate on the learned heart rate, inside the 10 bpm wavelet buffer
   RATE_ESTIMATOR: FactorizePhys         # the single-trace network the rate is read off, or Spectral
   RATE_DOWNSCALE: 2              # area shrink of the clip the rate estimator reads; 1 is none
-  WAVELET_DOWNSCALE: 2           # area shrink before the wavelet, its field upscaled back; 1 is none
+  WAVELET_DOWNSCALE: 2           # area shrink before the wavelet; the masks and kinematics work on that grid; 1 is none
   REGULARISATION:                # the mask priors, and the rate estimator's terms
     PULSATILITY_TV: 0.005        # the attention over a region, not a speckle
     PULSATILITY_SATURATION: 1.0  # pull the map's raw correction back inside its bound
-    BACKGROUND_PULSATILE: 0.5    # the traces claim what pulses; the background keeps at most an even share
     PHASE_SATURATION: 1.0        # pull the phase masks' raw correction back inside its bound
     HARMONIC_COHERENCE: 0.02     # no trace weight on scale-incoherent pixels
     SPATIAL_COHERENCE: 0.02      # ... or on pixels out of phase with their neighbours

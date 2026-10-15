@@ -1,0 +1,7 @@
+# CardioConv as it stood before the tuning (experiment 14): each trace mixed
+# from its own masked candidates only. The hpc_configs_200 YAML now ships
+# TRACE_INDEPENDENT false (cardioconv_dense.yaml, the recipe as it stands),
+# so this arm sets the old value back to stay the reference it was.
+BASE: ../hpc_configs_200/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+MODEL:
+  TRACE_INDEPENDENT: true

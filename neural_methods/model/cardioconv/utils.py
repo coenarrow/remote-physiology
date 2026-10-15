@@ -46,21 +46,16 @@ def shrink(video: torch.Tensor, factor: int) -> torch.Tensor:
     return rearrange(small, "(b c) t h w -> b c t h w", b=b)
 
 
-def upscale(field: torch.Tensor, size: tuple) -> torch.Tensor:
-    """``(B, C, T, h, w, K)`` complex -> ``(B, C, T, H, W, K)``: the field
-    resampled to ``size`` bilinearly, real and imaginary parts alike, one
-    harmonic group of scales at a time to bound the peak. The inverse of
-    :func:`shrink` for a smooth field; a field already at ``size`` is
-    returned as it is."""
-    b, c, t, h, w, k = field.shape
+def upscale(maps: torch.Tensor, size: tuple) -> torch.Tensor:
+    """``(B, C, h, w, M)`` per-window maps -> ``(B, C, H, W, M)``: the maps
+    resampled to ``size`` bilinearly. The inverse of :func:`shrink` for a
+    smooth map; maps already at ``size`` are returned as they are."""
+    _, c, h, w, _ = maps.shape
     if (h, w) == tuple(size):
-        return field
-    parts = []
-    for part in torch.view_as_real(field).split(max(1, k // 3), dim=-2):
-        flat = rearrange(part, "b c t h w k r -> (b c t) (k r) h w")
-        big = F.interpolate(flat, size=tuple(size), mode="bilinear", align_corners=False)
-        parts.append(rearrange(big, "(b c t) (k r) h w -> b c t h w k r", b=b, c=c, r=2))
-    return torch.view_as_complex(torch.cat(parts, dim=-2).contiguous())
+        return maps
+    flat = rearrange(maps, "b c h w m -> b (c m) h w")
+    big = F.interpolate(flat, size=tuple(size), mode="bilinear", align_corners=False)
+    return rearrange(big, "b (c m) h w -> b c h w m", c=c)
 
 
 def pearson(pred: torch.Tensor, label: torch.Tensor) -> torch.Tensor:

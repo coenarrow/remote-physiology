@@ -12,7 +12,7 @@ from neural_methods.model._shared_modules.utils import EPS
 
 class PulsatilityMasker(nn.Module):
     """Where the clip pulses at the heart rate: one distribution over the
-    pixels of each channel, per window, expanded over the frames.
+    pixels of each channel, per window, on the wavelet field's grid.
 
     Physics decides, the network nudges. The *pulsatility index* is the log
     of the field's band power at the harmonics over the pixel's variance in
@@ -69,19 +69,18 @@ class PulsatilityMasker(nn.Module):
             nn.Conv3d(hidden, 1, kernel_size=1),
         )
 
-    def forward(self, field: torch.Tensor, clip: torch.Tensor, present: torch.Tensor) -> tuple:
-        """``(B, C, T, h, w, K)`` complex field, ``(B, C, T, h, w)`` clip
-        and ``(B, C)`` presence -> the mask ``(B, C, T, h, w)`` (one map per
-        window, expanded over the frames), summing to one over ``(h, w)``,
-        and its priors ``{term: ()}``."""
-        b, _, _, h, w, _ = field.shape
+    def forward(self, power: torch.Tensor, small: torch.Tensor, present: torch.Tensor) -> tuple:
+        """``(B, C, T, h, w, K)`` power of the field (its ``abs()``, which the
+        model holds already), the ``(B, C, T, h, w)`` clip on the field's
+        grid and ``(B, C)`` presence -> the mask ``(B, C, h, w)``, one map
+        per window summing to one over ``(h, w)``, and its priors ``{term: ()}``."""
+        b, _, _, h, w, _ = power.shape
         # Features, not a path: the mask trains through the pooling weights
-        # downstream. The network is checkpointed, so a full-resolution grid
-        # keeps no hidden activations between the passes.
+        # downstream. The network is checkpointed, so it keeps no hidden
+        # activations between the passes.
         with torch.no_grad():
-            power = field.abs()
             scale = reduce(power, "b c t h w k -> b c 1 1 1 1", "mean").clamp_min(EPS)
-            variance = clip.float().var(dim=2, keepdim=True)                         # (B, C, 1, h, w)
+            variance = small.float().var(dim=2, keepdim=True)                        # (B, C, 1, h, w)
             band = reduce(power ** 2, "b c t h w k -> b c t h w", "sum")
             # Floors relative to the channel, the band's far below the
             # variance's, so a static pixel (no band power, no variance)
@@ -109,4 +108,4 @@ class PulsatilityMasker(nn.Module):
         saturation = reduce(F.relu(correction.abs() / bound - 1.0) ** 2, "b c h w -> b c", "mean")
         priors = {"pulsatility_tv": present_mean(tv, present),
                   "pulsatility_saturation": present_mean(saturation, present)}
-        return rearrange(mask, "b c h w -> b c 1 h w").expand(-1, -1, field.shape[2], -1, -1), priors
+        return mask, priors

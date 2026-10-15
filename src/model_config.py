@@ -167,8 +167,9 @@ class CardioBaseConfig(ModelConfig):
     RATE_DOWNSCALE: int = 2           # area shrink of the frames the rate estimator reads;
                                       # 1 is none
     WAVELET_DOWNSCALE: int = 2        # area shrink of the frames the wavelet transform reads;
-                                      # its field is upscaled back, so the masks and every
-                                      # later stage work at the input's resolution; 1 is none
+                                      # the masks, kinematics and every reading of the field
+                                      # work on that grid; only the masks are read at the
+                                      # input's resolution, to pool the clip; 1 is none
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)
@@ -190,6 +191,15 @@ class CardioBaseConfig(ModelConfig):
 @dataclass
 class CardioConvConfig(CardioBaseConfig):
     TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
+    MIXER_HIDDEN: int = 16            # channels of each trace's temporal layer
+    MIXER_TAPS: int = 15              # taps of the temporal layer, odd; 15 is half a beat at 30 fps
+
+    def validate(self, interface: InterfaceConfig, where: str) -> None:
+        super().validate(interface, where)
+        _require_positive(where, "MIXER_HIDDEN", self.MIXER_HIDDEN)
+        _require_positive(where, "MIXER_TAPS", self.MIXER_TAPS)
+        if self.MIXER_TAPS % 2 == 0:
+            raise ConfigError(f"{where}: MIXER_TAPS must be odd, got {self.MIXER_TAPS}")
 
 
 @dataclass

@@ -1,5 +1,41 @@
 # CardioConv and CardioHydra, 2026-10-10 overnight: summary
 
+**2026-10-15 (experiment 14, `experiment_14.md`):** the final local tuning
+for the 200 px cluster run, 24 h on the dev card, P033 held out, 10 epochs
+an arm on the `hpc_configs_200` recipe. CardioHydra ships as it stood: four
+arms (ABP max/min weights 0.2, Mamba trunks 0.3x, pulsatility TV 0.02, LR
+5e-4) all scored below the baseline, whose best P033 reading is ABP CCC
+0.68 / r 0.85 and CVP 0.40 / 0.61 at epoch 4 (r 0.89 by epoch 8), second
+to FactorizePhys's 0.78 / 0.43 at 200 px on this fold and ahead of every
+other sweep model, which predict nothing on most of P030-P039 at 200 px.
+CardioConv ships with `TRACE_INDEPENDENT: false` (every trace mixed from
+every candidate): +0.06 ABP r and +0.05 CVP r on P033, where a wider and
+longer mixer (new `MIXER_TAPS` / `MIXER_HIDDEN` switches) changed nothing.
+The ABP level is still read 15-18 mmHg low with the pulse 20 mmHg too
+narrow; heavier amplitude weights lift the mean, not the spread, and cost
+shape (experiment 6b again). Masks were the baseline's in every arm.
+On the confirmation fold P035, where every sweep model scores ABP CCC
+under 0.10, CardioHydra reaches ABP CCC 0.86 / r 0.93 (MAE 7.3 mmHg, level
++6) and CVP 0.40 / 0.61 at epoch 10: the best ABP reading of any model on
+any fold in this work.
+
+**2026-10-14, later (experiment 13, `experiment_13.md`):** local tuning on
+the HPC recipe (200 px, rate 4 / wavelet 3), P033, 10 epochs an arm. The
+phase masker's background bin now follows coherence, `PHASE_GAIN (1 - 2 R)`
+instead of 0, so a wandering-phase pixel is background by default and a
+coherent one is not taxed for it; `background_pulsatile` removed. The
+CardioConv control under the old rule is run 1; both baselines rerun under
+the new rule. Result on P033 at 10 epochs: CardioConv ABP CCC 0.28 / r
+0.52, CVP 0.18 / 0.31; **CardioHydra ABP 0.64 / r 0.90, CVP 0.40 / 0.60**,
+the best cardio result so far, on the same masks.
+
+**2026-10-14 (experiment 12, `experiment_12.md`):** the coarse-grid design
+(masks on the `WAVELET_DOWNSCALE` grid) scores the 11b weights on P033 at
+0.507 / 0.316 against 0.51 / 0.31 at full resolution, with no retraining;
+at 200 px it fits an A100 at batch 2 a card. The P033 tuning job
+(`.slurm_scripts/Neckflix_CardioTuning_P033_4GPU.slurm`,
+`configs/hpc_tuning_p33/`) smoked locally for both models.
+
 **2026-10-12 (experiment 8, `experiment_8.md`):**
 - **Changes.**
   - The evaluator scores level tracking and CVP max/min.

@@ -1,0 +1,6 @@
+# CardioConv tuning arm: half the baseline learning rate, the HoldCosine
+# schedule unchanged. Experiment 11's held-out score swung by 0.1 between
+# late epochs at 1e-3 before the decay was added.
+BASE: ../hpc_configs_200/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+TRAIN:
+  LR: 5e-4

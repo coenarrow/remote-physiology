@@ -1,0 +1,8 @@
+# CardioConv tuning arm, shipped: the mixer draws every trace from every
+# candidate (TRACE_INDEPENDENT false). On P033 it led the own-candidates
+# baseline on both traces from epoch 6 on (ABP r 0.58 against 0.52, CVP
+# 0.37 against 0.31 at epoch 10; notes, experiment 14, arm 5), where the
+# mixer's width and reach (31 taps, 32 hidden, arm 3) had moved nothing.
+# The hpc_configs_200 CardioConv YAML carries the value, so this arm is
+# the recipe as it stands.
+BASE: ../hpc_configs_200/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml

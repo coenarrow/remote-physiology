@@ -15,6 +15,8 @@ backbone's ``capture`` switch on, and for each one the script writes, under
   the background mask; below them the predicted and label waveforms per
   trace and the estimated heart rate. A synthetic store's true vessel map
   (``vessel_ids``: artery, vein) is drawn as contours on every map.
+- ``overlay.png``: the same maps drawn over each channel's mean frame, the
+  map's value as its alpha, so the mass is read against the anatomy.
 - ``masks.gif``: the depth channel's frames with the window's pulsatility
   and trace masks over them.
 
@@ -190,6 +192,43 @@ def draw_panel(out: Path, captured: dict, batch: dict, result: dict, maps: dict 
     plt.close(fig)
 
 
+def draw_overlay(out: Path, captured: dict, channels: list, traces: list) -> None:
+    """``panel.png``'s maps drawn over the channel's mean frame: the frame in
+    grey, the map in magma with its alpha the map's own normalised value, so
+    the mass sits on the anatomy and the empty parts of the map show the
+    frame through. Each map is scaled to its own maximum, as in the panel,
+    and the titles carry the same amounts."""
+    clip = captured["clip"][0]                                               # (C, T, h, w)
+    pulsatility = captured["pulsatility"][0].mean(dim=1)
+    masks = (captured["pulsatility"][0, ..., None] * captured["phase_masks"][0]).mean(dim=1)
+    background = (captured["pulsatility"][0] * captured["background"][0]).mean(dim=1)
+    n_cols = 2 + len(traces)
+    fig, axes = plt.subplots(len(channels), n_cols, figsize=(3.2 * n_cols, 3.0 * len(channels)))
+    axes = np.atleast_2d(axes)
+    titles = ["pulsatility"] + [f"{t} mask x pulsatility" for t in traces] + ["background x pulsatility"]
+    for c, (channel, row) in enumerate(zip(channels, health(captured, channels, traces))):
+        frame = clip[c].mean(dim=0)
+        grey = ((frame - frame.min()) / (frame.max() - frame.min() + 1e-6)).cpu().numpy()
+        images = [pulsatility[c], *[masks[c, ..., s] for s in range(len(traces))], background[c]]
+        amounts = [f"{row['pulsatility_effective_px']:.0f} px",
+                   *[f"share {share_text(row[f'{t}_share'])}" for t in traces],
+                   f"share {share_text(row['background_share'])}"]
+        for col, (image, title, amount) in enumerate(zip(images, titles, amounts)):
+            ax = axes[c, col]
+            weight = image.cpu().numpy()
+            weight = weight / (weight.max() + 1e-12)
+            ax.imshow(grey, cmap="gray", vmin=0.0, vmax=1.0)
+            ax.imshow(weight, cmap="magma", vmin=0.0, vmax=1.0, alpha=np.clip(weight, 0.0, 1.0) * 0.9)
+            name = f"{channel}: {title}" if c == 0 else channel if col == 0 else ""
+            ax.set_title("\n".join(part for part in (name, amount) if part), fontsize=8)
+            ax.axis("off")
+    rate = float(captured["rate"][0])
+    fig.suptitle(f"{out.parent.name}: maps over the mean frame, estimated rate {rate:.1f} bpm", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(out, dpi=110)
+    plt.close(fig)
+
+
 def draw_gif(out: Path, captured: dict, channel_index: int, traces: list, fs: float) -> None:
     """The channel's frames with the window's pulsatility map (green) and
     the first two traces' pulsatile masks (red, blue) over them, at the
@@ -262,6 +301,7 @@ def main(argv=None) -> Path:
             all_scores.append({"window": name, "rate_bpm": float(captured["rate"][0]), **row,
                                **{k: v for k, v in vessel_row.items() if k != "channel"}})
         draw_panel(folder / "panel.png", captured, batch, result, maps, channels, traces, interface.FS)
+        draw_overlay(folder / "overlay.png", captured, channels, traces)
         depth = channels.index("D") if "D" in channels else 0
         draw_gif(folder / "masks.gif", captured, depth, traces, interface.FS)
         print(f"drew {folder}")

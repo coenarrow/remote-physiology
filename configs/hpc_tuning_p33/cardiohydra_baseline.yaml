@@ -1,0 +1,6 @@
+# CardioHydra: the hpc_configs_200 recipe as it stands, P033 held out. The
+# reference every other CardioHydra arm in this directory is read against,
+# and the recipe that ships: every arm tried on the dev card (ABP amplitude
+# weights, Mamba 0.3x, TV 0.02, LR 5e-4) scored below it (notes,
+# experiment 14).
+BASE: ../hpc_configs_200/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml

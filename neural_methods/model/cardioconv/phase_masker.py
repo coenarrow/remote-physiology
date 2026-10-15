@@ -25,6 +25,14 @@ FEATURES_PER_HARMONIC = 5
 #: (experiment 7, 7b against 7c).
 PHASE_GAIN = 2.0
 
+#: Prior odds that a pulsatile pixel with no phase evidence is noise rather
+#: than a given trace: the vessels are a few percent of the neck's projected
+#: area (2.3 % of the grid in the synthetic neck), so about 40 to 1. The
+#: background's bin starts here, ``ln 40 = 3.7`` nats, and the Rayleigh
+#: evidence ``n R^2`` is taken off it; at ``R = 1`` on a 10 s window it ends
+#: near ``-2.7``, beside the antiphase trace's ``-PHASE_GAIN``.
+BACKGROUND_PRIOR_ODDS = 40.0
+
 
 class PhaseMasker(nn.Module):
     """Which pulsing pixels belong to which trace, told apart by phase.
@@ -50,7 +58,27 @@ class PhaseMasker(nn.Module):
     The centres are learned per channel and trace (they start evenly spaced
     around the circle; per channel, because which vessel dominates a
     channel's pulse, and so sits at relative phase zero, differs between
-    colour, infrared and depth). The background's bin is zero. A separable
+    colour, infrared and depth). The background's bin is the log-odds of
+    "no coherent source here": ``ln BACKGROUND_PRIOR_ODDS - n R^2``. ``R`` is
+    the mean resultant length of the relative phase over the window, the
+    circular measure of how steadily it holds and a monotone function of the
+    pixel's band SNR (phase jitter variance about ``1 / (2 SNR)``, so ``R``
+    about ``exp(-1 / (4 SNR))``); ``n R^2`` is the Rayleigh statistic, the
+    log-likelihood ratio of a coherent source against uniform phase over
+    ``n`` independent samples; and ``n`` is the window's beats over the
+    wavelet's correlation length, because the Morlet's time support makes
+    neighbouring coefficients of even a noise pixel agree, so a 10 s window
+    holds about six independent phases, not 300, and noise ``R`` sits near
+    0.3 with a 95th percentile near 0.6 (measured, notes experiment 13). The
+    prior is the base rate: the vessels are a few percent of the neck, so a
+    pulsatile pixel with no phase evidence is noise 40 to 1 against each
+    trace. On a 10 s window the background therefore wins below ``R`` of
+    about 0.6, which is above 95 % of noise pixels and below the neck's
+    coherent spots (``R`` 0.8-1.0), and at ``R = 1`` its bin is near
+    ``-PHASE_GAIN``, the antiphase trace's. Until 2026-10-14 the bin was zero,
+    which taxed a perfectly coherent pixel 12 % for the background and split
+    a wandering one evenly three ways; the background then held a quarter of
+    the pulsatile mass in every run as a floor, not as a region. A separable
     3-D convolution over all the features adds a correction to every class,
     from which two things are removed before it is bounded: each class's
     pulsatility-weighted mean, so no class can be preferred wholesale (the
@@ -78,10 +106,11 @@ class PhaseMasker(nn.Module):
     background its floor (experiment 7a).
 
     Priors, all with the pulsatility map detached, so phase never shapes
-    the phase-blind map. ``background_pulsatile`` is the pulsatile mass the
-    background takes beyond an even share, ``1 / (S + 1)``, of the
-    channel's: the traces must claim most of what pulses, and the background
-    may keep the pixels that pulse at neither trace's phase.
+    the phase-blind map. None is on the background: it is what the traces
+    did not claim, and with its bin set by coherence it needs no prior to
+    hold or to yield pulsatile mass (the ``background_pulsatile`` hinge above
+    an even share, removed 2026-10-14, read zero in every recorded run and
+    would have fought the coherence bin on a noisy window).
     ``phase_saturation`` is the mean of ``relu(|c| / bound - 1) ** 2`` over
     the raw correction ``c``: zero inside the bound, and a pull back towards
     it beyond, where the tanh has no gradient left (in experiment 7a the raw
@@ -105,12 +134,18 @@ class PhaseMasker(nn.Module):
     """
 
     def __init__(self, in_channels: int, n_traces: int, n_harmonics: int, correction_bound: float,
-                 hidden: int = 16, temporal_kernel: int = 15, coherence_kernel: int = 3,
-                 stability_window: int = 30):
+                 wavelet_bandwidth: float, hidden: int = 16, temporal_kernel: int = 15,
+                 coherence_kernel: int = 3, stability_window: int = 30):
         super().__init__()
         self.n_harmonics = n_harmonics
         self.correction_bound = correction_bound
-        self.background_cap = 1.0 / (n_traces + 1)
+        # The Morlet's envelope is exp(-t^2 / B) in periods, so neighbouring
+        # coefficients decorrelate over about 2 sigma = sqrt(2 B) beats; a
+        # window of ``beats`` beats holds ``beats / sqrt(2 B)`` independent
+        # phase samples. Checked against white noise through the transform
+        # (notes, experiment 13): median R 0.32 on a 10 s window at 67 bpm,
+        # the Rayleigh null's sqrt(ln 2 / n) at n = 6.4.
+        self.correlation_beats = math.sqrt(2.0 * wavelet_bandwidth)
         self.coherence_kernel = coherence_kernel
         self.stability_window = stability_window
         # Replicate padding in space and time: zeros blended in at the border
@@ -129,7 +164,7 @@ class PhaseMasker(nn.Module):
         self.phase_centre = nn.Parameter(repeat(centres, "s -> c s", c=in_channels).clone())  # own memory per channel
 
     def features(self, field: torch.Tensor, pulsatility: torch.Tensor) -> tuple:
-        """``(B, C, T, h, w, K)`` complex field and ``(B, C, T, h, w)`` pulsatility
+        """``(B, C, T, h, w, K)`` complex field and ``(B, C, h, w)`` pulsatility
         -> the ``(B, C, T, h, w, 5N)`` features and the three ``(B, C, T, h, w, N)``
         coherences they include (over scales, in time, in space)."""
         # Features, not a path (see PulsatilityMasker.forward): the masks train
@@ -139,7 +174,7 @@ class PhaseMasker(nn.Module):
             centre = grouped[..., grouped.shape[-1] // 2]                             # (B, C, T, h, w, N)
             scale_coherence = unit(grouped).mean(dim=-1).abs()
             reference = unit(einsum(centre, pulsatility.to(centre.dtype),
-                                    "b c t h w n, b c t h w -> b c t n"))
+                                    "b c t h w n, b c h w -> b c t n"))
             relative = unit(centre * rearrange(reference.conj(), "b c t n -> b c t 1 1 n"))
             stability = temporal_resultant(relative, self.stability_window)
             spatial = spatial_resultant(relative, self.coherence_kernel)
@@ -147,13 +182,15 @@ class PhaseMasker(nn.Module):
                                  dim=-1)
         return features, scale_coherence, stability, spatial
 
-    def forward(self, field: torch.Tensor, pulsatility: torch.Tensor, present: torch.Tensor) -> tuple:
-        """``(B, C, T, h, w, K)`` complex field, ``(B, C, T, h, w)`` pulsatility
-        and ``(B, C)`` presence -> the trace masks ``(B, C, T, h, w, S)`` and
-        the background mask ``(B, C, T, h, w)`` (one map per window each,
-        expanded over the frames), each trace's priors ``[{term: ()}]`` in
-        the masks' order, and the shared priors ``{term: ()}``."""
-        b, _, t = field.shape[:3]
+    def forward(self, field: torch.Tensor, pulsatility: torch.Tensor, present: torch.Tensor,
+                beats: torch.Tensor) -> tuple:
+        """``(B, C, T, h, w, K)`` complex field, ``(B, C, h, w)`` pulsatility,
+        ``(B, C)`` presence and ``(B,)`` beats in the window at the estimated
+        rate -> the trace masks ``(B, C, h, w, S)`` and
+        the background mask ``(B, C, h, w)``, one map per window each, each
+        trace's priors ``[{term: ()}]`` in the masks' order, and the shared
+        priors ``{term: ()}``."""
+        b = field.shape[0]
         features, scale_coherence, stability, spatial = self.features(field, pulsatility)
         net = checkpoint(self.net, rearrange(features, "b c t h w f -> (b c) f t h w"),
                          use_reentrant=False)
@@ -161,7 +198,7 @@ class PhaseMasker(nn.Module):
         # PulsatilityMasker.forward). No class preferred wholesale: each
         # class's pulsatility-weighted mean correction is removed, then the
         # mean over the classes (which the softmax ignores anyway).
-        weight = pulsatility[:, :, 0].detach()                                    # (B, C, h, w), one map per window
+        weight = pulsatility.detach()                                             # (B, C, h, w), one map per window
         correction = reduce(net, "(b c) m t h w -> b c h w m", "mean", b=b)
         correction = correction - reduce(rearrange(weight, "b c h w -> b c h w 1") * correction,
                                          "b c h w m -> b c 1 1 m", "sum")
@@ -170,18 +207,20 @@ class PhaseMasker(nn.Module):
         n = self.n_harmonics
         cos = reduce(features[..., 0], "b c t h w -> b c h w 1", "mean")         # the fundamental's unit vector
         sin = reduce(features[..., n], "b c t h w -> b c h w 1", "mean")
+        resultant = torch.sqrt(cos ** 2 + sin ** 2)                               # R: 1 holds, 0 wanders
         centre = rearrange(self.phase_centre, "c s -> 1 c 1 1 s")
         bins = PHASE_GAIN * (cos * centre.cos() + sin * centre.sin())             # (B, C, h, w, S)
-        logits = F.pad(bins, (0, 1)) + bound * torch.tanh(correction / bound)     # background's bin is 0
+        # The background's bin: the prior odds of noise, less the Rayleigh
+        # evidence for a coherent source, ``n R^2`` over the window's ``n``
+        # independent phase samples (its beats over the wavelet's correlation
+        # length). See the class docstring.
+        independent = rearrange(beats / self.correlation_beats, "b -> b 1 1 1 1").clamp_min(1.0)
+        background_bin = math.log(BACKGROUND_PRIOR_ODDS) - independent * resultant ** 2
+        logits = torch.cat([bins, background_bin], dim=-1) + bound * torch.tanh(correction / bound)
         classes = logits.softmax(dim=-1)                                          # (B, C, h, w, M)
         maps, background_map = classes[..., :-1], classes[..., -1]
-        masks = rearrange(maps, "b c h w m -> b c 1 h w m").expand(-1, -1, t, -1, -1, -1)
-        background = rearrange(background_map, "b c h w -> b c 1 h w").expand(-1, -1, t, -1, -1)
 
-        background_share = reduce(weight * background_map, "b c h w -> b c", "sum")
-        shared = {"background_pulsatile": present_mean(
-                      (background_share - self.background_cap).clamp_min(0.0), present),
-                  "phase_saturation": present_mean(
+        shared = {"phase_saturation": present_mean(
                       reduce(F.relu(correction.abs() / bound - 1.0) ** 2, "b c h w m -> b c", "mean"), present)}
         # Each trace's claimed distribution, pulsatility times mask normalised
         # over the pixels, in log space: no clamp, so it is the same
@@ -202,4 +241,4 @@ class PhaseMasker(nn.Module):
                                                "temporal_consistency"))}
             terms["phase_tv"] = present_mean(tv, present)
             priors.append(terms)
-        return masks, background, priors, shared
+        return maps, background_map, priors, shared

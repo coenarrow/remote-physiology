@@ -28,12 +28,16 @@ class Kinematics(nn.Module):
       n_harmonics: harmonic groups the scale axis folds into.
       sharpness: exponent on ``|W|`` in the per-harmonic collapse; 2 weights
         by power, larger approaches the peak scale, 0 is a plain mean.
+      pixel: the size of the field's grid cell in input pixels (the wavelet
+        downscale), so the wavenumber is in radians per input pixel and the
+        speed in input pixels per frame whatever grid the field is on.
     """
 
-    def __init__(self, n_harmonics: int, sharpness: float = 2.0):
+    def __init__(self, n_harmonics: int, sharpness: float = 2.0, pixel: float = 1.0):
         super().__init__()
         self.n_harmonics = n_harmonics
         self.sharpness = sharpness
+        self.pixel = pixel
 
     @torch.no_grad()
     def forward(self, field: torch.Tensor) -> dict:
@@ -41,14 +45,19 @@ class Kinematics(nn.Module):
         real: ``amplitude``, ``wavenumber`` (radians per pixel),
         ``phase_speed`` (signed, pixels per frame) and the unit heading,
         ``direction_x`` and ``direction_y``."""
-        harmonics = collapse_harmonics(field, self.n_harmonics, self.sharpness)
-        k_x = -phase_gradient(harmonics, COLUMNS)
-        k_y = -phase_gradient(harmonics, ROWS)
-        wavenumber = torch.sqrt(k_x ** 2 + k_y ** 2).clamp_min(1e-9)
-        return {
-            "amplitude": harmonics.abs(),
-            "wavenumber": wavenumber,
-            "phase_speed": phase_gradient(harmonics, TIME) / wavenumber,
-            "direction_x": k_x / wavenumber,
-            "direction_y": k_y / wavenumber,
-        }
+        harmonics = collapse_harmonics(field, self.n_harmonics, self.sharpness)    # (B, C, T, h, w, N)
+        # One harmonic at a time, written into the outputs: the gradients'
+        # temporaries are one harmonic's plane, not N of them.
+        out = {name: harmonics.real.new_empty(harmonics.shape)
+               for name in ("amplitude", "wavenumber", "phase_speed", "direction_x", "direction_y")}
+        for n in range(self.n_harmonics):
+            harmonic = harmonics[..., n]
+            k_x = -phase_gradient(harmonic, COLUMNS) / self.pixel
+            k_y = -phase_gradient(harmonic, ROWS) / self.pixel
+            wavenumber = torch.sqrt(k_x ** 2 + k_y ** 2).clamp_min(1e-9)
+            out["amplitude"][..., n] = harmonic.abs()
+            out["wavenumber"][..., n] = wavenumber
+            out["phase_speed"][..., n] = phase_gradient(harmonic, TIME) / wavenumber
+            out["direction_x"][..., n] = k_x / wavenumber
+            out["direction_y"][..., n] = k_y / wavenumber
+        return out

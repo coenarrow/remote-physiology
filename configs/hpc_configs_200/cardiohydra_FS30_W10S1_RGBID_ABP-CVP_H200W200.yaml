@@ -5,13 +5,17 @@ MODEL:
   SUPERVISE_MASKS: true
   RATE_TOLERANCE_BPM: 8.0        # training gate on the learned heart rate, inside the 10 bpm wavelet buffer
   RATE_ESTIMATOR: RhythmFormer          # the single-trace network the rate is read off, or Spectral
-  RATE_DOWNSCALE: 2              # area shrink of the clip the rate estimator reads; 1 is none
-  WAVELET_DOWNSCALE: 2           # area shrink before the wavelet, its field upscaled back; 1 is none
-  MAMBA_LR_SCALE: 0.1            # the Mamba trunks' rate as a multiple of TRAIN.LR (the repo's PhysMamba configs use 0.1 too)
+  RATE_DOWNSCALE: 4              # area shrink of the clip the rate estimator reads (50 px at 200); 1 is none
+  WAVELET_DOWNSCALE: 3           # area shrink before the wavelet; the masks, kinematics and priors live on
+                                 # this grid (66 px at 200) and each window's maps are upscaled to the input.
+                                 # 4 / 3 chosen 2026-10-14 so the same recipe trains on the 16 GB dev card
+                                 # (the rate network at 100 px alone took 7 GB) and keeps the 64 px grids
+                                 # of the 128 px local runs; the P033 tuning (notes, experiment 12) ran it.
+  MAMBA_LR_SCALE: 0.1            # the Mamba trunks' rate as a multiple of TRAIN.LR (the repo's PhysMamba configs use 0.1 too);
+                                 # 0.3 learned no faster and scored lower on P033 (notes, experiment 14)
   REGULARISATION:                # the mask priors, and the rate estimator's terms
-    PULSATILITY_TV: 0.005        # the attention over a region, not a speckle
+    PULSATILITY_TV: 0.005        # the attention over a region, not a speckle; 0.02 softened the map and scored lower (experiment 14)
     PULSATILITY_SATURATION: 1.0  # pull the map's raw correction back inside its bound
-    BACKGROUND_PULSATILE: 0.5    # the traces claim what pulses; the background keeps at most an even share
     PHASE_SATURATION: 1.0        # pull the phase masks' raw correction back inside its bound
     HARMONIC_COHERENCE: 0.02     # no trace weight on scale-incoherent pixels
     SPATIAL_COHERENCE: 0.02      # ... or on pixels out of phase with their neighbours
@@ -39,7 +43,7 @@ INTERFACE:
 # CardioConv's recipe: --epochs 3 --batch-size 2
 TRAIN:
   OPTIMIZER: Adam
-  LR: 1e-3
+  LR: 1e-3                        # 5e-4 lagged on held-out shape at every epoch (experiment 14)
   WEIGHT_DECAY: 0.0
   SCHEDULER: HoldCosine           # the rate held, then a cosine to 0 over the last third: a constant rate left the held-out score swinging between epochs (notes, experiment 11)
   PRECISION: bfloat16

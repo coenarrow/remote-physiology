@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from einops import einsum, rearrange, reduce
 
 from neural_methods.model.cardioconv.utils import softplus_inverse
-from neural_methods.model._shared_modules.utils import EPS
+from neural_methods.model._shared_modules.utils import EPS, mask_area
 
 #: Shrinks the mean readout's initial weights, so the bias the trainer seeds
 #: with the trace's physiological prior is the starting prediction and the
@@ -75,22 +75,20 @@ class StatisticsHead(nn.Module):
                 spread.weight.mul_(READOUT_WEIGHT_SCALE)
                 spread.bias.fill_(softplus_inverse(relative_spread))
 
-    def features(self, power, clip, pulsatility, phase_masks, heart_rate, present,
-                 extra=None) -> torch.Tensor:
+    def features(self, power, clip, weight, heart_rate, present, extra=None) -> torch.Tensor:
         """The ``(B, n_features)`` summary; absent channels contribute zeros."""
         here = rearrange(present.to(clip.dtype), "b c -> b c 1")
         intensity = torch.stack([reduce(clip, "b c t h w -> b c", kind)
                                  for kind in ("min", "max", "mean")], dim=-1)
         intensity = torch.log1p(intensity.clamp_min(0.0)) * here                      # (B, C, 3)
 
-        weight = rearrange(pulsatility, "b c t h w -> b c t h w 1") * phase_masks      # (B, C, T, h, w, S)
-        # The pulsatility distribution sums to one per frame, so the mass is the
-        # share of the pulsatile pixels the trace claims, averaged over frames.
-        mass = reduce(weight.detach(), "b c t h w s -> b c s", "sum") / weight.shape[2] * here
+        # The pulsatility distribution sums to one, so the mass is the share
+        # of the pulsatile pixels the trace claims.
+        mass = reduce(weight.detach(), "b c h w s -> b c s", "sum") * here
         if not self.supervise_masks:
             weight = weight.detach()
-        area = reduce(weight, "b c t h w s -> b c s 1", "sum").clamp_min(EPS)
-        pooled = einsum(power, weight, "b c t h w k, b c t h w s -> b c s k") / area
+        area = rearrange(mask_area(weight), "b c s -> b c s 1") * power.shape[2]
+        pooled = einsum(power, weight, "b c t h w k, b c h w s -> b c s k") / area
         harmonics = reduce(pooled, "b c s (n j) -> b c s n", "mean", n=self.n_harmonics)
         harmonics = torch.log1p(harmonics) * rearrange(here, "b c 1 -> b c 1 1")
 
@@ -104,14 +102,13 @@ class StatisticsHead(nn.Module):
             *extras,
         ], dim=-1)
 
-    def forward(self, mixed, power, clip, pulsatility, phase_masks, heart_rate, present,
-                extra=None) -> torch.Tensor:
+    def forward(self, mixed, power, clip, weight, heart_rate, present, extra=None) -> torch.Tensor:
         """``(B, S, T)`` shape-only waveforms -> ``(B, S, T)`` in each trace's
         physical units. The rest are the stages' outputs: ``(B, C, T, h, w, K)``
-        power, ``(B, C, T, h, w)`` clip and pulsatility mask,
-        ``(B, C, T, h, w, S)`` trace masks, ``(B,)`` bpm, ``(B, C)`` presence,
-        and the ``(B, n_extra)`` extra features if the head was built with any."""
-        features = self.features(power, clip, pulsatility, phase_masks, heart_rate, present, extra)
+        power with the pooling weight ``(B, C, h, w, S)`` on its grid, the
+        ``(B, C, T, H, W)`` clip, ``(B,)`` bpm, ``(B, C)`` presence, and the
+        ``(B, n_extra)`` extra features if the head was built with any."""
+        features = self.features(power, clip, weight, heart_rate, present, extra)
         hidden = [trunk(features) for trunk in self.trunks]
         mean = torch.cat([layer(h) for layer, h in zip(self.means, hidden)], dim=-1)          # (B, S)
         spread = torch.cat([layer(h) for layer, h in zip(self.spreads, hidden)], dim=-1)

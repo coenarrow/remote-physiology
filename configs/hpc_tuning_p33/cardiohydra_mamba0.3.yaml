@@ -1,0 +1,5 @@
+# CardioHydra tuning arm: the Mamba trunks at 0.3x the rate instead of 0.1x,
+# asking whether the SSM predictor is held back by the PhysMamba-era scale.
+BASE: ../hpc_configs_200/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+MODEL:
+  MAMBA_LR_SCALE: 0.3

@@ -1,0 +1,7 @@
+# CardioHydra tuning arm: LR 1e-3 -> 5e-4. The baseline's held-out ABP CCC
+# peaks at epoch 4 (0.68) and slides to 0.62 by epoch 8 while r keeps rising,
+# the predicted scale shrinking; a lower rate asks whether the slide is the
+# rate's doing. The Mamba trunks follow at 0.1x of it.
+BASE: ../hpc_configs_200/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+TRAIN:
+  LR: 5e-4

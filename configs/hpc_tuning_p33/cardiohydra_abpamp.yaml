@@ -1,0 +1,10 @@
+# CardioHydra tuning arm: ABP's soft-max and soft-min L1 terms at CVP's weight,
+# the mean term unchanged. At the baseline the held-out ABP shape is right
+# (r 0.89 on P033) and the CCC is held at 0.62 by scale: the pulse pressure
+# comes out about 20 mmHg short (systolic -30, diastolic -9). The amplitude
+# terms are the handle on the statistics head's spread; the mean term stays,
+# since four times its weight did not move the level (notes, experiment 6b).
+BASE: ../hpc_configs_200/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+INTERFACE:
+  LOSS:
+    ABP: {CCC: 1.0, MEAN: 0.05, MAX: 0.2, MIN: 0.2}

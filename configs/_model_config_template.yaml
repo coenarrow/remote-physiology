@@ -37,7 +37,12 @@
 #                                                   the wavelet transform reads; its field
 #                                                   is upscaled back, so the masks work at
 #                                                   the input's resolution; 1 is none
-#   CardioHydra            CardioConv's, without TRACE_INDEPENDENT, plus
+#                          MIXER_HIDDEN: <int > 0>   channels of each trace's temporal
+#                                                   layer in the channel mixer (16)
+#                          MIXER_TAPS: <odd int > 0> taps of that layer (15, half a
+#                                                   beat at 30 fps)
+#   CardioHydra            CardioConv's, without TRACE_INDEPENDENT, MIXER_HIDDEN
+#                          and MIXER_TAPS, plus
 #                          MAMBA_LR_SCALE: <number > 0>  the Mamba trunks' rate as a
 #                                                   multiple of TRAIN.LR (0.1 in its configs)
 #   FactorizePhys          FSAM: <bool>              the factorized attention

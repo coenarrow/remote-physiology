@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from einops import einsum, rearrange, reduce
 
-from neural_methods.model._shared_modules.utils import EPS
+from neural_methods.model._shared_modules.utils import mask_area
 
 
 class ChannelPredictor(nn.Module):
@@ -22,19 +22,18 @@ class ChannelPredictor(nn.Module):
     here.
     """
 
-    def forward(self, clip: torch.Tensor, pulsatility: torch.Tensor,
-                phase_masks: torch.Tensor, planes: torch.Tensor = None) -> torch.Tensor:
-        """``(B, C, T, h, w)`` clip, ``(B, C, T, h, w)`` pulsatility mask,
-        ``(B, C, T, h, w, S)`` trace masks and ``(B, C, T, h, w, F)`` feature
-        planes -> ``(B, C, 1 + F, T, S)``, the intensity candidate first."""
+    def forward(self, clip: torch.Tensor, weight_fine: torch.Tensor,
+                planes: torch.Tensor = None, weight: torch.Tensor = None) -> torch.Tensor:
+        """``(B, C, T, H, W)`` clip with the pooling weight ``(B, C, H, W, S)``
+        on its grid, and ``(B, C, T, h, w, F)`` feature planes with the
+        weight ``(B, C, h, w, S)`` on theirs -> ``(B, C, 1 + F, T, S)``, the
+        intensity candidate first."""
         low = reduce(clip, "b c t h w -> b c 1 1 1", "min")
         high = reduce(clip, "b c t h w -> b c 1 1 1", "max")
         scaled = (clip - low) / (high - low).clamp_min(1e-8)
-        weight = rearrange(pulsatility, "b c t h w -> b c t h w 1") * phase_masks
-        area = reduce(weight, "b c t h w s -> b c 1 t s", "sum").clamp_min(EPS)
-        candidates = rearrange(einsum(scaled, weight, "b c t h w, b c t h w s -> b c t s"),
-                               "b c t s -> b c 1 t s")
+        candidates = [rearrange(einsum(scaled, weight_fine, "b c t h w, b c h w s -> b c t s")
+                                / rearrange(mask_area(weight_fine), "b c s -> b c 1 s"), "b c t s -> b c 1 t s")]
         if planes is not None:
-            candidates = torch.cat(
-                [candidates, einsum(planes, weight, "b c t h w f, b c t h w s -> b c f t s")], dim=2)
-        return candidates / area
+            candidates.append(einsum(planes, weight, "b c t h w f, b c h w s -> b c f t s")
+                              / rearrange(mask_area(weight), "b c s -> b c 1 1 s"))
+        return torch.cat(candidates, dim=2)

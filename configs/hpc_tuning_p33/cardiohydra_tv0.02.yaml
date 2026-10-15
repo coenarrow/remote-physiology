@@ -1,0 +1,6 @@
+# CardioHydra tuning arm: the pulsatility map's TV prior at 4x the baseline
+# (see cardioconv_tv0.02.yaml).
+BASE: ../hpc_configs_200/cardiohydra_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+MODEL:
+  REGULARISATION:
+    PULSATILITY_TV: 0.02

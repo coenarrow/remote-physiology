@@ -65,10 +65,11 @@ from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
 from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
+from neural_methods.model.cardioconv.utils import shrink
 from neural_methods.model.cardioconv.waveform_rate_estimator import WaveformRateEstimator
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
 from neural_methods.model._shared_modules.kinematics import Kinematics
-from neural_methods.model._shared_modules.utils import pooled_speed, require_min_frame
+from neural_methods.model._shared_modules.utils import pooled_speed, require_min_frame, window_weight
 
 __all__ = ["BUFFER_BPM", "CardioHydra", "min_frame"]
 
@@ -114,8 +115,9 @@ class CardioHydra(nn.Module):
           rate_downscale: the area shrink of the clip the rate estimator
             reads. 1 is none.
           wavelet_downscale: the area shrink of the clip the wavelet
-            transform reads; its field is upscaled back, so the masks and
-            everything after them work at the input's resolution. 1 is none.
+            transform reads; the masks, the kinematics and every reading of
+            the field work on that grid, and the masks are read at the
+            input's resolution only to pool the clip. 1 is none.
           mamba_lr_scale: the trunks' Mamba blocks train at this multiple of
             the recipe's learning rate (the trainer reads the ``_lr_scale``
             flag), as PhysMamba's layers do. On Neckflix the CVP phase mask
@@ -130,6 +132,7 @@ class CardioHydra(nn.Module):
         self.fs = fs
         self.rate_tolerance_bpm = rate_tolerance_bpm
         self.supervise_masks = supervise_masks
+        self.wavelet_downscale = wavelet_downscale
         self.min_frame = min_frame(wavelet_downscale)
         n_traces = len(self.traces)
         self.rate_estimator = (RateEstimator(in_channels, fs, downscale=rate_downscale)
@@ -138,13 +141,14 @@ class CardioHydra(nn.Module):
         # The bank's pad covers the slowest kernel the estimator can ask for.
         self.wavelet_transformer = WaveletTransformer(
             fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, step_bpm=STEP_BPM,
-            min_bpm=float(self.rate_estimator.bins[0]), downscale=wavelet_downscale)
+            min_bpm=float(self.rate_estimator.bins[0]))
         self.pulsatility_masker = (
             PulsatilityMasker(self.wavelet_transformer.n_scales, PULSATILITY_BOUND)
             if pulsatility_masker else None)
-        self.phase_masker = (PhaseMasker(in_channels, n_traces, N_HARMONICS, PHASE_BOUND)
+        self.phase_masker = (PhaseMasker(in_channels, n_traces, N_HARMONICS, PHASE_BOUND,
+                                         self.wavelet_transformer.bandwidth)
                              if phase_masker else None)
-        self.kinematics = Kinematics(N_HARMONICS)
+        self.kinematics = Kinematics(N_HARMONICS, pixel=wavelet_downscale)
         self.ssm_predictor = SSMPredictor(in_channels, n_traces, N_HARMONICS, d_model=D_MODEL,
                                           n_blocks=N_BLOCKS, d_state=D_STATE, expand=EXPAND,
                                           headdim=HEADDIM, dt_init=DT_INIT)
@@ -217,21 +221,21 @@ class CardioHydra(nn.Module):
         clip, ``(b, C)`` presence and ``(b,)`` bpm -> ``(b, S, T)`` and
         each trace's mask priors, ``[{term: ()}]`` in traces order."""
         with torch.no_grad():                     # a feature, not a path (see CardioConv.predict)
-            field = self.wavelet_transformer(clip, rate)
+            small = shrink(clip, self.wavelet_downscale)
+            field = self.wavelet_transformer(small, rate)
             power = field.abs()
-        pulsatility, phase_masks, background, shared, per_trace = self.masks(clip, field, present)
+        coarse, fine, shared, per_trace = self.masks(small, field, power, present, clip.shape[-2:], rate)
+        pulsatility, phase_masks, _ = coarse
+        weight = window_weight(pulsatility, phase_masks)          # (b, C, h, w, S): pools what the field gives
+        weight_fine = window_weight(fine[0], fine[1])             # (b, C, H, W, S): pools the clip
         # The shared priors belong to every trace alike, so each trace
         # reports them: the trainer's total is the mean over traces.
         priors = [{**shared, **own} for own in per_trace]
 
         kinematics = self.kinematics(field)
-        shapes = self.ssm_predictor(field, power, clip, pulsatility, phase_masks, kinematics,
-                                    present)
-        speed = pooled_speed(kinematics["phase_speed"], pulsatility, phase_masks, present,
-                             self.supervise_masks)
-        out = self.statistics_head(shapes, power, clip, pulsatility, phase_masks, rate, present,
-                                   extra=speed)
+        shapes = self.ssm_predictor(field, power, clip, weight, weight_fine, kinematics, present)
+        speed = pooled_speed(kinematics["phase_speed"], weight, present, self.supervise_masks)
+        out = self.statistics_head(shapes, power, clip, weight, rate, present, extra=speed)
         if self.capture:
-            self.captured = capture(clip, rate, power, pulsatility, phase_masks, background,
-                                    N_HARMONICS, kinematics, speed)
+            self.captured = capture(clip, rate, power, *fine, N_HARMONICS, kinematics, speed)
         return out, priors
