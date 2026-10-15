@@ -331,3 +331,159 @@ Run last, on the shipped dense mixer, against the dense arm's own P033 curve:
 behind at every epoch on both traces, with the training loss in the usual
 band (0.42 at epoch 4). The last of the day's seven arms; the chain ended
 with its queue empty.
+
+## Round 2 (2026-10-15 evening, 12 more hours): evidence, not tuning
+
+Agreed with the user: no more knob arms. Three more held-out folds of the
+shipped CardioHydra recipe (P037, where FactorizePhys scores 0.73; P034
+and P036, where every sweep model fails on ABP), a per-participant
+calibration analysis of the finished folds, and a weight-average check.
+
+### The level error is a per-participant constant (`calibration.py`)
+
+From the evaluator's per-measurement tables, three readings of each
+level error: raw; one-point calibrated (the first measurement's error
+subtracted from the rest, the cuff-calibrated convention of ISO 81060
+methods that take one reference reading); and mean-offset (the oracle,
+the participant's mean error removed). MAE in mmHg:
+
+| Fold | Parameter | raw MAE | raw mean (SD) | one-point MAE | mean-offset MAE |
+| --- | --- | --- | --- | --- | --- |
+| CardioHydra P033 (epoch 8) | ABP mean | 17.9 | -17.9 (3.3) | **2.7** | 2.7 |
+| | ABP systolic | 30.0 | -30.0 (7.4) | **6.0** | 5.9 |
+| | ABP diastolic | 8.6 | -8.6 (2.8) | 2.5 | 2.3 |
+| | CVP mean | 2.4 | -2.4 (1.9) | 2.6 | 1.8 |
+| CardioHydra P035 (epoch 10) | ABP mean | 6.2 | +6.2 (1.9) | **1.7** | 1.5 |
+| | ABP systolic | 8.9 | +8.8 (5.7) | **4.6** | 4.2 |
+| | ABP diastolic | 2.8 | +2.8 (1.5) | 2.6 | 1.2 |
+| | CVP mean | 1.2 | +1.1 (1.1) | 0.8 | 0.9 |
+| CardioConv dense P033 | ABP mean | 14.4 | -14.4 (4.0) | 3.8 | 3.1 |
+| CardioConv dense P035 | ABP mean | 10.2 | +10.2 (2.6) | 2.7 | 2.2 |
+| FactorizePhys 200 px P033 | ABP mean | 3.4 | -3.3 (2.8) | 2.6 | 2.1 |
+| FactorizePhys 200 px P035 | ABP mean | 18.6 | +18.6 (2.0) | 2.2 | 1.6 |
+
+The within-participant SD of CardioHydra's ABP mean error is 2-3 mmHg on
+both folds: the level error is almost entirely one constant per
+participant, low on P033 and high on P035, and one reference reading
+removes it (ABP mean MAE 2-3 mmHg, systolic 5-6, inside ISO 81060's 5 +/- 8
+on these two folds). The same holds for FactorizePhys, whose P035 offset is
++19. So every model reads the population's level and none reads the
+participant's; what the models do read, beat to beat and over the
+recording's 30 s, tracks within 3 mmHg. The calibrated numbers are the
+ones a cuff-calibrated deployment would report, and the cluster's LOSO
+evaluation should report both. The uncalibrated level stays the open
+research problem (the kinematics path, or a design that reads level from
+something with pressure information).
+
+### Fold P037, CardioHydra as it stands (`final_tuning_p37_cardiohydra_baseline`, 19:54-23:21, exit 0)
+
+FactorizePhys's strong participant (0.73 / 0.76 ABP at 200 px); 633 training
+windows. (Epoch 1 lost 25 minutes to a test pass that shared the card.)
+
+| Epoch | ABP CCC / r | ABP MAE | CVP CCC / r | ABP mean / sys / dia err | CVP mean err | HR err |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2 | 0.68 / 0.73 | 10.9 | 0.19 / 0.35 | +4.5 / -15.4 / +5.0 | +3.8 | +0.6 |
+| 4 | 0.68 / 0.70 | 11.6 | 0.22 / 0.39 | +3.0 / -20.8 / -1.9 | +3.8 | +0.9 |
+| 6 | 0.77 / 0.78 | 10.7 | 0.17 / 0.31 | +1.8 / -14.3 / -2.7 | +3.7 | +0.7 |
+| 8 | 0.80 / 0.84 | 8.9 | 0.21 / 0.38 | +2.9 / -15.2 / +4.2 | +3.7 | +0.9 |
+| **10** | **0.86 / 0.88** | **7.9** | **0.24 / 0.42** | +1.5 / -8.7 / 0.0 | +3.7 | +0.9 |
+
+| P037, sweeps at epoch 20 | ABP CCC / r | CVP CCC / r | ABP mean / sys err |
+| --- | --- | --- | --- |
+| FactorizePhys | 0.73 / 0.76 | 0.15 / 0.34 | -0.7 / -13.8 |
+| RhythmFormer | 0.07 / 0.14 | 0.22 / 0.41 | -0.5 / -34.1 |
+| PhysFormer | 0.04 / 0.11 | 0.19 / 0.36 | +4.8 / -29.6 |
+| PhysNet, iBVPNet | 0.01-0.05 | 0.02-0.04 | |
+
+CardioHydra passes FactorizePhys on its own participant from epoch 6 and
+ends 0.13 CCC ahead, with the level right (mean +1.5, diastolic 0.0) and
+only the pulse pressure short (systolic -8.7); CVP is the best of any model
+on P037. The score rises to the last epoch under the cosine tail, as on
+P035. Masks at epoch 6: G gives ABP 57 % of the pulsatile mass, depth a
+22 % patch, background 28-70 % by channel; the familiar neck band.
+
+### Fold P034, CardioHydra as it stands (`final_tuning_p34_cardiohydra_baseline`, 23:21-02:31, exit 0)
+
+A participant on whom every sweep model fails on both traces (ABP CCC at
+most 0.08, CVP at most 0.17); 629 training windows.
+
+| Epoch | ABP CCC / r | ABP MAE | CVP CCC / r | ABP mean / sys / dia err | CVP mean err | HR err |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2 | 0.67 / 0.72 | 11.5 | 0.21 / 0.60 | +6.1 / -9.2 / +5.0 | -4.6 | -0.1 |
+| 4 | 0.73 / 0.78 | 10.0 | 0.20 / 0.60 | +5.6 / -9.0 / +4.9 | -4.7 | 0.0 |
+| 6 | 0.77 / 0.79 | 9.2 | 0.24 / 0.57 | +2.6 / -11.4 / +1.5 | -4.1 | 0.0 |
+| 8 | 0.78 / 0.81 | 9.7 | 0.30 / 0.63 | +4.5 / -1.7 / +2.9 | -4.0 | 0.0 |
+| **10** | **0.80 / 0.82** | **8.8** | 0.25 / 0.63 | +3.4 / -5.4 / +1.8 | -4.5 | 0.0 |
+
+| P034, sweeps at epoch 20 | ABP CCC / r | CVP CCC / r | ABP mean / sys err |
+| --- | --- | --- | --- |
+| FactorizePhys | 0.06 / 0.08 | 0.14 / 0.60 | +16.1 / -0.9 |
+| PhysFormer | 0.08 / 0.23 | 0.04 / 0.60 | +0.1 / -19.8 |
+| RhythmFormer | 0.07 / 0.18 | 0.17 / 0.60 | +2.1 / -29.2 |
+| PhysNet, iBVPNet | 0.01-0.03 | 0.01-0.02 | |
+
+CardioHydra reads ABP at CCC 0.80 where no sweep model reaches 0.1, with
+the level within 3.4 mmHg and the pulse pressure nearly right (systolic
+-5.4); its CVP r 0.63 matches the sweep models' 0.60 at a CCC they do not
+reach (0.25 against 0.17), though the CVP level is 4.5 mmHg low here. The
+score rises to the last epoch. Rate right to 0.0 bpm. Masks at epoch 6: the
+neck band, CVP with 17-20 % of the pulsatile mass in colour, depth 84 %
+background.
+
+### Fold P036, CardioHydra as it stands (`final_tuning_p36_cardiohydra_baseline`, 02:32-05:42, exit 0)
+
+RhythmFormer's one good participant (0.64 / 0.72 ABP), FactorizePhys 0.01;
+629 training windows.
+
+| Epoch | ABP CCC / r | ABP MAE | CVP CCC / r | ABP mean / sys / dia err | CVP mean err | HR err |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2 | 0.58 / 0.73 | 16.6 | 0.13 / 0.26 | +9.7 / -31.6 / +17.6 | +1.7 | +0.1 |
+| 4 | 0.62 / 0.72 | 16.1 | 0.15 / 0.29 | +9.4 / -28.9 / +16.1 | +1.9 | -0.3 |
+| 6 | 0.68 / 0.79 | 14.8 | 0.15 / 0.28 | +9.2 / -26.3 / +14.8 | +1.0 | -0.1 |
+| 8 | 0.66 / 0.76 | 14.8 | 0.22 / 0.35 | +8.4 / -30.6 / +14.8 | +1.3 | +1.4 |
+| **10** | **0.73 / 0.83** | 13.4 | 0.22 / 0.38 | +8.3 / -21.3 / +15.5 | +1.2 | -0.5 |
+
+| P036, sweeps at epoch 20 | ABP CCC / r | CVP CCC / r | ABP mean / sys err |
+| --- | --- | --- | --- |
+| RhythmFormer | 0.64 / 0.72 | 0.18 / 0.35 | +8.9 / -26.4 |
+| PhysFormer | 0.27 / 0.60 | 0.16 / 0.35 | +3.8 / -55.5 |
+| FactorizePhys | 0.01 / 0.01 | 0.22 / 0.40 | +21.5 / -16.3 |
+| PhysNet, iBVPNet | 0.03-0.06 | 0.03 | |
+
+The hardest of the five folds: the shape is read (r 0.83, above
+RhythmFormer's 0.72) but the pulse pressure comes out 37 mmHg too narrow
+(systolic -21, diastolic +15) around a level 8 high, the P033 pattern
+magnified, and the colour masks are the sparsest of the five (G ABP 33 %,
+background 57-86 %). CVP level with the best sweep model. Rate right.
+
+## Round 2 summary: five folds of the shipped CardioHydra recipe
+
+| Participant | CardioHydra ABP CCC / r (epoch) | ABP MAE | CVP CCC / r | Best sweep model, ABP CCC / r | Best sweep CVP CCC |
+| --- | --- | --- | --- | --- | --- |
+| P033 | 0.68 / 0.85 (4); 0.62 / 0.89 (8) | 18.6 | 0.40 / 0.61 | FactorizePhys 0.78 / 0.81 | 0.55 (RhythmFormer) |
+| P035 | **0.86 / 0.93** (10) | **7.3** | 0.40 / 0.61 | RhythmFormer 0.09 / 0.21 | 0.42 |
+| P037 | **0.86 / 0.88** (10) | **7.9** | 0.24 / 0.42 | FactorizePhys 0.73 / 0.76 | 0.22 |
+| P034 | **0.80 / 0.82** (10) | **8.8** | 0.25 / 0.63 | PhysFormer 0.08 / 0.23 | 0.17 |
+| P036 | **0.73 / 0.83** (10) | 13.4 | 0.22 / 0.38 | RhythmFormer 0.64 / 0.72 | 0.22 |
+
+CardioHydra's ABP CCC lies between 0.62 and 0.86 on all five folds with the
+heart rate right to the bpm on every one; the sweep models' best is 0.78 on
+P033 and under 0.1 on three of the five. On four of five CardioHydra is the
+best model on both traces, and on P033 it is second on ABP to
+FactorizePhys. Where it loses CCC it is on level and pulse pressure, not
+shape (r 0.82-0.93 everywhere), and the calibration analysis above shows
+the level part is one constant per participant. The folds that rise to
+the last epoch (P035, P037, P034, P036) say 30 epochs on the cluster are
+safe; P033's slow slide after epoch 4 is the exception, not the rule.
+Nothing in round 2 changes what ships.
+
+### Weight averaging (P035, epochs 6-10 averaged, `weight_average_p35/`)
+
+| P035 | ABP CCC / r | ABP MAE | CVP CCC / r | ABP mean / sys err |
+| --- | --- | --- | --- | --- |
+| epoch 10 | 0.86 / 0.93 | 7.3 | 0.40 / 0.61 | +6.2 / +8.8 |
+| mean of epochs 6-10 | 0.86 / 0.92 | 7.5 | 0.40 / 0.61 | +6.2 / +7.8 |
+
+No gain: the cosine tail already leaves the last five checkpoints at one
+point. Not used. (First attempt at 20:00 shared the card with a training
+run and both crawled eightfold; the pass was rerun on the free card.)

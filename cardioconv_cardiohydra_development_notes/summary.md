@@ -14,10 +14,13 @@ longer mixer (new `MIXER_TAPS` / `MIXER_HIDDEN` switches) changed nothing.
 The ABP level is still read 15-18 mmHg low with the pulse 20 mmHg too
 narrow; heavier amplitude weights lift the mean, not the spread, and cost
 shape (experiment 6b again). Masks were the baseline's in every arm.
-On the confirmation fold P035, where every sweep model scores ABP CCC
-under 0.10, CardioHydra reaches ABP CCC 0.86 / r 0.93 (MAE 7.3 mmHg, level
-+6) and CVP 0.40 / 0.61 at epoch 10: the best ABP reading of any model on
-any fold in this work.
+On four more held-out folds of the shipped recipe (P035, P037, P034,
+P036) CardioHydra reads ABP at CCC 0.73-0.86 / r 0.82-0.93, MAE 7-13 mmHg,
+with the heart rate right to the bpm, where the best sweep model scores
+0.09, 0.73, 0.08 and 0.64; it is the best model on both traces on four of
+five folds and second to FactorizePhys on P033. The level error is one
+constant per participant (within-participant SD 2-3 mmHg): one reference
+reading brings ABP mean MAE to 2-3 mmHg and systolic to 5-6.
 
 **2026-10-14, later (experiment 13, `experiment_13.md`):** local tuning on
 the HPC recipe (200 px, rate 4 / wavelet 3), P033, 10 epochs an arm. The
