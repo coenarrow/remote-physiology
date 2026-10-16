@@ -159,9 +159,13 @@ feature of the clip at the estimated rate, and no gradient flows through it
 back to the rate estimator.
 
 To save memory, the transform runs on the clip downsampled by area averaging
-(`WAVELET_DOWNSCALE`). The resulting complex field is then upsampled
-bilinearly back to the input resolution, so the masks and every later stage
-work at full resolution.
+(`WAVELET_DOWNSCALE`), and everything that reads the field stays on that
+grid: the pulsatility and phase masks, their networks and priors, and the
+kinematics. Only each window's finished masks are upsampled bilinearly to the
+input resolution, to pool the clip's pixels. Averaging before the transform is
+also what makes the pulsatility index usable: at full resolution the index
+divides a smooth band power by each pixel's own noisy variance and ranks
+pixel noise rather than the neck.
 
 The complex field is used in three ways: its **magnitude** drives the
 pulsatility mask, its **phase** drives the phase masks, and its **spatial and
@@ -242,8 +246,21 @@ $$
 
 where $R$ is the coherence of the relative phase over the window: 1 for a
 pixel whose phase holds steady and 0 for one whose phase wanders. A
-**background** class with a logit of zero collects pixels that pulse at
-neither trace's phase.
+**background** class collects pixels with no coherent phase. Its logit is the
+log-odds of "no coherent source here",
+
+$$
+\ell_{bg}(x) = \ln 40 \;-\; n\, R(x)^2,
+$$
+
+where $n$ is the number of independent phase samples in the window (the
+window's beats divided by the Morlet kernel's width in beats, from the
+estimated rate) and $n R^2$ is the Rayleigh statistic for a coherent source
+against uniform phase. The prior odds of 40 to 1 are the vessels' share of
+the neck. A pixel whose phase holds ($R$ near 1) is therefore a trace's;
+one whose phase wanders ($R$ at the noise level, about 0.3 on a 10 s
+window) is background whatever the network says; between the two the
+network decides.
 
 **The network nudges.** As with the pulsatility mask, a small separable 3-D
 convolutional network adds a bounded correction to each class's logit. Its
@@ -267,8 +284,6 @@ arterial mask to cover most of the pulsatile skin, weighted towards the
 carotid, and the venous mask to concentrate over the jugular. The background
 should absorb pulsatile pixels that fit neither. Regularisers encourage:
 
-- the traces to claim most of the pulsatile mass, with the background keeping
-  no more than an even share;
 - each trace's mask to sit on pixels that are coherent across scales, steady
   over time and consistent with their neighbours;
 - spatially smooth masks.
@@ -388,9 +403,12 @@ operations.
    trace, a temporal 1-D convolution over that trace's candidates from every
    channel, followed by a pointwise readout, gives one shape-only waveform. The
    mixer learns how to combine channels, each with its own polarity, phase lag
-   and quality. Each trace is mixed only from its own candidates. The
-   kinematic branch is initialised to zero, so the mixer starts as a pure
-   intensity filter bank and learns to use the kinematics.
+   and quality. Whether each trace is mixed only from its own candidates or
+   from every candidate of both traces is a switch (`TRACE_INDEPENDENT`); the
+   shipped configuration mixes from every candidate, which scored better on
+   both traces than own-candidates-only, where a wider and longer mixer
+   changed nothing. The kinematic branch is initialised to zero, so the mixer
+   starts as a pure intensity filter bank and learns to use the kinematics.
 
 The mixer is deliberately **linear**, with no nonlinearity between temporal
 layers. A ReLU in that position rectified the zero-mean candidates, removing
@@ -436,19 +454,21 @@ are written in Triton.
 
 ## Current settings
 
-These values reflect the code at the time of writing. They are still being
-tuned, and the concepts above do not depend on them.
+The configuration the models ship with for the Neckflix comparison
+(`configs/hpc_configs_200/`), settled on 2026-10-15 (development notes,
+experiment 14). The concepts above do not depend on them.
 
 | Setting | Value |
 | --- | --- |
-| Input interface | 30 fps, 10 s windows, 72 × 72 px, channels R, G, B, IR, depth |
+| Input interface | 30 fps, 10 s windows, 200 × 200 px, channels R, G, B, IR, depth |
 | Traces | ABP, CVP |
-| Rate estimator | RhythmFormer, on the clip downscaled ×2; 1 bpm grid, 30–200 bpm |
-| Rate gate tolerance | 8 bpm |
-| Wavelet | complex Morlet `cmor1.5-1.0`; 3 harmonics × 3 scales at ±10 bpm; clip downscaled ×2 |
+| Rate estimator | RhythmFormer, on the clip downscaled ×4 (50 px); 1 bpm grid, 30–200 bpm |
+| Rate gate tolerance | 8 bpm, inside the wavelet bank's 10 bpm buffer |
+| Wavelet | complex Morlet `cmor1.5-1.0`; 3 harmonics × 3 scales at ±10 bpm; clip downscaled ×3 (66 px grid for the masks and kinematics) |
 | Pulsatility correction bound | 1.5 nats |
-| Phase bin gain / correction bound | 2 / 0.9 nats |
-| CardioConv mixer | grouped temporal conv, 15 taps, 16 hidden channels per trace |
+| Phase bin gain / correction bound / background prior odds | 2 / 0.9 nats / 40 to 1 |
+| CardioConv mixer | temporal conv over every candidate of both traces (`TRACE_INDEPENDENT: false`), 15 taps, 16 hidden channels per trace |
 | CardioHydra trunk | width 128, 2 BiMamba3 blocks per trace; Mamba LR × 0.1 |
 | Statistics head | one hidden layer of 64 per trace |
-| Loss | per trace CCC + $L_1$ on mean, max, min; mask priors; rate waveform term |
+| Loss | per trace CCC + $L_1$ on mean, max, min (ABP 0.05 each, CVP 0.2); mask priors; rate waveform term |
+| Training | Adam 1e-3, no weight decay, rate held for two thirds of the run then a cosine to zero, bfloat16, 30 epochs at a global batch of 4 |
