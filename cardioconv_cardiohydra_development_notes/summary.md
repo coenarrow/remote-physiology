@@ -36,7 +36,8 @@ the best cardio result so far, on the same masks.
 (masks on the `WAVELET_DOWNSCALE` grid) scores the 11b weights on P033 at
 0.507 / 0.316 against 0.51 / 0.31 at full resolution, with no retraining;
 at 200 px it fits an A100 at batch 2 a card. The P033 tuning job
-(`.slurm_scripts/Neckflix_CardioTuning_P033_4GPU.slurm`,
+(`.slurm_scripts/Neckflix_CardioTuning_P033_4GPU.slurm`, since merged into
+`Neckflix_CardioCheck_H200_4GPU.slurm`;
 `configs/hpc_tuning_p33/`) smoked locally for both models.
 
 **2026-10-12 (experiment 8, `experiment_8.md`):**
