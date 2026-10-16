@@ -44,7 +44,9 @@ class Kinematics(nn.Module):
         """``(B, C, T, h, w, K)`` complex field -> ``{name: (B, C, T, h, w, N)}``
         real: ``amplitude``, ``wavenumber`` (radians per pixel),
         ``phase_speed`` (signed, pixels per frame) and the unit heading,
-        ``direction_x`` and ``direction_y``."""
+        ``direction_x`` and ``direction_y``; plus ``harmonics``, the blended
+        complex field itself, for whoever wants its phase (the visualiser;
+        the models read the named features only)."""
         harmonics = collapse_harmonics(field, self.n_harmonics, self.sharpness)    # (B, C, T, h, w, N)
         # One harmonic at a time, written into the outputs: the gradients'
         # temporaries are one harmonic's plane, not N of them.
@@ -60,4 +62,5 @@ class Kinematics(nn.Module):
             out["phase_speed"][..., n] = phase_gradient(harmonic, TIME) / wavenumber
             out["direction_x"][..., n] = k_x / wavenumber
             out["direction_y"][..., n] = k_y / wavenumber
+        out["harmonics"] = harmonics
         return out

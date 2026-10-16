@@ -314,6 +314,18 @@ direction of travel. Per pixel, frame and harmonic, the phase gradients give:
 Phase gradients are computed as $\operatorname{Im}(\partial W \cdot
 \overline{W}) / |W|^2$, so no phase unwrapping is needed.
 
+**What is measured in practice.** `scripts/visualise.py` draws these
+quantities per window (`kinematics.png`, the phase strip of `masks.gif`,
+`speed_vs_pressure.png`). On Neckflix at 200 px the heading is incoherent
+(resultant length under the masks 0.02 to 0.12), the median wavelength is a
+quarter of the frame where a propagating pulse's would be metres, and the
+pooled speed is a smooth positive number of about 2 pixels per frame that
+is nearly the same for both traces and does not modulate within the beat:
+at this resolution and frame rate it behaves as a measure of local phase
+roughness, not of propagation. It correlates with pressure between a
+participant's postures but not within a recording (development notes,
+experiment 15).
+
 **Why speed.** By the Bramwell–Hill relation, pulse wave velocity rises with
 vessel stiffness, which in turn rises with distending pressure. The apparent
 speed of the pulse is therefore a candidate cue to the pressure *level*,
