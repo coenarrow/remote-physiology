@@ -13,9 +13,12 @@
 
 # CardioConv on Neckflix at 200 px, 30 epochs a fold, the whole node: as long
 # as the ported models' 20-epoch sweeps plus their 10-epoch continuations, in
-# one run, so it needs no continuation. Its recipe's learning rate is
-# constant, so 30 straight epochs follow the schedule 20 + 10 would; the only
-# difference from a continued run is that Adam's moments never restart.
+# one run, and it must be one run: its recipe's schedule is HoldCosine (the
+# rate held for two thirds of the run, then a cosine to zero), which is
+# relative to the run's length, so a continued run would start the schedule
+# afresh. The recipe is the one settled on the dev box on 2026-10-14/15
+# (development notes, experiment 14: TRACE_INDEPENDENT false) and checked on
+# the cluster by Neckflix_CardioCheck_H200_4GPU.slurm; run that first.
 #
 #   sbatch .slurm_scripts/Neckflix_CardioConv_H200_4GPU.slurm 1 2 3 4 5 7 8 9 10 11 12 13 14 15 17 22 23 24 25 26 27 28 29 30 31
 #   sbatch .slurm_scripts/Neckflix_CardioConv_H200_4GPU.slurm 32 33 34 35 36 37 38 39 40 41 43 44 45 46 47 49 50 51 52 53 54 55 56 57 58
@@ -42,17 +45,12 @@
 # 25 two at a time 38-52 h. 5 workers a process (20 in all) and 400G of host
 # memory, as RhythmFormer's sweep.
 #
-# The model lives on the cardiohydra branch, which is not on origin: commit
-# it (this script, configs/hpc_configs_200/cardio*_H200W200.yaml and the
-# model code) and push it, then on the cluster `git fetch && git checkout
-# cardiohydra` and check `git log -1` before sbatch. A pull on main is not
-# enough: it keeps main's older script of this name, which trains the
-# pre-redesign CardioConv. Every fold imports the code and reads its config
-# when it starts, so leave the checkout alone until both jobs finish; jobs
-# started from the same checkout meanwhile (the ported models'
-# continuations) run this branch's code too, so run these from a second
-# checkout to keep them apart. The model has not run on the cluster yet; a
-# smoke in salloc on two GPUs first:
+# The model is on main from d1b0059 (coarse-grid masks, the coherence
+# background bin, MIXER_* keys, TRACE_INDEPENDENT false): `git pull`, then
+# `git log -1` and `git status` before sbatch. Every fold imports the code
+# and reads its config when it starts, so leave the checkout alone until
+# both jobs finish. A smoke in salloc on two GPUs first, if the check job
+# has not already run:
 #
 #   uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc \
 #       --test-participant-id 15 \
