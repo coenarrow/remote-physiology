@@ -1,0 +1,8 @@
+Job ID: 151998, node k177
+CPUs on node: 48, usable here: 48
+commit: b462247 SLURM: one cardio check job, arms from configs/hpc_tuning_p33
+arms: cardiohydra_baseline cardioconv_dense; held out: 33 36; epochs: 30
+=== arm cardiohydra_baseline: Sun Oct 18 05:50:17 AM AWST 2026 ===
+experiment: cardiohydra on ['neckflix_hpc'], 2 fold(s) holding out neckflix_hpc ['33', '36'], 2 at a time, 2 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardiohydra_baseline
+fold 1/2: holding out neckflix_hpc 33 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC.33_202610180551
+fold 2/2: holding out neckflix_hpc 36 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC.36_202610180551
