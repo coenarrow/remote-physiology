@@ -11,89 +11,67 @@
 #SBATCH --output=logs/%j_Neckflix_CardioCheck_H200_4GPU.out
 #SBATCH --error=logs/%j_Neckflix_CardioCheck_H200_4GPU.err
 
-# The cluster check of the cardio recipes before their LOSO sweeps, and the
-# optional re-run of the tuning arms on the native cache. Each arm is a YAML
-# in configs/hpc_tuning_p33/ (BASE on the hpc_configs_200 cardio YAML plus
-# one change); cardiohydra_baseline and cardioconv_dense are the two
-# recipes as they ship, the rest the arms that lost on the dev box
-# (development notes, experiment 14). Each arm runs for EPOCHS epochs on
-# every participant in PARTICIPANTS, two folds at once, and is scored.
+# The cluster check of the cardio recipes before (or beside) their LOSO
+# sweeps, and the optional run of the tuning arms. Each arm is a YAML in
+# configs/hpc_tuning_p33/ (BASE on the hpc_configs_200 cardio YAML plus one
+# change); cardiohydra_baseline and cardioconv_coherent are the two recipes
+# as they ship, cardioconv_dense the masked-mean readout they replaced, the
+# rest the arms that lost on the dev box (development notes, experiment 14).
+# Each arm runs for EPOCHS epochs on every participant in PARTICIPANTS, up
+# to four folds at once, one card each, and is scored.
 #
-#   sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm                              # both shipped recipes, P033 + P036, 30 epochs
-#   sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm cardiohydra_baseline         # one
-#   PARTICIPANTS="33 34" sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm         # other folds
-#   EPOCHS=10 sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm cardiohydra_tv0.02 cardiohydra_mamba0.3   # tuning arms
+#   sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm                              # both shipped recipes, P033 + P036, 20 epochs
+#   sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm cardioconv_coherent          # one
+#   PARTICIPANTS="33 34 35 36" sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm   # four folds, one round
+#   EPOCHS=10 sbatch .slurm_scripts/Neckflix_CardioCheck_H200_4GPU.slurm cardiohydra_tv0.02 cardiohydra_abpamp   # tuning arms
 #
-# Why P033 and P036. P033 is the fold every model was tuned and compared
-# on; at 200 px FactorizePhys scores ABP CCC 0.78 there, the best of the
-# ported models on any participant in the 30s, and on the dev box
-# CardioHydra reached 0.68 at epoch 4 (then slid to 0.62 as the predicted
-# scale shrank) and CardioConv 0.38. P036 is the hardest of the five folds
-# CardioHydra ran on the dev box: the shape comes (r 0.83) but the pulse
-# pressure is 37 mmHg too narrow around a level 8 mmHg high, and no ported
-# model but RhythmFormer (0.64) reads it at all. P034 (every ported model
-# under 0.1, CardioHydra 0.80) is the alternative.
+# The first run of this script (job 151998, 2026-10-18, 30 epochs, native
+# 650 px cache, two folds at a time over two cards each) is the reference:
 #
-# What "learned pretty well" looks like, from the dev-box folds (10 epochs,
-# 128 px cache upsampled to 200, float32, batch 1):
+#   | fold | CardioHydra ABP CCC / r, epoch 30 (best) | CVP CCC / r | CardioConv dense ABP CCC / r | CVP CCC / r |
+#   | P033 | 0.65 / 0.92 (0.71 at epoch 15)           | 0.40 / 0.53 | 0.22 / 0.43                  | 0.22 / 0.35 |
+#   | P036 | 0.74 / 0.84 (0.77 at epoch 22)           | 0.18 / 0.34 | 0.21 / 0.36                  | 0.19 / 0.29 |
 #
-#   | fold | CardioHydra ABP CCC / r                | CVP CCC / r | CardioConv ABP CCC / r | CVP CCC / r |
-#   | P033 | 0.68 / 0.85 (ep 4), 0.62 / 0.89 (ep 8) | 0.40 / 0.61 | 0.38 / 0.58            | 0.22 / 0.37 |
-#   | P036 | 0.73 / 0.83 (ep 10)                    | 0.22 / 0.38 | not run                |             |
+# which reproduced the dev box almost number for number (experiment 14's
+# addendum): bf16, DDP and the native cache changed nothing, the held-out
+# peak came by epoch 15-22 and the second half of the schedule transferred
+# nothing, hence 20 epochs here and in the sweeps. CardioConv with the
+# masked-mean readout did not fit the ABP shape even on the training set
+# (its training CCC term never left 0.62); COHERENT_POOLING (experiment 16)
+# took the P033 fold to 0.59-0.64 on the dev box and is what ships, so a
+# cardioconv_coherent fold near or above that is the pass and
+# cardioconv_dense is the ablation.
 #
-# The cluster recipe differs in what the dev box could not run: the native
-# 200 px cache (the masks see 66 px of real detail, not 43), bfloat16, a
-# global batch of 4 across two cards, and 30 epochs (4,710 optimiser steps
-# against the dev box's 6,280 at batch 1 over 10 epochs; HoldCosine's tail
-# sits in the last third of either). On the dev box four of five CardioHydra
-# folds rose to the last epoch and P033 slid slowly after epoch 4, so a
-# cluster fold that ends near or above the table is the pass; one that
-# collapses or sits far below it is the bf16 / DDP / resolution question the
-# dev box could not ask. The tuning arms are read against the shipped
-# recipe's fold the same way; on the dev box every one scored below it, so
-# an arm that wins here is a resolution effect worth knowing about. Read the
-# held-out curve with tools/tuning_report.py convergence and
-# scripts/evaluate.py, and the masks with scripts/visualise.py --checkpoint
-# <fold> --dataset neckflix_hpc --test-participant-id <id> --windows 6.
+# That job also ran at 3.2 s a step against the ported sweeps' 1.45 s, the
+# loader resizing 650 px windows in a dense einsum. The cache is now 200 px
+# (configs/datasets/neckflix_hpc.yaml), the loader resizes nothing, and the
+# layout is the sweeps': one process and one card a fold at batch 4
+# (--parallel 4 --nproc-per-node 1), 10 workers a fold. Read the first
+# epoch's step time in each fold's log.txt; the card alone should be well
+# under 1 s. Score the held-out curve per epoch with
+# runs/dev_cardio/exp14_final_tuning/score_folds.py (scratch copies), the
+# fold with scripts/evaluate.py, and the masks with scripts/visualise.py
+# --checkpoint <fold> --dataset neckflix_hpc --test-participant-id <id>.
 #
-# Two folds at once, two A100s each at batch 2 a card (a global batch of 4,
-# the batch of every hpc_configs_200 sweep; --parallel 2 --nproc-per-node 2),
-# one arm after another. Peak reserved memory a card at rate 4 / wavelet 3,
-# bf16: under 11 GB at batch 1 for CardioConv on the dev box, so batch 2 is
-# well inside the A100's 39.5 GB. The sweeps ran about 1.5 s a step,
-# loader-bound, 5.5-7 min an epoch: 30 epochs about 3-4 h an arm of two
-# folds, 6-8 h for the two shipped recipes. 5 workers a process (20 in all),
-# 400G of host memory, as the sweeps. An arm that fails is reported and the
-# next one starts.
-#
-# Neither model has trained on the cluster before, and the dev box cannot
-# run bfloat16 (Turing), DistributedDataParallel (no libuv in the Windows
-# torch) or Mamba3's Triton kernels under either (the same mamba-ssm 2.3.2
-# install ran PhysMamba's sweep). Every parameter of both models takes a
-# gradient with the training gate open or closed (checked 2026-10-14,
-# runs/dev_cardio/exp12_coarse_check/grad_coverage.py), which is what DDP
-# needs. A smoke in salloc on two GPUs first, one model each, costs minutes
-# and catches anything that would waste the job:
+# The checkout must carry the coherent-pooling commit of 2026-10-18 or
+# later; `git pull`, `uv sync` (the lock gained opencv-python-headless),
+# then `git log -1` and `git status` before sbatch, and leave the checkout
+# alone until the job finishes. A smoke in salloc on one GPU first:
 #
 #   uv run python main.py --datasets neckflix_hpc --test-participant-dataset neckflix_hpc \
 #       --test-participant-id 33 \
-#       --config configs/hpc_tuning_p33/cardiohydra_baseline.yaml \
-#       --experiment smoke_cardio_check --epochs 1 --batch-size 2 --limit-windows 8 \
-#       --parallel 1 --nproc-per-node 2
+#       --config configs/hpc_tuning_p33/cardioconv_coherent.yaml \
+#       --experiment smoke_cardio_check --epochs 1 --batch-size 4 --limit-windows 8
 #
-# The checkout must carry main at d1b0059 or later (coarse-grid masks, the
-# coherence background bin, MIXER_* keys, TRACE_INDEPENDENT false for
-# CardioConv): `git pull`, then `git log -1` and `git status` before sbatch,
-# and leave the checkout alone until the job finishes. Each fold writes its
-# own log.txt under runs/neckflix_hpc_check_<arm>/; the scoring at the end
-# writes evaluation/ beside the folds and inside each.
+# Each fold writes its own log.txt under runs/neckflix_hpc_check_<arm>/; the
+# scoring at the end writes evaluation/ beside the folds and inside each.
 
 ARMS=("$@")
 if [ "${#ARMS[@]}" -eq 0 ]; then
-    ARMS=(cardiohydra_baseline cardioconv_dense)
+    ARMS=(cardiohydra_baseline cardioconv_coherent)
 fi
 PARTICIPANTS=${PARTICIPANTS:-"33 36"}
-EPOCHS=${EPOCHS:-30}
+EPOCHS=${EPOCHS:-20}
 CONFIG_DIR="configs/hpc_tuning_p33"
 
 mkdir -p logs
@@ -122,7 +100,7 @@ for arm in "${ARMS[@]}"; do
         --test-participant-id ${PARTICIPANTS} \
         --config "${config}" \
         --experiment "${experiment}" \
-        --epochs "${EPOCHS}" --batch-size 2 --num-workers 5 --parallel 2 --nproc-per-node 2
+        --epochs "${EPOCHS}" --batch-size 4 --num-workers 10 --parallel 4 --nproc-per-node 1
     status=$?
     echo "=== arm ${arm} exited ${status}: $(date) ==="
     if [ "${status}" -ne 0 ]; then
@@ -130,9 +108,11 @@ for arm in "${ARMS[@]}"; do
         continue
     fi
     # Score every fold's last epoch (CPU): evaluation/tables/ under the
-    # experiment directory, the folds pooled, plus a copy inside each fold.
+    # experiment directory, the folds pooled, plus a copy inside each fold
+    # (the pooled evaluation/ directory is not a fold and is skipped).
     uv run python scripts/evaluate.py "runs/${experiment}"
     for fold in runs/"${experiment}"/*/; do
+        [ -f "${fold}/config.yaml" ] || continue
         uv run python scripts/evaluate.py "${fold}"
     done
     echo "=== arm ${arm} scored: $(date) ==="

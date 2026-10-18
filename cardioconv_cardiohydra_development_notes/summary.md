@@ -1,5 +1,26 @@
 # CardioConv and CardioHydra, 2026-10-10 overnight: summary
 
+**2026-10-18 (experiment 16, `experiment_16.md`, and experiment 14's cluster
+check):** the first cluster run of both recipes (job 151998, P033 and P036,
+30 epochs, native cache) reproduced the dev box almost number for number:
+CardioHydra ABP CCC 0.65 / r 0.92 and 0.74 / 0.84, CVP 0.40 and 0.18, the
+held-out peak by epoch 15-22 and nothing gained after, the level error set by
+epoch 2; CardioConv with the masked-mean readout 0.22 and 0.21, its training
+ABP CCC term never below 0.62 on the same masks. The job ran at 3.2 s a step
+against the sweeps' 1.45 s: the area-average resize of 2026-10-14 as a dense
+einsum on 650 px windows in the loader. `resize_video` is now OpenCV
+(`INTER_AREA` shrinking, `INTER_LINEAR` growing, nearest for depth, as the
+cacher), bit-identical to the einsum on colour and infrared, and the HPC
+dataset config names a 200 px cache so the loader resizes nothing. A
+two-hour dev-box test of coherent wavelet pooling for CardioConv's
+intensity candidate (each pixel's harmonics rotated into phase before the
+masked mean; `COHERENT_POOLING`) took the training term to 0.27 and the
+P033 fold to ABP CCC 0.59-0.64 / r 0.75-0.78, CVP 0.31-0.35, against 0.38 /
+0.59 / 0.23 for the mean and 0.65 / 0.86 / 0.38 for CardioHydra, on the
+same masks. CardioConv ships with it; CardioHydra unchanged; both LOSO
+sweeps at 20 epochs, four folds a node at batch 4, on the 200 px cache
+(`.slurm_scripts/Neckflix_Cardio{Conv,Hydra}_H200_4GPU.slurm`).
+
 **2026-10-16 (experiment 15, `experiment_15.md`):** the kinematics are
 drawn (`scripts/visualise.py`: `kinematics.png`, a phase strip in
 `masks.gif`, `speed_vs_pressure.png`, pooled speed / wavelength / heading

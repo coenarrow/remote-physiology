@@ -1,6 +1,16 @@
-# PURE on the HPC: pure.yaml with the cache where it lives on group storage.
-# Keys and grammar: pure.yaml. Only the path differs; edit it to wherever the
-# cache landed (docs/hpc_pure_physmamba.md). Loaded as `--datasets pure_hpc`,
-# so run directories read PHYSMAMBA_PURE_HPC.<participant>_<stamp>.
+# Neckflix on the HPC: neckflix.yaml with the cache where it lives on group
+# storage. Keys and grammar: neckflix.yaml. Only the path differs. Loaded as
+# `--datasets neckflix_hpc`, so run directories read
+# <MODEL>_NECKFLIX_HPC.<participant>_<stamp>.
+#
+# From 2026-10-18 the path is the 200 px cache (the Neckflix cacher,
+# dataset/cachers/neckflix, with --resize 200 200: INTER_AREA for colour and
+# infrared, nearest-neighbour for depth), so every hpc_configs_200 model
+# reads frames already at its RESIZE and the loader resizes nothing. The
+# sweeps before that date (runs on Z:\runs up to the cardio check, job
+# 151998) read the native 650 px cache at
+# /group/pgh004/carrow/caches/neckflix_zarr and shrank each window in the
+# loader: bilinear without antialiasing until 2026-10-14, an area average
+# after (development notes, experiment 9 and its postscript).
 BASE: neckflix.yaml
-CACHED_PATH: "/group/pgh004/carrow/caches/neckflix_zarr"
+CACHED_PATH: "/group/pgh004/carrow/caches/neckflix_zarr_200"
