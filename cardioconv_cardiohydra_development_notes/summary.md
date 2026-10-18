@@ -1,5 +1,14 @@
 # CardioConv and CardioHydra, 2026-10-10 overnight: summary
 
+**2026-10-16 (experiment 15, `experiment_15.md`):** the kinematics are
+drawn (`scripts/visualise.py`: `kinematics.png`, a phase strip in
+`masks.gif`, `speed_vs_pressure.png`, pooled speed / wavelength / heading
+coherence in `scores.csv`). On P035 the heading is incoherent (resultant
+0.02-0.12), the wavelength a quarter of the frame, and the pooled speed a
+smooth 2 px/frame that is the same for both traces: a phase-roughness
+measure, not a wave speed. It correlates with pressure between postures
+(r 0.55-0.78) but not within a recording (r about 0).
+
 **2026-10-15 (experiment 14, `experiment_14.md`):** the final local tuning
 for the 200 px cluster run, 24 h on the dev card, P033 held out, 10 epochs
 an arm on the `hpc_configs_200` recipe. CardioHydra ships as it stood: four

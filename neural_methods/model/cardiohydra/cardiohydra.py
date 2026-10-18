@@ -237,5 +237,5 @@ class CardioHydra(nn.Module):
         speed = pooled_speed(kinematics["phase_speed"], weight, present, self.supervise_masks)
         out = self.statistics_head(shapes, power, clip, weight, rate, present, extra=speed)
         if self.capture:
-            self.captured = capture(clip, rate, power, *fine, N_HARMONICS, kinematics, speed)
+            self.captured = capture(clip, rate, power, coarse, fine, N_HARMONICS, kinematics, speed)
         return out, priors

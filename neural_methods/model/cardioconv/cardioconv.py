@@ -344,15 +344,18 @@ class CardioConv(nn.Module):
                              self.statistics_head.supervise_masks)
         out = self.statistics_head(mixed, power, clip, weight, rate, present, extra=speed)
         if self.capture:
-            self.captured = capture(clip, rate, power, *fine, N_HARMONICS, kinematics, speed)
+            self.captured = capture(clip, rate, power, coarse, fine, N_HARMONICS, kinematics, speed)
         return out, priors
 
 
-def capture(clip, rate, power, pulsatility, phase_masks, background, n_harmonics: int,
+def capture(clip, rate, power, coarse: tuple, fine: tuple, n_harmonics: int,
             kinematics: dict, speed: torch.Tensor) -> dict:
     """What a forward looked at, detached, for the visualiser: the clip and
     the masks read at its grid (one map per window, expanded over the frames
-    as views), the per-harmonic magnitude and the kinematics on the field's grid."""
+    as views), the same masks on the field's grid (``*_coarse``, one map per
+    window), the per-harmonic magnitude, the kinematics and the fundamental's
+    blended complex field on the field's grid."""
+    pulsatility, phase_masks, background = fine
     t = clip.shape[2]
     return {
         "clip": clip.detach(), "rate": rate.detach(),
@@ -360,8 +363,13 @@ def capture(clip, rate, power, pulsatility, phase_masks, background, n_harmonics
         "pulsatility": rearrange(pulsatility.detach(), "b c h w -> b c 1 h w").expand(-1, -1, t, -1, -1),
         "phase_masks": rearrange(phase_masks.detach(), "b c h w s -> b c 1 h w s").expand(-1, -1, t, -1, -1, -1),
         "background": rearrange(background.detach(), "b c h w -> b c 1 h w").expand(-1, -1, t, -1, -1),
+        "pulsatility_coarse": coarse[0].detach(),
+        "phase_masks_coarse": coarse[1].detach(),
+        "background_coarse": coarse[2].detach(),
+        "wavenumber": kinematics["wavenumber"].detach(),
         "phase_speed": kinematics["phase_speed"].detach(),
         "direction_x": kinematics["direction_x"].detach(),
         "direction_y": kinematics["direction_y"].detach(),
+        "harmonic": kinematics["harmonics"][..., 0].detach(),
         "pooled_speed": speed.detach(),
     }
