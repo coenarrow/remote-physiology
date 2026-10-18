@@ -1,0 +1,6 @@
+# CardioConv as it ships (2026-10-18): the mixer draws every trace from every
+# candidate (TRACE_INDEPENDENT false, experiment 14, arm 5) and the intensity
+# candidate is the wavelet harmonics pooled coherently under the masks
+# (COHERENT_POOLING true, experiment 16). The hpc_configs_200 CardioConv
+# YAML carries both values, so this arm is the recipe as it stands.
+BASE: ../hpc_configs_200/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml

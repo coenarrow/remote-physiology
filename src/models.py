@@ -372,7 +372,8 @@ def _build_cardioconv(cfg: CardioConvConfig, interface: InterfaceConfig) -> Mult
         trace_independent=cfg.TRACE_INDEPENDENT, supervise_masks=cfg.SUPERVISE_MASKS,
         rate_tolerance_bpm=cfg.RATE_TOLERANCE_BPM, rate_downscale=cfg.RATE_DOWNSCALE,
         wavelet_downscale=cfg.WAVELET_DOWNSCALE, rate_network=_rate_network(cfg, interface),
-        mixer_hidden=cfg.MIXER_HIDDEN, mixer_taps=cfg.MIXER_TAPS)
+        mixer_hidden=cfg.MIXER_HIDDEN, mixer_taps=cfg.MIXER_TAPS,
+        coherent_pooling=cfg.COHERENT_POOLING)
     return _wrap(backbone, interface, cfg)
 
 

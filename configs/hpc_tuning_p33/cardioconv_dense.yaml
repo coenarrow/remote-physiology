@@ -1,8 +1,10 @@
-# CardioConv tuning arm, shipped: the mixer draws every trace from every
-# candidate (TRACE_INDEPENDENT false). On P033 it led the own-candidates
-# baseline on both traces from epoch 6 on (ABP r 0.58 against 0.52, CVP
-# 0.37 against 0.31 at epoch 10; notes, experiment 14, arm 5), where the
-# mixer's width and reach (31 taps, 32 hidden, arm 3) had moved nothing.
-# The hpc_configs_200 CardioConv YAML carries the value, so this arm is
-# the recipe as it stands.
+# CardioConv with the masked-mean intensity candidate: the recipe as it stood
+# before coherent pooling (experiment 16), kept as the ablation. The mixer
+# draws every trace from every candidate (TRACE_INDEPENDENT false; on P033 it
+# led the own-candidates baseline on both traces from epoch 6 on, ABP r 0.58
+# against 0.52, CVP 0.37 against 0.31 at epoch 10; experiment 14, arm 5). On
+# the cluster (job 151998, 30 epochs, native cache) this arm finished at ABP
+# CCC 0.22 (P033) and 0.21 (P036), its training ABP CCC term never below 0.62.
 BASE: ../hpc_configs_200/cardioconv_FS30_W10S1_RGBID_ABP-CVP_H200W200.yaml
+MODEL:
+  COHERENT_POOLING: false

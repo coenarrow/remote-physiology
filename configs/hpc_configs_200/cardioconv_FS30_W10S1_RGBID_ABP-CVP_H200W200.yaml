@@ -5,6 +5,10 @@ MODEL:
   TRACE_INDEPENDENT: false       # every trace mixed from every candidate: +0.06 ABP r, +0.05 CVP r on P033 over own-candidates-only (notes, experiment 14, arm 5)
   MIXER_HIDDEN: 16               # channels of each trace's temporal layer in the mixer
   MIXER_TAPS: 15                 # its taps (odd); half a beat at 30 fps. 31 x 32 changed nothing (notes, experiment 14)
+  COHERENT_POOLING: true         # the intensity candidate is the wavelet harmonics pooled with every pixel
+                                 # rotated into phase, not the masked mean: on P033 ABP CCC 0.59-0.64 / r 0.75-0.78
+                                 # against 0.38 / 0.59 for the mean, whose training CCC term never left 0.62 on
+                                 # the cluster (notes, experiment 16; shipped 2026-10-18, one fold, the sweep confirms)
   SUPERVISE_MASKS: true
   RATE_TOLERANCE_BPM: 8.0        # training gate on the learned heart rate, inside the 10 bpm wavelet buffer
   RATE_ESTIMATOR: RhythmFormer          # the single-trace network the rate is read off, or Spectral

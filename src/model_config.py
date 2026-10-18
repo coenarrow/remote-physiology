@@ -193,6 +193,7 @@ class CardioConvConfig(CardioBaseConfig):
     TRACE_INDEPENDENT: bool = True    # mix each trace from its own candidates only
     MIXER_HIDDEN: int = 16            # channels of each trace's temporal layer
     MIXER_TAPS: int = 15              # taps of the temporal layer, odd; 15 is half a beat at 30 fps
+    COHERENT_POOLING: bool = False    # intensity candidate pooled coherently in the wavelet domain
 
     def validate(self, interface: InterfaceConfig, where: str) -> None:
         super().validate(interface, where)

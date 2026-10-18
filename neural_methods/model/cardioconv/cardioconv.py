@@ -111,7 +111,7 @@ import torch.nn as nn
 from einops import rearrange, reduce
 
 from neural_methods.model.cardioconv.channel_mixer import ChannelMixer
-from neural_methods.model.cardioconv.channel_predictor import ChannelPredictor
+from neural_methods.model.cardioconv.channel_predictor import ChannelPredictor, coherent_candidate
 from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
 from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
@@ -170,7 +170,8 @@ class CardioConv(nn.Module):
                  phase_masker: bool = True, trace_independent: bool = True,
                  supervise_masks: bool = True, rate_tolerance_bpm: float = 8.0,
                  rate_downscale: int = 2, wavelet_downscale: int = 2,
-                 rate_network: nn.Module = None, mixer_hidden: int = 16, mixer_taps: int = 15):
+                 rate_network: nn.Module = None, mixer_hidden: int = 16, mixer_taps: int = 15,
+                 coherent_pooling: bool = False):
         """Definition of CardioConv.
 
         Args:
@@ -199,12 +200,16 @@ class CardioConv(nn.Module):
           mixer_hidden: channels of each trace's temporal layer in the
             channel mixer.
           mixer_taps: taps of that layer; odd. 15 is half a beat at 30 fps.
+          coherent_pooling: the intensity candidate is the pulse pooled
+            coherently in the wavelet domain (``coherent_candidate``)
+            instead of the masked mean of the intensity.
         """
         super().__init__()
         self.traces = tuple(traces)
         self.fs = fs
         self.rate_tolerance_bpm = rate_tolerance_bpm
         self.wavelet_downscale = wavelet_downscale
+        self.coherent_pooling = coherent_pooling
         self.min_frame = min_frame(wavelet_downscale)
         n_traces = len(self.traces)
         self.rate_estimator = (RateEstimator(in_channels, fs, downscale=rate_downscale)
@@ -338,7 +343,9 @@ class CardioConv(nn.Module):
 
         kinematics = self.kinematics(field)
         planes = torch.cat(kinematic_features(kinematics), dim=-1)          # (b, C, T, h, w, N F)
-        candidates = self.channel_predictor(clip, weight_fine, planes, weight)
+        coherent = (coherent_candidate(kinematics["harmonics"], pulsatility, weight)
+                    if self.coherent_pooling else None)
+        candidates = self.channel_predictor(clip, weight_fine, planes, weight, coherent)
         mixed = self.channel_mixer(candidates)
         speed = pooled_speed(kinematics["phase_speed"], weight, present,
                              self.statistics_head.supervise_masks)

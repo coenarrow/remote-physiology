@@ -41,6 +41,8 @@
 #                                                   layer in the channel mixer (16)
 #                          MIXER_TAPS: <odd int > 0> taps of that layer (15, half a
 #                                                   beat at 30 fps)
+#                          COHERENT_POOLING: <bool> the intensity candidate pooled
+#                          coherently in the wavelet domain (default false)
 #   CardioHydra            CardioConv's, without TRACE_INDEPENDENT, MIXER_HIDDEN
 #                          and MIXER_TAPS, plus
 #                          MAMBA_LR_SCALE: <number > 0>  the Mamba trunks' rate as a

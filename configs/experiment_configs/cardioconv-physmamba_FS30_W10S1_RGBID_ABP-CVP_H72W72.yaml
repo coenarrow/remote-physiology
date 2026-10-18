@@ -5,6 +5,7 @@ MODEL:
   TRACE_INDEPENDENT: true
   MIXER_HIDDEN: 16               # channels of each trace's temporal layer in the mixer
   MIXER_TAPS: 15                 # its taps (odd); half a beat at 30 fps. 31 x 32 changed nothing (notes, experiment 14)
+  COHERENT_POOLING: false        # intensity candidate as the masked mean (true: pooled coherently in the wavelet domain, notes, experiment 16)
   SUPERVISE_MASKS: true
   RATE_TOLERANCE_BPM: 8.0        # training gate on the learned heart rate, inside the 10 bpm wavelet buffer
   RATE_ESTIMATOR: PhysMamba             # the single-trace network the rate is read off, or Spectral
