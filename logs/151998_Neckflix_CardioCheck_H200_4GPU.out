@@ -6,3 +6,18 @@ arms: cardiohydra_baseline cardioconv_dense; held out: 33 36; epochs: 30
 experiment: cardiohydra on ['neckflix_hpc'], 2 fold(s) holding out neckflix_hpc ['33', '36'], 2 at a time, 2 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardiohydra_baseline
 fold 1/2: holding out neckflix_hpc 33 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC.33_202610180551
 fold 2/2: holding out neckflix_hpc 36 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC.36_202610180551
+fold 1/2: done in 21000s, final loss 2.329
+fold 2/2: done in 25457s, final loss 2.294
+experiment: 2 fold(s) done
+=== arm cardiohydra_baseline exited 0: Sun Oct 18 12:55:51 PM AWST 2026 ===
+69 measurement(s) of 10 ± 1 s over 2 participant(s)
+written to runs/neckflix_hpc_check_cardiohydra_baseline/evaluation
+33 measurement(s) of 10 ± 1 s over 1 participant(s)
+written to runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC.33_202610180551/evaluation
+36 measurement(s) of 10 ± 1 s over 1 participant(s)
+written to runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC.36_202610180551/evaluation
+=== arm cardiohydra_baseline scored: Sun Oct 18 12:58:25 PM AWST 2026 ===
+=== arm cardioconv_dense: Sun Oct 18 12:58:25 PM AWST 2026 ===
+experiment: cardioconv on ['neckflix_hpc'], 2 fold(s) holding out neckflix_hpc ['33', '36'], 2 at a time, 2 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardioconv_dense
+fold 1/2: holding out neckflix_hpc 33 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardioconv_dense/CARDIOCONV_NECKFLIX_HPC.33_202610181300
+fold 2/2: holding out neckflix_hpc 36 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardioconv_dense/CARDIOCONV_NECKFLIX_HPC.36_202610181300
