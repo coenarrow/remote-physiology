@@ -142,3 +142,38 @@ waveform term is 0.05.
 
 At full resolution, the per-pixel index does not separate the neck, even with
 clean inputs. Separating it takes averaged evidence: wavelet factor 2, or more.
+
+## Postscript (2026-10-18): the area average becomes antialiased bilinear
+
+The area-average `resize_video` was a dense einsum of a `(200, H)` and a
+`(200, W)` weight matrix against the whole `(300, H, W)` plane. On the dev
+box's 128 px cache the call grows frames, so the matrices are small and it
+cost nothing. On the HPC cache, which is native resolution, every window of
+every model is shrunk to 200 px by that einsum in a single-threaded loader
+worker, and the first cluster job after the change
+(`Neckflix_CardioCheck_H200_4GPU`, 2026-10-18) ran at 3.2 s a step against the
+sweeps' 1.45 s, with the forward-only held-out pass at the same 3.2 s a batch:
+the loader, not the models.
+
+One CPU thread, one plane of 300 frames to 200 x 200:
+
+| native | bilinear, no antialias (before 2026-10-14) | area einsum (2026-10-14 to 10-18) | antialiased bilinear (now) |
+| --- | --- | --- | --- |
+| 128 x 128 (grows) | 0.08 s | 0.06 s | 0.04 s |
+| 480 x 640 | 0.07 s | 0.48 s | 0.15 s |
+| 720 x 1280 | 0.08 s | 1.31 s | 0.37 s |
+| 1080 x 1920 | 0.09 s | 3.06 s | 0.77 s |
+
+The lattice this experiment found was aliasing: `F.interpolate` without
+`antialias` reads a fixed 2 x 2 neighbourhood whatever the factor, so at
+128 -> 72 one output pixel copies a source pixel, the next averages two, the
+next four, and the pixels between are skipped. `antialias=True` widens the
+tent kernel with the factor, so every output pixel averages the same amount
+of source and nothing is skipped, which is what the area average also gave,
+with a tent in place of a box. Growing is unchanged: the two agree to the
+bit at 128 -> 200. Shrinking, on white noise, the two differ by a mean 4 to 7
+grey levels of 255 per pixel with identical means, which is the box and the
+tent weighting noise differently; on a real frame the difference is far
+smaller. Checkpoints trained between 2026-10-14 and 2026-10-18 at a shrink
+(the cluster check's P033 and P036 folds) saw the box average; nothing else
+did.
