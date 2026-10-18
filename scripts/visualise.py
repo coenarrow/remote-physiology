@@ -22,6 +22,20 @@ backbone's ``capture`` switch on, and for each one the script writes, under
   phase on the field's grid (a cyclic colour map, the pulsatility as its
   alpha): a travelling pulse shows bands sweeping along the vessel, a
   standing pulsation the whole region flashing in step.
+- ``propagation.png``: per channel, the mean frame and a grid of arrows,
+  one per block, each pointing the way the pulse travels there: the
+  direction in which the arrival phase (the window-averaged phase of each
+  pixel relative to the channel's own pulse at the fundamental) falls,
+  averaged over the block. An arrow is coloured by the trace that holds its
+  block (ABP red, CVP blue) and fades with the block's pulsatile mass and
+  with how far its neighbours disagree with it, so a region whose arrows
+  all point one way stands out and a region of noise fades. No numbers; the
+  length is fixed.
+- ``pulse_magnified_<channel>.gif``: Eulerian magnification of the pulse,
+  the fundamental's band-passed signal added back onto the frame many times
+  over (brightening in red, darkening in blue), so the sub-pixel pulsation
+  becomes a visible wave; whether it sweeps along the neck or beats in
+  place is the propagation question seen directly.
 - ``kinematics.png``: what the kinematics stage reads off the field at the
   fundamental, one row per channel, every map on the field's grid over the
   channel's mean frame with the pulsatility map as its alpha and on a
@@ -363,6 +377,157 @@ def draw_speed_vs_pressure(out: Path, rows: list, channels: list, trace: str) ->
     fig.savefig(out, dpi=110)
     plt.close(fig)
 
+#: Propagation arrows: the box over which the mean phasor is smoothed before
+#: its gradient is read, the phase coherence below which a pixel does not
+#: vote on the direction, and the arrow's length in grid cells.
+PHASE_SMOOTHING = 3
+PHASE_COHERENCE_FLOOR = 0.6              # a noise pixel's R on a 10 s window reaches 0.6 (experiment 13)
+ARROW_BLOCK = 2                          # grid cells per arrow
+ARROW_NEIGHBOURHOOD = 3                  # blocks over which arrows must agree to stay opaque
+#: Magnified GIF: the band-passed pulse's peak-to-peak swing as a fraction
+#: of the grey range, after magnification.
+MAGNIFICATION_SWING = 0.8
+
+
+def relative_phase(captured: dict, channel_index: int) -> tuple:
+    """The fundamental's phase relative to the channel's own pulse, averaged
+    over the window: ``(mean phasor (h, w) complex, coherence R (h, w))``.
+    The reference is the pulsatility-weighted mean field per frame, as in
+    the phase masker; the per-frame relative phasors are averaged, so a
+    pixel whose phase holds has ``R`` near 1 and the mean phasor's angle is
+    its arrival phase. The phasor is box-averaged (weighted by pulsatility)
+    so the arrival is read from the region, not pixel speckle; the
+    coherence is the per-pixel one, before smoothing."""
+    field = captured["harmonic"][0, channel_index]                           # (T, h, w) complex
+    pulse = captured["pulsatility_coarse"][0, channel_index]                 # (h, w)
+    reference = (field * pulse).sum(dim=(-2, -1), keepdim=True)              # (T, 1, 1)
+    relative = field * reference.conj()
+    relative = relative / (relative.abs() + 1e-12)                           # unit phasors
+    mean = relative.mean(dim=0)                                              # (h, w) complex
+    coherence = mean.abs()
+    k = PHASE_SMOOTHING
+    weighted = torch.view_as_real(mean * pulse)                              # (h, w, 2)
+    smooth = F.avg_pool2d(rearrange(weighted, "h w r -> r 1 h w"), k, stride=1, padding=k // 2,
+                          count_include_pad=False)
+    norm = F.avg_pool2d(pulse[None, None], k, stride=1, padding=k // 2, count_include_pad=False)
+    smooth = rearrange(smooth / (norm + 1e-12), "r 1 h w -> h w r")
+    return torch.view_as_complex(smooth.contiguous()), coherence
+
+
+def phase_gradient_2d(field: torch.Tensor, dim: int) -> torch.Tensor:
+    """``Im(dW conj W) / |W|^2`` along ``dim`` of a complex map: the phase's
+    derivative, no unwrapping (the model's helper, for a 2-D map)."""
+    (difference,) = torch.gradient(field, dim=dim)
+    return (difference * field.conj()).imag / (field.real ** 2 + field.imag ** 2 + 1e-12)
+
+
+def propagation_field(mean_phasor: torch.Tensor, coherence: torch.Tensor, weight: torch.Tensor) -> tuple:
+    """Per block of ``ARROW_BLOCK`` cells: the unit direction in which the
+    arrival phase falls (the way the pulse travels), the block's share of the
+    weight, and how far the block's neighbours agree with it (the resultant
+    length of the unit directions over ``ARROW_NEIGHBOURHOOD`` blocks, mass-
+    weighted). ``(dx, dy, mass, agreement)`` on the block grid, image axes."""
+    b = ARROW_BLOCK
+    votes = weight * (coherence >= PHASE_COHERENCE_FLOOR)
+    k_x = -phase_gradient_2d(mean_phasor, dim=-1)
+    k_y = -phase_gradient_2d(mean_phasor, dim=-2)
+    def pool(x):
+        return F.avg_pool2d(x[None, None], b, ceil_mode=True)[0, 0]
+    mass = pool(votes)
+    mx = pool(k_x * votes) / (mass + 1e-12)
+    my = pool(k_y * votes) / (mass + 1e-12)
+    norm = torch.sqrt(mx ** 2 + my ** 2) + 1e-12
+    dx, dy = mx / norm, my / norm
+    n = ARROW_NEIGHBOURHOOD
+    def smooth(x):
+        return F.avg_pool2d(x[None, None], n, stride=1, padding=n // 2, count_include_pad=False)[0, 0]
+    agreement = torch.sqrt(smooth(dx * mass) ** 2 + smooth(dy * mass) ** 2) / (smooth(mass) + 1e-12)
+    return dx, dy, mass / (mass.max() + 1e-12), agreement
+
+
+def draw_propagation(out: Path, captured: dict, channels: list, traces: list) -> None:
+    """``propagation.png``: per channel the mean frame, each trace's
+    pulsatile region tinted in its colour, and a grid of arrows pointing the
+    way the pulse travels, coloured by the trace that holds each block and
+    faded by the block's mass and its disagreement with its neighbours."""
+    clip = captured["clip"][0]
+    weight = coarse_weight(captured)                                         # (C, h, w, S)
+    h, w = weight.shape[1:3]
+    b = ARROW_BLOCK
+    tints = np.asarray(((1.0, 0.15, 0.15), (0.15, 0.6, 1.0), (0.2, 1.0, 0.2), (1.0, 0.6, 0.1)))
+    fig, axes = plt.subplots(1, len(channels), figsize=(5.0 * len(channels), 5.3), squeeze=False)
+    for c, (channel, ax) in enumerate(zip(channels, axes[0])):
+        frame = F.interpolate(clip[c].mean(dim=0)[None, None], size=(h, w), mode="area")[0, 0]
+        grey = ((frame - frame.min()) / (frame.max() - frame.min() + 1e-6)).cpu().numpy()
+        rgb = np.repeat(grey[..., None], 3, axis=-1) * 0.7 + 0.15
+        mean, coherence = relative_phase(captured, c)
+        total = weight[c].sum(dim=-1)                                        # (h, w)
+        if float(total.max()) <= 0:
+            ax.imshow(np.clip(rgb, 0, 1), interpolation="nearest")
+            ax.set_title(channel, fontsize=9)
+            ax.axis("off")
+            continue
+        ax.imshow(np.clip(rgb, 0, 1), interpolation="nearest")
+        dx, dy, mass, agreement = propagation_field(mean, coherence, total)
+        hb, wb = mass.shape
+        # Each block's arrow takes the colour of the trace with the most of
+        # the block's pulsatile mass.
+        block_share = F.avg_pool2d(rearrange(weight[c], "h w s -> s 1 h w"), b, ceil_mode=True)[:, 0]   # (S, hb, wb)
+        dominant = block_share.argmax(dim=0).cpu().numpy()
+        alpha = (np.sqrt(mass.cpu().numpy()) * agreement.cpu().numpy()).clip(0, 1)
+        ys, xs = np.mgrid[0:hb, 0:wb] * b + (b - 1) / 2
+        u, v = dx.cpu().numpy(), dy.cpu().numpy()
+        for iy in range(hb):
+            for ix in range(wb):
+                a = float(alpha[iy, ix])
+                if a < 0.2 or not np.isfinite(u[iy, ix]):
+                    continue
+                half = b * 0.6
+                start = (xs[iy, ix] - u[iy, ix] * half, ys[iy, ix] - v[iy, ix] * half)
+                end = (xs[iy, ix] + u[iy, ix] * half, ys[iy, ix] + v[iy, ix] * half)
+                tint = tints[dominant[iy, ix]]
+                # The trace's colour with a white edge, so it reads on any grey.
+                ax.annotate("", xy=end, xytext=start,
+                            arrowprops={"arrowstyle": "-|>,head_width=0.3,head_length=0.45",
+                                        "color": (1, 1, 1, a * 0.9), "lw": 2.6, "shrinkA": 0, "shrinkB": 0})
+                ax.annotate("", xy=end, xytext=start,
+                            arrowprops={"arrowstyle": "-|>,head_width=0.3,head_length=0.45",
+                                        "color": (*tint, a), "lw": 1.5, "shrinkA": 0, "shrinkB": 0})
+        ax.set_xlim(-0.5, w - 0.5)
+        ax.set_ylim(h - 0.5, -0.5)
+        ax.set_title(channel, fontsize=9)
+        ax.axis("off")
+    legend = ", ".join(f"{trace} {name}" for trace, name in zip(traces, ("red", "blue", "green", "orange")))
+    fig.suptitle(f"{out.parent.name}: the direction the pulse travels, one arrow per block ({legend}); "
+                 "arrows fade with low pulsatile mass and where neighbours disagree", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+
+
+def draw_magnified_gif(out: Path, captured: dict, channel_index: int, fs: float) -> None:
+    """``pulse_magnified_<channel>.gif``: the channel's frames on the field's
+    grid with the fundamental's band-passed signal added back many times
+    over, brightening in red and darkening in blue, the pulsatility map as
+    its alpha. The magnification is set so the pulsatile region's swing is
+    ``MAGNIFICATION_SWING`` of the grey range."""
+    field = captured["harmonic"][0, channel_index]                           # (T, h, w) complex
+    pulse = captured["pulsatility_coarse"][0, channel_index]
+    alpha = (pulse / (pulse.max() + 1e-12)).clamp(0, 1)
+    signal = field.real                                                     # (T, h, w), zero-mean band-passed
+    scale = float(torch.quantile((signal.abs() * alpha).flatten(), 0.99)) + 1e-12
+    swing = (signal / scale * MAGNIFICATION_SWING).clamp(-1, 1) * alpha      # (T, h, w)
+    clip = captured["clip"][0, channel_index]
+    frames = []
+    for i in range(0, clip.shape[0], GIF_FRAME_STEP):
+        grey = F.interpolate(clip[i][None, None], size=field.shape[-2:], mode="area")[0, 0]
+        grey = (grey - clip.min()) / (clip.max() - clip.min() + 1e-6)
+        lift = swing[i]
+        rgb = torch.stack([grey + lift.clamp(min=0), grey - lift.abs() * 0.5, grey - lift.clamp(max=0)], dim=-1)
+        image = Image.fromarray((rgb.clamp(0, 1).cpu().numpy() * 255).astype(np.uint8))
+        frames.append(image.resize((image.width * GIF_SCALE, image.height * GIF_SCALE), Image.NEAREST))
+    frames[0].save(out, save_all=True, append_images=frames[1:], duration=int(1000 * GIF_FRAME_STEP / fs), loop=0)
+
 
 def draw_panel(out: Path, captured: dict, batch: dict, result: dict, maps: dict | None,
                channels: list, traces: list, fs: float) -> None:
@@ -545,8 +710,13 @@ def main(argv=None) -> Path:
         draw_panel(folder / "panel.png", captured, batch, result, maps, channels, traces, interface.FS)
         draw_overlay(folder / "overlay.png", captured, channels, traces)
         draw_kinematics(folder / "kinematics.png", captured, batch, channels, traces, interface.FS)
+        draw_propagation(folder / "propagation.png", captured, channels, traces)
         depth = channels.index("D") if "D" in channels else 0
         draw_gif(folder / "masks.gif", captured, depth, traces, interface.FS)
+        for channel in ("G", "I"):
+            if channel in channels:
+                draw_magnified_gif(folder / f"pulse_magnified_{channel}.gif", captured,
+                                   channels.index(channel), interface.FS)
         print(f"drew {folder}")
     if all_scores:
         with open(out_root / "scores.csv", "w", newline="") as f:
