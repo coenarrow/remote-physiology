@@ -143,37 +143,47 @@ waveform term is 0.05.
 At full resolution, the per-pixel index does not separate the neck, even with
 clean inputs. Separating it takes averaged evidence: wavelet factor 2, or more.
 
-## Postscript (2026-10-18): the area average becomes antialiased bilinear
+## Postscript (2026-10-18): the area average moves to OpenCV
 
 The area-average `resize_video` was a dense einsum of a `(200, H)` and a
 `(200, W)` weight matrix against the whole `(300, H, W)` plane. On the dev
 box's 128 px cache the call grows frames, so the matrices are small and it
-cost nothing. On the HPC cache, which is native resolution, every window of
+cost nothing. On the HPC cache, which is native 650 x 650, every window of
 every model is shrunk to 200 px by that einsum in a single-threaded loader
 worker, and the first cluster job after the change
 (`Neckflix_CardioCheck_H200_4GPU`, 2026-10-18) ran at 3.2 s a step against the
 sweeps' 1.45 s, with the forward-only held-out pass at the same 3.2 s a batch:
 the loader, not the models.
 
-One CPU thread, one plane of 300 frames to 200 x 200:
-
-| native | bilinear, no antialias (before 2026-10-14) | area einsum (2026-10-14 to 10-18) | antialiased bilinear (now) |
-| --- | --- | --- | --- |
-| 128 x 128 (grows) | 0.08 s | 0.06 s | 0.04 s |
-| 480 x 640 | 0.07 s | 0.48 s | 0.15 s |
-| 720 x 1280 | 0.08 s | 1.31 s | 0.37 s |
-| 1080 x 1920 | 0.09 s | 3.06 s | 0.77 s |
-
 The lattice this experiment found was aliasing: `F.interpolate` without
 `antialias` reads a fixed 2 x 2 neighbourhood whatever the factor, so at
 128 -> 72 one output pixel copies a source pixel, the next averages two, the
-next four, and the pixels between are skipped. `antialias=True` widens the
-tent kernel with the factor, so every output pixel averages the same amount
-of source and nothing is skipped, which is what the area average also gave,
-with a tent in place of a box. Growing is unchanged: the two agree to the
-bit at 128 -> 200. Shrinking, on white noise, the two differ by a mean 4 to 7
-grey levels of 255 per pixel with identical means, which is the box and the
-tent weighting noise differently; on a real frame the difference is far
-smaller. Checkpoints trained between 2026-10-14 and 2026-10-18 at a shrink
-(the cluster check's P033 and P036 folds) saw the box average; nothing else
-did.
+next four, and the pixels between are skipped. The area average is the right
+filter for rPPG rather than an antialiased tent: each source pixel is counted
+once, in one output pixel, so neighbouring cells carry independent noise,
+which the cardio models' per-cell statistics (spatial coherence, the phase
+coherence floor, the background bin) assume. It is also the filter the
+Neckflix cacher writes its stores with (`INTER_AREA` for colour and infrared).
+
+`resize_video` now calls OpenCV: `INTER_AREA` when shrinking, `INTER_LINEAR`
+when growing, and `INTER_NEAREST` for depth either way, as the cacher does,
+so a depth frame's invalid zeros are never blended into false distances. The
+loader passes the modality. One CPU thread, one plane of 300 frames to
+200 x 200:
+
+| native | bilinear, no antialias (before 2026-10-14) | area einsum (2026-10-14 to 10-18) | OpenCV area (now) |
+| --- | --- | --- | --- |
+| 128 x 128 (grows) | 0.08 s | 0.06 s | 0.02 s |
+| 480 x 640 | 0.08 s | 0.49 s | 0.14 s |
+| 650 x 650 (HPC cache) | 0.09 s | 0.63 s | 0.17 s |
+| 1080 x 1920 | 0.09 s | 3.34 s | 0.71 s |
+
+OpenCV's area filter and the einsum agree to the bit on every shrink tested
+(max difference 0.0000 of 255), so no colour or infrared input of any
+checkpoint trained since 2026-10-14 changes; growing agrees with torch's
+bilinear to 0.002 of 255. Depth is the one change: every run before today
+area-averaged (or, before 10-14, bilinearly blended) the D channel, and from
+today it is nearest-neighbour, as a cache written at 200 px by the cacher
+would be. The better fix on the cluster is that cache: with frames already
+at the interface's size the call returns the plane untouched and a window
+read is a tenth of the bytes.

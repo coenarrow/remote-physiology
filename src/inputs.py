@@ -270,7 +270,7 @@ class WindowedDataset(torch.utils.data.Dataset):
                 modality, index = source
                 plane = torch.from_numpy(np.ascontiguousarray(videos[modality][index])).float()
                 if self.interface.resizes:
-                    plane = resize_video(plane, (self.interface.RESIZE.H, self.interface.RESIZE.W))
+                    plane = resize_video(plane, (self.interface.RESIZE.H, self.interface.RESIZE.W), modality)
                 frames[ch] = plane
             else:
                 frames[ch] = torch.zeros((self.interface.window_frames, *self._pad_hw(s)))
