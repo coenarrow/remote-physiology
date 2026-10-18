@@ -21,3 +21,15 @@ written to runs/neckflix_hpc_check_cardiohydra_baseline/CARDIOHYDRA_NECKFLIX_HPC
 experiment: cardioconv on ['neckflix_hpc'], 2 fold(s) holding out neckflix_hpc ['33', '36'], 2 at a time, 2 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardioconv_dense
 fold 1/2: holding out neckflix_hpc 33 on GPU(s) 0,1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardioconv_dense/CARDIOCONV_NECKFLIX_HPC.33_202610181300
 fold 2/2: holding out neckflix_hpc 36 on GPU(s) 2,3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_check_cardioconv_dense/CARDIOCONV_NECKFLIX_HPC.36_202610181300
+fold 1/2: done in 21121s, final loss 2.626
+fold 2/2: done in 24315s, final loss 2.588
+experiment: 2 fold(s) done
+=== arm cardioconv_dense exited 0: Sun Oct 18 07:45:40 PM AWST 2026 ===
+69 measurement(s) of 10 ± 1 s over 2 participant(s)
+written to runs/neckflix_hpc_check_cardioconv_dense/evaluation
+33 measurement(s) of 10 ± 1 s over 1 participant(s)
+written to runs/neckflix_hpc_check_cardioconv_dense/CARDIOCONV_NECKFLIX_HPC.33_202610181300/evaluation
+36 measurement(s) of 10 ± 1 s over 1 participant(s)
+written to runs/neckflix_hpc_check_cardioconv_dense/CARDIOCONV_NECKFLIX_HPC.36_202610181300/evaluation
+=== arm cardioconv_dense scored: Sun Oct 18 07:46:48 PM AWST 2026 ===
+all 2 arm(s) done: Sun Oct 18 07:46:48 PM AWST 2026
