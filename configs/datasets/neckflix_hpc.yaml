@@ -3,4 +3,4 @@
 # cache landed (docs/hpc_pure_physmamba.md). Loaded as `--datasets pure_hpc`,
 # so run directories read PHYSMAMBA_PURE_HPC.<participant>_<stamp>.
 BASE: neckflix.yaml
-CACHED_PATH: "/group/pgh004/carrow/caches/neckflix_zarr"
+CACHED_PATH: "/group/pgh004/carrow/caches/neckflix_zarr_200"
