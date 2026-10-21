@@ -4,9 +4,9 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
-from neural_methods.loss.ccc import MAX_LAG_SECONDS, lag_frames, lagged_pair
+from neural_methods.loss.lagged_neg_pearson import LaggedNegPearson
 from neural_methods.model.cardioconv.rate_estimator import grid_power
-from neural_methods.model.cardioconv.utils import pearson, shrink
+from neural_methods.model.cardioconv.utils import shrink
 from neural_methods.model._shared_modules.utils import EPS
 
 #: The exponent the spectrum is raised to before its centroid is taken. At 8
@@ -43,25 +43,18 @@ class WaveformRateEstimator(nn.Module):
         self.network = network
         self.fs = fs
         self.downscale = downscale
-        self.max_lag = lag_frames(MAX_LAG_SECONDS, fs)
+        self.loss = LaggedNegPearson(fs)
         self.register_buffer("bins", torch.arange(low_bpm, high_bpm + 1.0, dtype=torch.float32))
         self.waveform = None
 
     def waveform_term(self, target: torch.Tensor) -> torch.Tensor:
-        """``1 - r`` between the last forward's waveform and ``target``
-        ``(B, T)``, at the best lag within ``MAX_LAG_SECONDS``, averaged over
-        the samples whose target is finite; zero when none is. The lag is
-        searched because the neck pulses a transit time after the trace the
-        target took its phase from."""
+        """``LaggedNegPearson`` between the last forward's waveform and
+        ``target`` ``(B, T)``, averaged over the samples whose target is
+        finite; zero when none is."""
         has = torch.isfinite(target).all(dim=-1)
         if not bool(has.any()):
             return 0.0 * self.waveform.sum()          # zero, with the network kept in the graph
-        waveform, goal = self.waveform[has], target[has].to(self.waveform.dtype)
-        max_lag = min(self.max_lag, waveform.shape[-1] - 2)
-        correlations = torch.stack([
-            pearson(*lagged_pair(waveform, goal, lag))
-            for lag in range(-max_lag, max_lag + 1)])                 # (lags, b)
-        return (1.0 - correlations.max(dim=0).values).mean()
+        return self.loss(self.waveform[has], target[has].to(self.waveform.dtype)).mean()
 
     def forward(self, video: torch.Tensor, present: torch.Tensor) -> tuple:
         """``(B, C, T, H, W)`` clip -> the rate ``(B,)`` in bpm and the logits

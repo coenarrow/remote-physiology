@@ -5,11 +5,12 @@ Every component is one ``nn.Module`` in its own file whose ``forward`` maps a
 That per-sample reduction is the whole contract: it is what lets
 ``PerSignalLoss`` mask every component the same way. Each entry builds its
 module from the interface's frame rate, which only a component that reasons
-in seconds (CCC's lag bound) uses. A new component is a file and a line here,
+in seconds (the lag bound of CCC and LaggedNegPearson) uses. A new component is a file and a line here,
 not a redesign.
 """
 
 from neural_methods.loss.ccc import CCC
+from neural_methods.loss.lagged_neg_pearson import LaggedNegPearson
 from neural_methods.loss.mean_l1 import MeanL1
 from neural_methods.loss.mse import MSE
 from neural_methods.loss.neg_pearson import NegPearson
@@ -20,6 +21,7 @@ from src.signal_transforms import canonical_signal, validate_traces
 #: interface's frame rate.
 COMPONENTS = {
     'ccc': lambda fs: CCC(fs),
+    'laggednegpearson': lambda fs: LaggedNegPearson(fs),
     'mean': lambda fs: MeanL1(),
     'max': lambda fs: SoftPeakL1('max'),
     'min': lambda fs: SoftPeakL1('min'),
