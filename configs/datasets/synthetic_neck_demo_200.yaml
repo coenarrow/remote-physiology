@@ -1,0 +1,201 @@
+# Synthetic neck: which stores participate. Nothing here about channels,
+# traces, windows or rates — that is the interface's business.
+#
+# The stores are written by `synthetic-neck generate` (the submodule at
+# tools/synthetic_neck); dataset/data_loader/SYNTHETIC_NECK.md
+# is their cache spec. FILTERS is keyed by the store's own root attrs, exactly
+# as the generator writes them. Every entry carries both an `include` and an
+# `exclude` list; an empty list is no constraint on that side. A store is
+# admitted when it passes every entry.
+#
+# Values compare as strings. A store lacking an attr (or carrying null) fails
+# an include on it and passes an exclude. Nested attrs are addressed with dots
+# (`synthetic_neck.traces.heart_rate_bpm`). `FILTERS: {}` admits every
+# store.
+#
+# Filterable root attrs (one store = one sample, perspective "1"; rgb, ir and
+# depth in every sample):
+#   participant        '1', '2', ...; the sample index. Ids collide with other
+#                      datasets' ids, so hold one out with
+#                      --test-participant-dataset synthetic_neck
+#   recording          same value as participant
+#   posture            supine | recumbent | sitting (Neckflix's spelling)
+#   abp_site           radial | brachial; the stored ABP's catheter site
+#   skin_tone          Monk skin tone 1..10 (core attr)
+#   neck_circumference_cm   float, from the drawn neck radius (core attr)
+#   seed               the sample's seed (int)
+#   synthetic_neck.*   the generator's full per-sample metadata, every key
+#                      listed below. Units are in the key names.
+#
+# synthetic_neck.<key>, the sample as a whole:
+#   seed  output_px  n_frames  abp_site  posture
+#   version            the generator's version
+#   priors             the priors file's path, as typed on the command line
+#   device             the render backend (cpu | cuda | ...)
+#   clevel             the compression level the store was written with
+#
+# synthetic_neck.traces.<key>, the drawn values behind the five traces:
+#   duration_s  sample_rate_hz
+#   resp_rate_bpm  resp_rate_drift_frac  resp_rate_drift_tau_s  resp_phase_rad
+#   heart_rate_bpm  hr_variability  rsa_fraction  mayer_fraction
+#   ecg_r_amplitude  ecg_am_fraction  ecg_wander  ecg_noise
+#   map_mmhg  pulse_pressure_mmhg  pre_ejection_s
+#   aortic_to_brachial_s  brachial_to_radial_s  radial_amplification
+#   abp_resp_swing_mmhg  abp_noise_mmhg
+#   cvp_mean_mmhg  cvp_pulse_mmhg  cvp_c_to_a  cvp_v_to_a  cvp_x_to_a
+#   cvp_y_to_a  cvp_p_to_a_s  cvp_resp_swing_mmhg  cvp_noise_mmhg
+#   ppg_amplitude  radial_to_finger_s  ppg_am_fraction  ppg_wander  ppg_noise
+#
+# synthetic_neck.camera.<key>:
+#   distance_mm  focal_px  crop_px  output_px
+#
+# synthetic_neck.scene.<key>, the neck and its two vessels:
+#   neck_radius_mm  length_mm  angle_deg  axial_offset_mm  posture_deg
+#   artery_phi  vein_phi  artery_axis_radius_mm  vein_axis_radius_mm
+#   artery_diameter_mm  vein_diameter_mm
+#
+# synthetic_neck.propagation.<key>, the traces carried to the neck:
+#   aortic_to_carotid_s  carotid_pp_fraction  carotid_pwv_m_s
+#   venous_pwv_m_s  atrium_to_neck_s
+#
+# synthetic_neck.distension.<key>, pressure to blood volume under the skin:
+#   carotid_compliance_mm2_per_kpa  jugular_area_strain_per_mmhg
+#   skin_transit_s
+#
+# synthetic_neck.appearance.<key>:
+#   monk_tone  texture_frac  ambient  light_angle_deg  ir_level  background_ir
+#   skin_rgb  background_rgb      three-value lists; compared as the list's string
+#
+# synthetic_neck.optics.<key>:
+#   blood_fraction  pulse_blood_fraction  rest_saturation  pulse_saturation
+#
+# synthetic_neck.sensor.<key>:
+#   blur_sigma_px  rgb_noise  ir_noise  depth_noise_mm
+#
+# synthetic_neck.derived.<key>, computed from the draws above:
+#   pixel_scale_mm  artery_axis_depth_mm  vein_axis_depth_mm
+#   artery_compliance_mm2_per_mmhg  vein_compliance_mm2_per_mmhg
+#   carotid_mean_mmhg  cvp_mean_mmhg  artery_lift_ptp_mm  vein_lift_ptp_mm
+#
+# Most of these are continuous draws. Since values compare as strings, the
+# keys that filter usefully are the categorical and integer ones: participant,
+# posture, abp_site, skin_tone, seed, output_px, n_frames, device, clevel.
+CACHED_PATH: "data/synthetic_neck_demo_200"   # rendered in-repo (data/ is gitignored); relative to the repo root
+FILTERS:                       # every key the generator writes; all empty, so every store is admitted
+  # root attrs
+  participant: {include: [], exclude: []}
+  recording: {include: [], exclude: []}
+  posture: {include: [], exclude: []}
+  abp_site: {include: [], exclude: []}
+  skin_tone: {include: [], exclude: []}
+  neck_circumference_cm: {include: [], exclude: []}
+  seed: {include: [], exclude: []}
+
+
+  # the sample as a whole - unlikely to ever use these
+  synthetic_neck.seed: {include: [], exclude: []}
+  synthetic_neck.output_px: {include: [], exclude: []}
+  synthetic_neck.n_frames: {include: [], exclude: []}
+  synthetic_neck.abp_site: {include: [], exclude: []}
+  synthetic_neck.posture: {include: [], exclude: []}
+  synthetic_neck.version: {include: [], exclude: []}
+  synthetic_neck.priors: {include: [], exclude: []}
+  synthetic_neck.device: {include: [], exclude: []}
+  synthetic_neck.clevel: {include: [], exclude: []}
+  # traces
+  synthetic_neck.traces.duration_s: {include: [], exclude: []}
+  synthetic_neck.traces.sample_rate_hz: {include: [], exclude: []}
+  synthetic_neck.traces.resp_rate_bpm: {include: [], exclude: []}
+  synthetic_neck.traces.resp_rate_drift_frac: {include: [], exclude: []}
+  synthetic_neck.traces.resp_rate_drift_tau_s: {include: [], exclude: []}
+  synthetic_neck.traces.resp_phase_rad: {include: [], exclude: []}
+  synthetic_neck.traces.heart_rate_bpm: {include: [], exclude: []}
+  synthetic_neck.traces.hr_variability: {include: [], exclude: []}
+  synthetic_neck.traces.rsa_fraction: {include: [], exclude: []}
+  synthetic_neck.traces.mayer_fraction: {include: [], exclude: []}
+  synthetic_neck.traces.ecg_r_amplitude: {include: [], exclude: []}
+  synthetic_neck.traces.ecg_am_fraction: {include: [], exclude: []}
+  synthetic_neck.traces.ecg_wander: {include: [], exclude: []}
+  synthetic_neck.traces.ecg_noise: {include: [], exclude: []}
+  synthetic_neck.traces.map_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.pulse_pressure_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.pre_ejection_s: {include: [], exclude: []}
+  synthetic_neck.traces.aortic_to_brachial_s: {include: [], exclude: []}
+  synthetic_neck.traces.brachial_to_radial_s: {include: [], exclude: []}
+  synthetic_neck.traces.radial_amplification: {include: [], exclude: []}
+  synthetic_neck.traces.abp_resp_swing_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.abp_noise_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_mean_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_pulse_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_c_to_a: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_v_to_a: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_x_to_a: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_y_to_a: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_p_to_a_s: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_resp_swing_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.cvp_noise_mmhg: {include: [], exclude: []}
+  synthetic_neck.traces.ppg_amplitude: {include: [], exclude: []}
+  synthetic_neck.traces.radial_to_finger_s: {include: [], exclude: []}
+  synthetic_neck.traces.ppg_am_fraction: {include: [], exclude: []}
+  synthetic_neck.traces.ppg_wander: {include: [], exclude: []}
+  synthetic_neck.traces.ppg_noise: {include: [], exclude: []}
+  # camera
+  synthetic_neck.camera.distance_mm: {include: [], exclude: []}
+  synthetic_neck.camera.focal_px: {include: [], exclude: []}
+  synthetic_neck.camera.crop_px: {include: [], exclude: []}
+  synthetic_neck.camera.output_px: {include: [], exclude: []}
+  # scene
+  synthetic_neck.scene.neck_radius_mm: {include: [], exclude: []}
+  synthetic_neck.scene.length_mm: {include: [], exclude: []}
+  synthetic_neck.scene.angle_deg: {include: [], exclude: []}
+  synthetic_neck.scene.axial_offset_mm: {include: [], exclude: []}
+  synthetic_neck.scene.artery_phi: {include: [], exclude: []}
+  synthetic_neck.scene.vein_phi: {include: [], exclude: []}
+  synthetic_neck.scene.artery_axis_radius_mm: {include: [], exclude: []}
+  synthetic_neck.scene.vein_axis_radius_mm: {include: [], exclude: []}
+  synthetic_neck.scene.artery_diameter_mm: {include: [], exclude: []}
+  synthetic_neck.scene.vein_diameter_mm: {include: [], exclude: []}
+  synthetic_neck.scene.posture_deg: {include: [], exclude: []}
+  # propagation
+  synthetic_neck.propagation.aortic_to_carotid_s: {include: [], exclude: []}
+  synthetic_neck.propagation.carotid_pp_fraction: {include: [], exclude: []}
+  synthetic_neck.propagation.carotid_pwv_m_s: {include: [], exclude: []}
+  synthetic_neck.propagation.venous_pwv_m_s: {include: [], exclude: []}
+  synthetic_neck.propagation.atrium_to_neck_s: {include: [], exclude: []}
+  # distension
+  synthetic_neck.distension.carotid_compliance_mm2_per_kpa: {include: [], exclude: []}
+  synthetic_neck.distension.jugular_area_strain_per_mmhg: {include: [], exclude: []}
+  synthetic_neck.distension.skin_transit_s: {include: [], exclude: []}
+  # appearance
+  synthetic_neck.appearance.monk_tone: {include: [], exclude: []}
+  synthetic_neck.appearance.skin_rgb: {include: [], exclude: []}
+  synthetic_neck.appearance.texture_frac: {include: [], exclude: []}
+  synthetic_neck.appearance.ambient: {include: [], exclude: []}
+  synthetic_neck.appearance.light_angle_deg: {include: [], exclude: []}
+  synthetic_neck.appearance.ir_level: {include: [], exclude: []}
+  synthetic_neck.appearance.background_rgb: {include: [], exclude: []}
+  synthetic_neck.appearance.background_ir: {include: [], exclude: []}
+  # optics
+  synthetic_neck.optics.blood_fraction: {include: [], exclude: []}
+  synthetic_neck.optics.pulse_blood_fraction: {include: [], exclude: []}
+  synthetic_neck.optics.rest_saturation: {include: [], exclude: []}
+  synthetic_neck.optics.pulse_saturation: {include: [], exclude: []}
+  # sensor
+  synthetic_neck.sensor.blur_sigma_px: {include: [], exclude: []}
+  synthetic_neck.sensor.rgb_noise: {include: [], exclude: []}
+  synthetic_neck.sensor.ir_noise: {include: [], exclude: []}
+  synthetic_neck.sensor.depth_noise_mm: {include: [], exclude: []}
+  # derived
+  synthetic_neck.derived.pixel_scale_mm: {include: [], exclude: []}
+  synthetic_neck.derived.artery_axis_depth_mm: {include: [], exclude: []}
+  synthetic_neck.derived.vein_axis_depth_mm: {include: [], exclude: []}
+  synthetic_neck.derived.artery_compliance_mm2_per_mmhg: {include: [], exclude: []}
+  synthetic_neck.derived.vein_compliance_mm2_per_mmhg: {include: [], exclude: []}
+  synthetic_neck.derived.carotid_mean_mmhg: {include: [], exclude: []}
+  synthetic_neck.derived.cvp_mean_mmhg: {include: [], exclude: []}
+  synthetic_neck.derived.artery_lift_ptp_mm: {include: [], exclude: []}
+  synthetic_neck.derived.vein_lift_ptp_mm: {include: [], exclude: []}
+
+# Root attrs scripts/evaluate.py reports beside the core five (age_years, sex,
+# skin_tone, posture, neck_circumference_cm); dotted when nested.
+ADDITIONAL_PARAMS: []

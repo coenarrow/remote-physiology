@@ -22,7 +22,9 @@ tracking columns say whether the prediction follows the reference's level
 at all (``src/evaluation/agreement.py``). The pooled waveform table
 also carries each metric's median and interquartile range.
 
-Written to ``RUN_DIR/evaluation/``, replacing what was there::
+Written to ``RUN_DIR/evaluation/`` (or the folder ``--out-dir`` names, so
+a 5 s and a 10 s evaluation can sit side by side), replacing what was
+there::
 
     measurements/waveform_<SIGNAL>.csv   one row per measurement and signal
     measurements/<PARAMETER>.csv         one row per measurement and parameter
@@ -82,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--measurement-tolerance", type=float, default=1.0, metavar="SECONDS",
         help="how far from the nominal length a measurement may be (default: 1)")
+    parser.add_argument(
+        "--out-dir", default=OUT_DIR, metavar="NAME",
+        help=f"folder under RUN_DIR the evaluation is written to (default: {OUT_DIR})")
     return parser
 
 
@@ -107,7 +112,7 @@ def main(argv=None) -> Path:
           f"{args.measurement_tolerance:g} s over "
           f"{measurements['participant'].nunique()} participant(s)")
 
-    out_dir = run_dir / OUT_DIR
+    out_dir = run_dir / args.out_dir
     if out_dir.exists():
         shutil.rmtree(out_dir)
     for name in (MEASUREMENTS_DIR, TABLES_DIR, FIGURES_DIR):
