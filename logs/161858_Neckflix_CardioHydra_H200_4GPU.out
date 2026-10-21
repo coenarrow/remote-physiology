@@ -1,0 +1,106 @@
+Job ID: 161858, node k177
+CPUs on node: 48, usable here: 48
+commit: 32fa02b Merge branch 'main' of https://github.com/coenarrow/remote-physiology
+held out: every participant
+experiment: cardiohydra on ['neckflix_hpc'], 50 fold(s) holding out neckflix_hpc ['1', '2', '3', '4', '5', '7', '8', '9', '10', '11', '12', '13', '14', '15', '17', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '43', '44', '45', '46', '47', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58'], 4 at a time, 1 process(es) each, GPUs 0,1,2,3, into /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep
+fold 1/50: holding out neckflix_hpc 1 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.1_202610191518
+fold 2/50: holding out neckflix_hpc 2 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.2_202610191518
+fold 3/50: holding out neckflix_hpc 3 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.3_202610191518
+fold 4/50: holding out neckflix_hpc 4 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.4_202610191518
+fold 2/50: done in 4823s, final loss 2.538
+fold 5/50: holding out neckflix_hpc 5 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.5_202610191639
+fold 3/50: done in 4927s, final loss 2.475
+fold 6/50: holding out neckflix_hpc 7 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.7_202610191640
+fold 1/50: done in 5001s, final loss 2.585
+fold 7/50: holding out neckflix_hpc 8 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.8_202610191642
+fold 4/50: done in 5144s, final loss 2.534
+fold 8/50: holding out neckflix_hpc 9 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.9_202610191644
+fold 5/50: done in 4082s, final loss 2.547
+fold 9/50: holding out neckflix_hpc 10 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.10_202610191747
+fold 6/50: done in 4078s, final loss 2.465
+fold 10/50: holding out neckflix_hpc 11 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.11_202610191748
+fold 7/50: done in 4266s, final loss 2.463
+fold 11/50: holding out neckflix_hpc 12 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.12_202610191753
+fold 8/50: done in 5084s, final loss 2.6
+fold 12/50: holding out neckflix_hpc 13 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.13_202610191809
+fold 9/50: done in 4594s, final loss 2.498
+fold 13/50: holding out neckflix_hpc 14 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.14_202610191903
+fold 10/50: done in 4647s, final loss 2.491
+fold 14/50: holding out neckflix_hpc 15 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.15_202610191906
+fold 11/50: done in 4733s, final loss 2.528
+fold 15/50: holding out neckflix_hpc 17 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.17_202610191912
+fold 12/50: done in 4654s, final loss 2.534
+fold 16/50: holding out neckflix_hpc 22 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.22_202610191926
+fold 14/50: done in 4609s, final loss 2.524
+fold 17/50: holding out neckflix_hpc 23 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.23_202610192023
+fold 15/50: done in 5011s, final loss 2.495
+fold 18/50: holding out neckflix_hpc 24 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.24_202610192035
+fold 16/50: done in 4214s, final loss 2.543
+fold 19/50: holding out neckflix_hpc 25 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.25_202610192037
+fold 13/50: done in 5681s, final loss 2.498
+fold 20/50: holding out neckflix_hpc 26 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.26_202610192038
+fold 17/50: done in 4579s, final loss 2.567
+fold 21/50: holding out neckflix_hpc 27 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.27_202610192139
+fold 18/50: done in 4535s, final loss 2.601
+fold 22/50: holding out neckflix_hpc 28 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.28_202610192151
+fold 19/50: done in 4519s, final loss 2.567
+fold 23/50: holding out neckflix_hpc 29 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.29_202610192152
+fold 20/50: done in 4537s, final loss 2.554
+fold 24/50: holding out neckflix_hpc 30 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.30_202610192154
+fold 21/50: done in 4466s, final loss 2.589
+fold 25/50: holding out neckflix_hpc 31 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.31_202610192253
+fold 23/50: done in 4106s, final loss 2.466
+fold 26/50: holding out neckflix_hpc 32 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.32_202610192300
+fold 22/50: done in 4293s, final loss 2.527
+fold 27/50: holding out neckflix_hpc 33 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.33_202610192302
+fold 24/50: done in 4361s, final loss 2.525
+fold 28/50: holding out neckflix_hpc 34 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.34_202610192306
+fold 25/50: done in 4262s, final loss 2.576
+fold 29/50: holding out neckflix_hpc 35 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.35_202610200004
+fold 27/50: done in 4095s, final loss 2.545
+fold 30/50: holding out neckflix_hpc 36 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.36_202610200011
+fold 26/50: done in 4235s, final loss 2.531
+fold 31/50: holding out neckflix_hpc 37 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.37_202610200011
+fold 28/50: done in 4195s, final loss 2.551
+fold 32/50: holding out neckflix_hpc 38 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.38_202610200016
+fold 29/50: done in 4126s, final loss 2.584
+fold 33/50: holding out neckflix_hpc 39 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.39_202610200113
+fold 31/50: done in 3921s, final loss 2.493
+fold 34/50: holding out neckflix_hpc 40 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.40_202610200116
+fold 30/50: done in 4168s, final loss 2.484
+fold 35/50: holding out neckflix_hpc 41 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.41_202610200120
+fold 32/50: done in 4183s, final loss 2.543
+fold 36/50: holding out neckflix_hpc 43 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.43_202610200126
+fold 33/50: done in 3947s, final loss 2.535
+fold 37/50: holding out neckflix_hpc 44 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.44_202610200219
+fold 34/50: done in 4176s, final loss 2.561
+fold 38/50: holding out neckflix_hpc 45 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.45_202610200226
+fold 35/50: done in 4164s, final loss 2.474
+fold 39/50: holding out neckflix_hpc 46 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.46_202610200229
+fold 36/50: done in 4238s, final loss 2.523
+fold 40/50: holding out neckflix_hpc 47 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.47_202610200237
+fold 37/50: done in 4162s, final loss 2.569
+fold 41/50: holding out neckflix_hpc 49 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.49_202610200328
+fold 38/50: done in 4259s, final loss 2.507
+fold 42/50: holding out neckflix_hpc 50 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.50_202610200337
+fold 39/50: done in 4114s, final loss 2.452
+fold 43/50: holding out neckflix_hpc 51 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.51_202610200338
+fold 40/50: done in 4197s, final loss 2.561
+fold 44/50: holding out neckflix_hpc 52 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.52_202610200347
+fold 41/50: done in 4195s, final loss 2.534
+fold 45/50: holding out neckflix_hpc 53 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.53_202610200438
+fold 42/50: done in 4196s, final loss 2.495
+fold 46/50: holding out neckflix_hpc 54 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.54_202610200447
+fold 43/50: done in 4160s, final loss 2.525
+fold 47/50: holding out neckflix_hpc 55 on GPU(s) 0 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.55_202610200447
+fold 44/50: done in 3992s, final loss 2.524
+fold 48/50: holding out neckflix_hpc 56 on GPU(s) 1 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.56_202610200453
+fold 45/50: done in 4198s, final loss 2.551
+fold 49/50: holding out neckflix_hpc 57 on GPU(s) 2 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.57_202610200548
+fold 46/50: done in 3992s, final loss 2.503
+fold 50/50: holding out neckflix_hpc 58 on GPU(s) 3 -> /mmfs1/data/group/pgh004/carrow/repo/remote-physiology/runs/neckflix_hpc_cardiohydra_H200W200_20ep/CARDIOHYDRA_NECKFLIX_HPC.58_202610200553
+fold 47/50: done in 4226s, final loss 2.554
+fold 48/50: done in 5294s, final loss 2.431
+fold 49/50: done in 4104s, final loss 2.519
+fold 50/50: done in 4131s, final loss 2.518
+experiment: 50 fold(s) done
