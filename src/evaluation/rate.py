@@ -56,6 +56,13 @@ _NAN = float("nan")
 #: :func:`rate_of`: how much better, in dB, the auto-SNR at half the peak
 #: frequency must be before the half is taken as the rate.
 SUBHARMONIC_MARGIN_DB = 1.0
+#: :func:`fft_length`: the widest a spectrum's bin may be, in bpm. The FFT
+#: is zero-padded until its bins are this fine, so a rate is read off the
+#: interpolated peak rather than quantised to the window's natural
+#: ``60 / duration`` bpm (6 bpm for a 10 s measurement). Padding sharpens
+#: the reading, not the resolving power: two rates closer than the natural
+#: spacing still merge into one peak.
+RATE_RESOLUTION_BPM = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +71,13 @@ SUBHARMONIC_MARGIN_DB = 1.0
 def next_power_of_2(x: int) -> int:
     """The smallest power of two at or above ``x``."""
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
+
+
+def fft_length(size: int, fs: float) -> int:
+    """The FFT length for a trace of ``size`` frames at ``fs``: a power of
+    two at or above the trace (upstream's rule) and long enough for bins no
+    wider than :data:`RATE_RESOLUTION_BPM`."""
+    return next_power_of_2(max(size, int(np.ceil(fs * 60 / RATE_RESOLUTION_BPM))))
 
 
 @functools.lru_cache(maxsize=32)
@@ -109,9 +123,10 @@ def clean(trace, fs: float) -> np.ndarray:
 
 
 def spectrum(trace, fs: float) -> tuple[np.ndarray, np.ndarray]:
-    """``(frequencies, power)`` of a cleaned trace, zero-padded to a power of two."""
+    """``(frequencies, power)`` of a cleaned trace, zero-padded to
+    :func:`fft_length`."""
     trace = np.asarray(trace, dtype=np.float64)
-    return periodogram(trace, fs=fs, nfft=next_power_of_2(trace.size), detrend=False)
+    return periodogram(trace, fs=fs, nfft=fft_length(trace.size, fs), detrend=False)
 
 
 def in_band(freqs) -> np.ndarray:

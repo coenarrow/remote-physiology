@@ -31,6 +31,8 @@ there::
     tables/demographics_<SIGNAL>.csv     who each signal was measured on
     tables/waveform_agreement.csv        the waveform metrics pooled, with median/IQR
     tables/agreement.csv                 the derived parameters pooled, with level tracking
+    tables/classification.csv            the parameters against clinical thresholds
+    tables/roc.csv                       the confusion counts at every candidate threshold
     figures/*.png                        best waveforms, Bland-Altman plots
 
 Every measurement row ends with its recording's sex, age, skin tone and
@@ -51,6 +53,7 @@ import pandas as pd                                                # noqa: E402
 
 from src.evaluation import progress                               # noqa: E402
 from src.evaluation.agreement import agreement, waveform_agreement  # noqa: E402
+from src.evaluation.classification import classification          # noqa: E402
 from src.evaluation.demographics import demographics, with_markers  # noqa: E402
 from src.evaluation.measurements import (                          # noqa: E402
     PARAMETERS, score_measurements, waveform_measurements,
@@ -136,6 +139,9 @@ def main(argv=None) -> Path:
     for p in PARAMETERS:
         write(MEASUREMENTS_DIR, p.key, parameter_frames[p.name])
     write(TABLES_DIR, "agreement", agreement(parameter_frames))
+    classes, sweeps = classification(parameter_frames)
+    write(TABLES_DIR, "classification", classes)
+    write(TABLES_DIR, "roc", sweeps)
 
     figures = {**best_waveform_figures(measurements, waveform_frames),
                **bland_altman_figures(parameter_frames)}
