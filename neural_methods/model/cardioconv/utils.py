@@ -58,13 +58,6 @@ def upscale(maps: torch.Tensor, size: tuple) -> torch.Tensor:
     return rearrange(big, "b (c m) h w -> b c h w m", c=c)
 
 
-def pearson(pred: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
-    """``(B, T)`` prediction and label -> ``(B,)`` Pearson correlation."""
-    pred = pred - pred.mean(dim=-1, keepdim=True)
-    label = label - label.mean(dim=-1, keepdim=True)
-    return (pred * label).sum(dim=-1) / (pred.norm(dim=-1) * label.norm(dim=-1) + EPS)
-
-
 def softplus_inverse(y: float) -> float:
     """``x`` such that ``softplus(x) == y``, for ``y > 0``."""
     return math.log(math.expm1(y))

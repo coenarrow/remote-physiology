@@ -10,8 +10,8 @@ the video and the same pulse at the pressure transducer are apart by the time
 it takes to travel between them, which differs between patients and between
 traces. Scored at lag zero, that delay would be charged as a shape error, so
 this component searches the lags within ``MAX_LAG_SECONDS`` and scores the
-concordance at the best one. The lag is picked by a detached argmax, so the
-gradient flows only through the concordance at the chosen alignment.
+concordance at the best one (``best_lag``, which ``LaggedNegPearson``
+shares).
 The evaluation's counterpart is ``waveform_ccc`` (``src/evaluation/recording.py``).
 """
 
@@ -41,6 +41,20 @@ def lagged_pair(pred, label, lag: int):
             label[..., max(-lag, 0):frames - max(lag, 0)])
 
 
+def best_lag(statistic, pred, label, max_lag: int):
+    """``(B,)`` the largest value of ``statistic`` (a ``(B, T), (B, T) ->
+    (B,)`` agreement) over the lags within ``max_lag`` frames, clipped to
+    what the window leaves room for. The lag is picked by a detached argmax,
+    so the gradient flows only through the statistic at the chosen
+    alignment. Shared by every lag-tolerant component."""
+    max_lag = min(max_lag, pred.shape[-1] - 2)
+    values = torch.stack([
+        statistic(*lagged_pair(pred, label, lag))
+        for lag in range(-max_lag, max_lag + 1)])                     # (lags, B)
+    best = values.argmax(dim=0, keepdim=True).detach()
+    return values.gather(0, best)[0]
+
+
 class CCC(nn.Module):
     def __init__(self, fs: float, max_lag_seconds: float = MAX_LAG_SECONDS):
         """``fs``: the interface's frame rate, which turns the lag bound from
@@ -61,9 +75,4 @@ class CCC(nn.Module):
 
     def forward(self, pred, label):
         """``(B, T)`` prediction and label -> ``(B,)``."""
-        max_lag = min(self.max_lag, pred.shape[-1] - 2)
-        coefficients = torch.stack([
-            self.concordance(*lagged_pair(pred, label, lag))
-            for lag in range(-max_lag, max_lag + 1)])                 # (lags, B)
-        best = coefficients.argmax(dim=0, keepdim=True).detach()
-        return 1.0 - coefficients.gather(0, best)[0]
+        return 1.0 - best_lag(self.concordance, pred, label, self.max_lag)
