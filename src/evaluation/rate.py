@@ -53,6 +53,9 @@ MIN_FRAMES = 10
 #: cannot veto the frequency every other trace favours.
 SPECTRUM_FLOOR = 1e-12
 _NAN = float("nan")
+#: :func:`rate_of`: how much better, in dB, the auto-SNR at half the peak
+#: frequency must be before the half is taken as the rate.
+SUBHARMONIC_MARGIN_DB = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +119,26 @@ def in_band(freqs) -> np.ndarray:
 
 
 def rate_of(freqs, power) -> float:
-    """The largest in-band bin, in beats per minute."""
+    """The largest in-band bin, in beats per minute, unless half that
+    frequency explains the spectrum better.
+
+    A bare argmax picks the first harmonic on a trace whose second crest
+    outweighs its first (CVP on its own, with nothing to fuse against). So
+    the half is tried too: :func:`snr` at a candidate counts the bins at the
+    candidate and at twice it as signal, so at ``f/2`` it holds the peak at
+    ``f`` plus whatever sits at ``f/2``, and wins by more than
+    ``SUBHARMONIC_MARGIN_DB`` only when there is real power at ``f/2``. The
+    margin is what stops sub-harmonic noise halving a clean rate.
+    """
     band = in_band(freqs)
-    return float(freqs[band][np.argmax(power[band])] * 60)
+    peak = float(freqs[band][np.argmax(power[band])] * 60)
+    half = peak / 2
+    if half < BAND[0] * 60:
+        return peak
+    peak_snr, half_snr = snr(freqs, power, peak), snr(freqs, power, half)
+    if np.isfinite(half_snr) and half_snr > peak_snr + SUBHARMONIC_MARGIN_DB:
+        return half
+    return peak
 
 
 def normalised(freqs, power) -> np.ndarray:
