@@ -1,23 +1,26 @@
 """The figures: one trace of one recording (the label, the combined
 prediction with its spread across the overlapping windows, and the detected
 beats), the Bland-Altman plot of a pooled parameter, and the sets of them a
-run's evaluation writes (the best measurement of each waveform metric per
-signal, one Bland-Altman plot per parameter), each with its numbers in a
-panel beside the axes.
+run's evaluation writes (the best-CCC measurement per signal, one
+Bland-Altman plot per parameter), each with its numbers in a panel beside
+the axes.
 
 Seaborn on the Agg backend. Every function draws and returns the figure; the
-caller saves and closes it. Pooled figures are ``REPORT_WIDTH`` inches wide,
-the text width of A4 portrait.
+caller saves and closes it. The evaluation's figures share one layout: the
+axes on the left, a panel of numbers and the legend in a column on the right.
 """
 
 import matplotlib
 matplotlib.use("Agg")            # write files; never open a window on a cluster
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import FancyBboxPatch
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
 from src.evaluation.agreement import limits, repeated_measures
+from src.evaluation.beat_metrics import detect_beats
 from src.evaluation.measurements import PARAMETERS, pairs_of
 from src.evaluation.pooling import MEASUREMENT_KEY
 from src.signal_transforms import signal_unit
@@ -73,137 +76,248 @@ def recording_figure(trace: pd.DataFrame, marks: dict | None, sig: str, title: s
 
 
 # ---------------------------------------------------------------------------
-# The pooled figures
+# The figures of a run's evaluation: one layout
 # ---------------------------------------------------------------------------
-REPORT_WIDTH = 6.3
-#: Subjects are told apart by colour up to this many; beyond it no palette
-#: keeps them distinct and every point wears the one colour.
-MAX_SUBJECT_COLOURS = 8
-LINE_COLOUR = "0.35"
+# Each is a seaborn figure-level plot, its axes on the left, and on the
+# right a column holding a panel of numbers hung from the top of the axes
+# with the legend in a framed box below it, two columns wide.
+#: The axes' height in inches and width-to-height ratio.
+FIGURE_HEIGHT, FIGURE_ASPECT = 2.8, 2.3
+#: Where the axes end and the right column starts and how wide it is, in
+#: figure fractions; the top edge both hang from.
+AXES_RIGHT, COLUMN_LEFT, COLUMN_WIDTH, TOP = 0.72, 0.745, 0.245, 0.96
+#: The panel's row height, block gap and padding, in figure fractions.
+PANEL_ROW, PANEL_GAP, PANEL_PAD = 0.055, 0.03, 0.03
+PANEL_FONT, PANEL_SMALL_FONT = 7, 6.5
+#: seaborn's default palette: the reference wears its first colour, the
+#: prediction its second, a pooled measurement the first.
+PALETTE = sns.color_palette()
+LINE_COLOUR = "0.3"
 
 
-def _report_axes(height: float = 3.6, columns: int = 1):
-    figure, axes = plt.subplots(1, columns, figsize=(REPORT_WIDTH, height), squeeze=False)
-    return figure, axes[0]
+def _panel(figure: plt.Figure, blocks: list) -> float:
+    """A rounded panel at the top of the right column holding ``blocks``,
+    each a list of rows; a row is ``(label, value)`` right-aligned, or
+    ``(label, ref, pred)`` under a small ``ref`` / ``pred`` header that a
+    block's leading ``(unit,)`` row supplies. Returns the panel's height."""
+    rows = sum(len(block) for block in blocks)
+    height = PANEL_PAD * 2 + PANEL_ROW * rows + PANEL_GAP * (len(blocks) - 1)
+    panel = figure.add_axes((COLUMN_LEFT, TOP - height, COLUMN_WIDTH, height))
+    panel.set_axis_off()
+    panel.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle="round,pad=0,rounding_size=0.04",
+                                   facecolor="white", edgecolor="0.8", linewidth=0.8,
+                                   transform=panel.transAxes, clip_on=False))
+    left, mid, right = 0.08, 0.68, 0.92
+    step = PANEL_ROW / height
+    y = 1 - (PANEL_PAD + PANEL_ROW / 2) / height
+    for index, block in enumerate(blocks):
+        if index:
+            y -= PANEL_GAP / height
+        for row in block:
+            if len(row) == 1:
+                for x, word, align in ((left, row[0], "left"), (mid, "ref", "right"),
+                                       (right, "pred", "right")):
+                    panel.text(x, y, word, fontsize=PANEL_SMALL_FONT, color="0.4",
+                               va="center", ha=align)
+            else:
+                panel.text(left, y, row[0], fontsize=PANEL_FONT, va="center")
+                for x, value in zip((mid, right)[-(len(row) - 1):], row[1:]):
+                    panel.text(x, y, value, fontsize=PANEL_FONT, va="center", ha="right")
+            y -= step
+    return height
 
 
-def _points(pairs: pd.DataFrame, x, y, axis) -> None:
-    """One point per measurement, coloured by subject while they are few; a
-    measurement read off an extreme sample for want of beats
-    (``pairs["fallback"]``) is a cross."""
-    style = {"ax": axis, "s": 30, "edgecolor": "white", "linewidth": 0.5}
-    fallback = pairs["fallback"].to_numpy(dtype=bool)
-    few = pairs["subject"].nunique() <= MAX_SUBJECT_COLOURS
-    for marker, rows, word in (("o", ~fallback, "beats"), ("X", fallback, "no beats, extreme sample")):
-        if not rows.any():
-            continue
-        if few:
-            sns.scatterplot(x=x[rows], y=y[rows], hue=pairs["subject"][rows],
-                            palette="colorblind", marker=marker, **style)
-        else:
-            sns.scatterplot(x=x[rows], y=y[rows], color=PRED_COLOUR, marker=marker,
-                            label=f"{word} ({rows.sum()})", **style)
-    if few:
-        axis.legend(title="subject (crosses: no beats, extreme sample)", fontsize=7,
-                    title_fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.2),
-                    ncol=4, frameon=False)
-    elif fallback.any():
-        axis.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2,
-                    frameon=False)
+def _legend(figure: plt.Figure, left_column: list, right_column: list, below: float) -> None:
+    """A framed legend of two columns under a panel of height ``below``. A
+    legend fills column by column, so the shorter column is padded with
+    blank entries to the longer's length."""
+    blank = Line2D([], [], linestyle="", label="")
+    length = max(len(left_column), len(right_column))
+    handles = (left_column + [blank] * (length - len(left_column))
+               + right_column + [blank] * (length - len(right_column)))
+    figure.legend(handles=handles, loc="upper left", ncol=2, columnspacing=0.8,
+                  handletextpad=0.5, handlelength=1.4, borderaxespad=0,
+                  bbox_to_anchor=(COLUMN_LEFT, TOP - below - PANEL_GAP),
+                  bbox_transform=figure.transFigure, frameon=True, fancybox=True,
+                  fontsize=PANEL_FONT)
 
 
-def bland_altman_figure(pairs: pd.DataFrame, stats: dict, limits: tuple, unit: str,
-                        title: str) -> plt.Figure:
-    """Error against the mean of reference and prediction, with the mean
-    error and the limits of agreement."""
-    figure, (axis,) = _report_axes()
-    _points(pairs, (pairs["ref"] + pairs["pred"]) / 2, pairs["error"], axis)
-    for value, style, name in ((stats["mean_error"], "-", "mean error"),
-                               (limits[0], "--", "lower limit"),
-                               (limits[1], "--", "upper limit")):
-        if np.isfinite(value):
-            axis.axhline(value, color=LINE_COLOUR, linestyle=style, linewidth=0.9)
-            axis.annotate(f"{name} {value:.3g}", xy=(1.0, value),
-                          xycoords=("axes fraction", "data"), xytext=(-2, 2),
-                          textcoords="offset points", ha="right", va="bottom",
-                          fontsize=7, color=LINE_COLOUR)
-    axis.set_xlabel(f"mean of reference and prediction ({unit})")
-    axis.set_ylabel(f"prediction − reference ({unit})")
-    axis.set_title(title, fontsize=10)
-    figure.tight_layout()
+def _figure(grid: sns.FacetGrid) -> plt.Figure:
+    """The grid's figure with its axes narrowed to leave the right column."""
+    figure = grid.figure
+    figure.subplots_adjust(top=TOP, bottom=0.16, left=0.10, right=AXES_RIGHT)
     return figure
 
 
 # ---------------------------------------------------------------------------
-# The figures of a run's evaluation
+# The best-CCC waveform
 # ---------------------------------------------------------------------------
-#: The share of the figure width the side panel takes.
-PANEL_WIDTH = 0.24
-#: The waveform metrics a larger value is better for; the rest are errors.
-HIGHER_IS_BETTER = frozenset({"ccc", "r", "cb"})
-#: The waveform metrics a best-measurement figure is drawn for.
-BEST_WAVEFORM_METRICS = ("mae", "rmse", "ccc")
+BEST_SERIES = {"reference": PALETTE[0], "prediction": PALETTE[1]}
+BEST_LINE_WIDTH = 1.1
+#: Per signal, the derived parameters the panel lists as a reference /
+#: prediction pair: ``(label, PARAMETERS name, column suffix)``.
+PANEL_PARAMETERS = {
+    "ABP": (("systolic", "ABP systolic", "systolic"),
+            ("diastolic", "ABP diastolic", "diastolic"),
+            ("mean", "ABP mean", "mean")),
+    "CVP": (("mean", "CVP mean", "mean"),),
+}
+#: The signals whose extremes are read at detected beats, drawn as markers.
+BEAT_SIGNALS = frozenset({"ABP"})
 
 
-def with_panel(figure, lines: list):
-    """``figure`` with the axes narrowed and ``lines`` of text in a box to
-    their right."""
-    figure.subplots_adjust(right=1 - PANEL_WIDTH - 0.02)
-    figure.text(1 - PANEL_WIDTH, 0.5, "\n".join(lines), fontsize=8, family="monospace",
-                va="center", ha="left",
-                bbox={"boxstyle": "round", "facecolor": "white", "edgecolor": "0.7"})
+def _row_of(frame: pd.DataFrame, key: pd.Series) -> pd.Series:
+    """The one row of ``frame`` at the measurement ``key`` names."""
+    where = np.ones(len(frame), dtype=bool)
+    for name in MEASUREMENT_KEY:
+        where &= (frame[name].astype(str) == str(key[name])).to_numpy()
+    return frame[where].iloc[0]
+
+
+def best_ccc_figure(trace: pd.DataFrame, best: pd.Series, parameters: dict,
+                    sig: str, fs: float) -> plt.Figure:
+    """One measurement over time: the reference and, shifted to the lag its
+    metrics were scored at (a positive lag delays it against the reference,
+    so it moves earlier), the prediction; each side's mean dotted in its
+    colour and, for a :data:`BEAT_SIGNALS` signal, the beats its systolic
+    and diastolic were averaged over as up and down triangles. The panel
+    holds the measurement's CCC, MAE, RMSE and lag and its
+    :data:`PANEL_PARAMETERS` as reference / prediction pairs; the legend
+    has the sides left and the marks right. ``parameters`` maps a parameter
+    name to its scored frame."""
+    unit = signal_unit(sig)
+    t0 = trace["t"].min()
+    lag = float(best["lag"]) if np.isfinite(best["lag"]) else 0.0
+    sides = {"reference": (trace["t"].to_numpy() - t0, trace["label"].to_numpy()),
+             "prediction": (trace["t"].to_numpy() - t0 - lag, trace["mean"].to_numpy())}
+    span = (0.0, float(sides["reference"][0].max()))
+    long = pd.concat([pd.DataFrame({"t": t, "value": v, "series": s})
+                      for s, (t, v) in sides.items()], ignore_index=True)
+    long = long[long["t"].between(*span)]
+
+    grid = sns.relplot(data=long, x="t", y="value", hue="series", kind="line",
+                       palette=BEST_SERIES, hue_order=list(BEST_SERIES),
+                       linewidth=BEST_LINE_WIDTH, height=FIGURE_HEIGHT, aspect=FIGURE_ASPECT,
+                       legend=False)
+    axis = grid.ax
+    axis.set_xlim(*span)
+    axis.set_xlabel("time (s)")
+    axis.set_ylabel(f"{sig} ({unit})")
+    for side, (t, values) in sides.items():
+        colour = BEST_SERIES[side]
+        axis.axhline(values.mean(), color=colour, linestyle=":", linewidth=1.0)
+        if sig in BEAT_SIGNALS:
+            for sign, marker in ((+1, "^"), (-1, "v")):
+                beats = detect_beats(sign * values, fs, sig)
+                keep = (t[beats] >= span[0]) & (t[beats] <= span[1])
+                axis.scatter(t[beats][keep], values[beats][keep], marker=marker, s=22,
+                             color=colour, edgecolor="white", linewidth=0.5, zorder=3)
+    figure = _figure(grid)
+
+    stats = [("CCC", f"{best['ccc']:.3f}"), ("MAE", f"{best['mae']:.2f} {unit}"),
+             ("RMSE", f"{best['rmse']:.2f} {unit}"), ("lag", f"{lag:+.2f} s")]
+    pressures = [(unit,)]
+    for label, name, column in PANEL_PARAMETERS.get(sig, ()):
+        row = _row_of(parameters[name], best)
+        pressures.append((label, f"{row[f'ref_{column}']:.1f}", f"{row[f'pred_{column}']:.1f}"))
+    height = _panel(figure, [stats, pressures] if len(pressures) > 1 else [stats])
+
+    sides_column = [Line2D([], [], color=c, linewidth=BEST_LINE_WIDTH, label=s)
+                    for s, c in BEST_SERIES.items()]
+    marks_column = [Line2D([], [], color="0.4", linestyle=":", linewidth=1.0, label="mean")]
+    if sig in BEAT_SIGNALS:
+        marks_column += [Line2D([], [], marker="^", linestyle="", color="0.4", markersize=5,
+                                label="systolic"),
+                         Line2D([], [], marker="v", linestyle="", color="0.4", markersize=5,
+                                label="diastolic")]
+    _legend(figure, sides_column, marks_column, height)
     return figure
 
 
-def best_waveform_figures(measurements: pd.DataFrame, frames: dict) -> dict:
-    """``{figure name: Figure}``: per signal, the measurement each metric in
-    :data:`BEST_WAVEFORM_METRICS` rates best (lowest MAE or RMSE, highest
-    CCC), drawn as its label and prediction over time."""
+def best_waveform_figures(measurements: pd.DataFrame, frames: dict, parameters: dict,
+                          fs: float) -> dict:
+    """``{figure name: Figure}``: per signal, the measurement with the
+    highest CCC drawn by :func:`best_ccc_figure`, named after the signal
+    and the recording, camera and segment it is."""
     figures = {}
     for sig, frame in frames.items():
-        for metric in BEST_WAVEFORM_METRICS:
-            scored = frame.dropna(subset=[metric])
-            if scored.empty:
-                continue
-            best = scored.loc[scored[metric].idxmax() if metric in HIGHER_IS_BETTER
-                              else scored[metric].idxmin()]
-            where = (measurements["signal"] == sig)
-            for name in MEASUREMENT_KEY:
-                where &= measurements[name] == best[name]
-            trace = measurements[where].assign(std=np.nan)
-            title = (f"{sig}, best {metric}: {best['recording']} camera "
-                     f"{best['perspective']} segment {best['segment']}")
-            figure = recording_figure(trace, None, sig, title)
-            figures[f"waveform_{sig}_best_{metric}"] = with_panel(figure, [
-                f"mae  {best['mae']:.2f}",
-                f"rmse {best['rmse']:.2f}",
-                f"ccc  {best['ccc']:.3f}",
-                f"r    {best['r']:.3f}",
-                f"cb   {best['cb']:.3f}",
-                f"lag  {best['lag']:.2f} s",
-            ])
+        scored = frame.dropna(subset=["ccc"])
+        if scored.empty:
+            continue
+        best = scored.loc[scored["ccc"].idxmax()]
+        where = (measurements["signal"] == sig)
+        for name in MEASUREMENT_KEY:
+            where &= measurements[name] == best[name]
+        name = (f"waveform_{sig}_best_ccc_{best['recording']}_cam{best['perspective']}"
+                f"_seg{int(best['segment'])}")
+        figures[name] = best_ccc_figure(measurements[where], best, parameters, sig, fs)
     return figures
 
 
+# ---------------------------------------------------------------------------
+# The Bland-Altman plots
+# ---------------------------------------------------------------------------
+#: The parameters a Bland-Altman plot is drawn for, by ``PARAMETERS`` key.
+BLAND_ALTMAN_PARAMETERS = ("CVP_mean", "ABP_mean", "ABP_systolic", "ABP_diastolic", "rate")
+POINT_COLOUR = PALETTE[0]
+
+
+def bland_altman_figure(pairs: pd.DataFrame, unit: str) -> plt.Figure:
+    """Error against the mean of reference and prediction, one point per
+    measurement (a cross where a side was read off an extreme sample for
+    want of beats), with the mean error solid, the 95 % limits of
+    agreement on the corrected SD dashed and zero dotted. The panel holds
+    the repeated-measures statistics; the legend has the points left and
+    the lines right."""
+    stats = repeated_measures(pairs["error"], pairs["subject"])
+    lower, upper = limits(stats)
+    data = pairs.assign(average=(pairs["ref"] + pairs["pred"]) / 2,
+                        marker=np.where(pairs["fallback"], "extreme sample", "beats"))
+    grid = sns.relplot(data=data, x="average", y="error", kind="scatter",
+                       style="marker", style_order=["beats", "extreme sample"],
+                       markers={"beats": "o", "extreme sample": "X"},
+                       color=POINT_COLOUR, s=18, alpha=0.6, edgecolor="white", linewidth=0.3,
+                       height=FIGURE_HEIGHT, aspect=FIGURE_ASPECT, legend=False)
+    axis = grid.ax
+    for value, style in ((stats["mean_error"], "-"), (lower, "--"), (upper, "--")):
+        if np.isfinite(value):
+            axis.axhline(value, color=LINE_COLOUR, linestyle=style, linewidth=0.9)
+    axis.axhline(0, color="0.6", linestyle=":", linewidth=0.8)
+    axis.set_xlabel(f"mean of reference and prediction ({unit})")
+    axis.set_ylabel(f"prediction − reference ({unit})")
+    figure = _figure(grid)
+
+    fallback = int(pairs["fallback"].sum())
+    rows = [("n", f"{stats['n']}"), ("subjects", f"{stats['k']}"),
+            ("mean error", f"{stats['mean_error']:.2f} {unit}"),
+            ("s_corr", f"{stats['s_corr']:.2f} {unit}"),
+            ("LoA", f"{lower:.1f} to {upper:.1f}"),
+            ("ICC", f"{stats['icc']:.2f}"), ("N_ind", f"{stats['n_ind']:.0f}")]
+    if fallback:
+        rows.append(("fallback", f"{fallback}"))
+    height = _panel(figure, [rows])
+
+    points_column = [Line2D([], [], marker="o", linestyle="", color=POINT_COLOUR,
+                            markersize=4, label="measurement")]
+    if fallback:
+        points_column.append(Line2D([], [], marker="X", linestyle="", color=POINT_COLOUR,
+                                    markersize=4, label="extreme sample"))
+    lines_column = [Line2D([], [], color=LINE_COLOUR, linestyle="-", linewidth=0.9, label="mean"),
+                    Line2D([], [], color=LINE_COLOUR, linestyle="--", linewidth=0.9,
+                           label="95 % LoA")]
+    _legend(figure, points_column, lines_column, height)
+    return figure
+
+
 def bland_altman_figures(frames: dict) -> dict:
-    """``{figure name: Figure}``: one Bland-Altman plot per parameter, the
-    error against the mean of reference and prediction, with the mean error
-    and the limits of agreement on the corrected SD."""
+    """``{figure name: Figure}``: one Bland-Altman plot per
+    :data:`BLAND_ALTMAN_PARAMETERS` entry with any measurement."""
     figures = {}
     for p in PARAMETERS:
+        if p.key not in BLAND_ALTMAN_PARAMETERS:
+            continue
         pairs = pairs_of(frames[p.name], p)
         if pairs.empty:
             continue
-        stats = repeated_measures(pairs["error"], pairs["subject"])
-        figure = bland_altman_figure(pairs, stats, limits(stats), p.unit,
-                                     f"{p.name}: Bland-Altman")
-        figures[f"bland_altman_{p.key}"] = with_panel(figure, [
-            f"n          {stats['n']}",
-            f"subjects   {stats['k']}",
-            f"mean error {stats['mean_error']:.2f} {p.unit}",
-            f"s_corr     {stats['s_corr']:.2f} {p.unit}",
-            f"ICC        {stats['icc']:.2f}",
-            f"N_ind      {stats['n_ind']:.0f}",
-            f"fallback   {int(pairs['fallback'].sum())}",
-        ])
+        figures[f"bland_altman_{p.key}"] = bland_altman_figure(pairs, p.unit)
     return figures

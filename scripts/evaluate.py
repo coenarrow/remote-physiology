@@ -143,7 +143,7 @@ def main(argv=None) -> Path:
     write(TABLES_DIR, "classification", classes)
     write(TABLES_DIR, "roc", sweeps)
 
-    figures = {**best_waveform_figures(measurements, waveform_frames),
+    figures = {**best_waveform_figures(measurements, waveform_frames, parameter_frames, fs),
                **bland_altman_figures(parameter_frames)}
     for name, figure in progress(figures.items(), "writing figures"):
         figure.savefig(out_dir / FIGURES_DIR / f"{name}.png", dpi=FIGURE_DPI)
