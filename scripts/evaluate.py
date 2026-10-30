@@ -33,7 +33,9 @@ there::
     tables/agreement.csv                 the derived parameters pooled, with level tracking
     tables/classification.csv            the parameters against clinical thresholds
     tables/roc.csv                       the confusion counts at every candidate threshold
-    figures/*.png                        best waveforms, Bland-Altman plots
+    figures/*.png                        best/median/worst waveforms, rainclouds of the
+                                         waveform metrics and parameter errors,
+                                         Bland-Altman plots
 
 Every measurement row ends with its recording's sex, age, skin tone and
 posture, for comparisons across them. Each stage reports a progress bar;
@@ -59,7 +61,8 @@ from src.evaluation.measurements import (                          # noqa: E402
     PARAMETERS, score_measurements, waveform_measurements,
 )
 from src.evaluation.plots import (                                 # noqa: E402
-    best_waveform_figures, bland_altman_figures,
+    bland_altman_figures, parameter_errors_figure, waveform_figures,
+    waveform_metrics_figures,
 )
 from src.evaluation.pooling import (                               # noqa: E402
     MEASUREMENT_KEY, collect_waveforms, segment,
@@ -132,18 +135,22 @@ def main(argv=None) -> Path:
                        in waveform_measurements(measurements, fs).items()}
     for sig, frame in waveform_frames.items():
         write(MEASUREMENTS_DIR, f"waveform_{sig}", frame)
-    write(TABLES_DIR, "waveform_agreement", waveform_agreement(waveform_frames))
+    waveform_pooled = waveform_agreement(waveform_frames)
+    write(TABLES_DIR, "waveform_agreement", waveform_pooled)
 
     parameter_frames = {name: with_markers(frame, attrs) for name, frame
                         in score_measurements(measurements, fs).items()}
     for p in PARAMETERS:
         write(MEASUREMENTS_DIR, p.key, parameter_frames[p.name])
-    write(TABLES_DIR, "agreement", agreement(parameter_frames))
+    parameter_pooled = agreement(parameter_frames)
+    write(TABLES_DIR, "agreement", parameter_pooled)
     classes, sweeps = classification(parameter_frames)
     write(TABLES_DIR, "classification", classes)
     write(TABLES_DIR, "roc", sweeps)
 
-    figures = {**best_waveform_figures(measurements, waveform_frames, parameter_frames, fs),
+    figures = {**waveform_figures(measurements, waveform_frames, parameter_frames, fs),
+               **waveform_metrics_figures(waveform_frames, waveform_pooled),
+               "parameter_errors": parameter_errors_figure(parameter_frames, parameter_pooled),
                **bland_altman_figures(parameter_frames)}
     for name, figure in progress(figures.items(), "writing figures"):
         figure.savefig(out_dir / FIGURES_DIR / f"{name}.png", dpi=FIGURE_DPI)
