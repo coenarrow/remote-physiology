@@ -4,11 +4,9 @@ The neck shows two cardiac pulsations, arterial and venous. They share the
 heart rate and differ in phase, so the clip is taken to the wavelet domain at
 the harmonics of the heart rate and read there:
 
-1. :class:`~neural_methods.model.cardioconv.waveform_rate_estimator.WaveformRateEstimator`
+1. :class:`~neural_methods.model.cardioconv.rate_estimator.RateEstimator`
    reads the heart rate off the waveform of a single-trace network
-   (``RATE_ESTIMATOR``, RhythmFormer by default), or
-   :class:`~neural_methods.model.cardioconv.rate_estimator.RateEstimator`
-   off a learned fusion of the channels' spectra;
+   (``RATE_ESTIMATOR``, RhythmFormer by default);
 2. :class:`~neural_methods.model.cardioconv.wavelet_transformer.WaveletTransformer`
    gives the complex wavelet field of every pixel at the harmonics of that
    rate, in closed form (not learned, and not a gradient path: the rate
@@ -114,10 +112,9 @@ from neural_methods.model.cardioconv.channel_mixer import ChannelMixer
 from neural_methods.model.cardioconv.channel_predictor import ChannelPredictor, coherent_candidate
 from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
-from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
 from neural_methods.model.cardioconv.utils import shrink, upscale
-from neural_methods.model.cardioconv.waveform_rate_estimator import WaveformRateEstimator
+from neural_methods.model.cardioconv.rate_estimator import RateEstimator
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
 from neural_methods.model._shared_modules.kinematics import Kinematics
 from neural_methods.model._shared_modules.utils import (
@@ -153,9 +150,6 @@ PHASE_BOUND = 0.9
 PULSATILITY_PRIORS = ("pulsatility_tv", "pulsatility_saturation")
 PHASE_PRIORS = ("phase_saturation", "harmonic_coherence", "spatial_coherence",
                 "temporal_consistency", "phase_tv")
-RATE_TERMS = ("rate", "rate_error", "rate_waveform")
-
-
 def min_frame(downscale: int) -> int:
     """The smallest frame that leaves the wavelet transform a ``MIN_GRID`` x
     ``MIN_GRID`` grid at a shrink of ``downscale``."""
@@ -163,14 +157,13 @@ def min_frame(downscale: int) -> int:
 
 
 class CardioConv(nn.Module):
-    REGULARISERS = PULSATILITY_PRIORS + PHASE_PRIORS + RATE_TERMS
     NEEDS_RATE_TARGET = True
 
-    def __init__(self, in_channels: int, traces: tuple, fs: float, pulsatility_masker: bool = True,
-                 phase_masker: bool = True, trace_independent: bool = True,
-                 supervise_masks: bool = True, rate_tolerance_bpm: float = 8.0,
-                 rate_downscale: int = 2, wavelet_downscale: int = 2,
-                 rate_network: nn.Module = None, mixer_hidden: int = 16, mixer_taps: int = 15,
+    def __init__(self, in_channels: int, traces: tuple, fs: float, rate_network: nn.Module,
+                 pulsatility_masker: bool = True, phase_masker: bool = True,
+                 trace_independent: bool = True, supervise_masks: bool = True,
+                 rate_tolerance_bpm: float = 8.0, rate_downscale: int = 2,
+                 wavelet_downscale: int = 2, mixer_hidden: int = 16, mixer_taps: int = 15,
                  coherent_pooling: bool = False):
         """Definition of CardioConv.
 
@@ -195,8 +188,7 @@ class CardioConv(nn.Module):
             the field work on that grid, and the masks are read at the
             input's resolution only to pool the clip. 1 is none.
           rate_network: one copy of a single-trace architecture to read the
-            rate off (``WaveformRateEstimator``); ``None`` is the spectral
-            ``RateEstimator``.
+            rate off (``RateEstimator``).
           mixer_hidden: channels of each trace's temporal layer in the
             channel mixer.
           mixer_taps: taps of that layer; odd. 15 is half a beat at 30 fps.
@@ -212,9 +204,9 @@ class CardioConv(nn.Module):
         self.coherent_pooling = coherent_pooling
         self.min_frame = min_frame(wavelet_downscale)
         n_traces = len(self.traces)
-        self.rate_estimator = (RateEstimator(in_channels, fs, downscale=rate_downscale)
-                               if rate_network is None
-                               else WaveformRateEstimator(rate_network, fs, downscale=rate_downscale))
+        self.rate_estimator = RateEstimator(rate_network, fs, downscale=rate_downscale)
+        # The label-free mask priors and whichever terms the estimator trains on.
+        self.REGULARISERS = PULSATILITY_PRIORS + PHASE_PRIORS + self.rate_estimator.TERMS
         # The bank's pad covers the slowest kernel the estimator can ask for.
         self.wavelet_transformer = WaveletTransformer(
             fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, step_bpm=STEP_BPM,
@@ -253,14 +245,14 @@ class CardioConv(nn.Module):
         require_min_frame("CardioConv", self.min_frame, video.shape[-2], video.shape[-1])
         present = reduce(video.abs(), "b c t h w -> b c", "max") > 0
         clip = video.float()
-        rate, logits = self.rate_estimator(clip, present)
+        rate = self.rate_estimator(clip, present)
         zero = clip.new_zeros(())
 
         keep = 1.0                                # weight of the mask priors
         if target_rate is None:
             passed = torch.ones_like(rate, dtype=torch.bool)
             run = passed
-            terms = dict.fromkeys(RATE_TERMS, zero)
+            terms = dict.fromkeys(self.rate_estimator.TERMS, zero)
         else:
             error = (rate - target_rate).abs()
             passed = torch.isfinite(target_rate) & (error <= self.rate_tolerance_bpm)
@@ -273,8 +265,7 @@ class CardioConv(nn.Module):
                 run = torch.zeros_like(passed)
                 run[torch.nan_to_num(error, nan=float("inf")).argmin()] = True
                 keep = 0.0
-            terms = rate_terms(logits, rate, target_rate, self.rate_estimator.bins)
-            terms["rate_waveform"] = self.rate_estimator.waveform_term(target_waveform)
+            terms = self.rate_estimator.terms(target_rate, target_waveform)
         self.sample_mask = passed
 
         index = run.nonzero().squeeze(1)

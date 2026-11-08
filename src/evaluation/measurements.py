@@ -221,9 +221,9 @@ def score_rate(traces: dict, fs: float) -> dict:
         return {"n_traces": 0, "ref_hr": np.nan, "pred_hr": np.nan,
                 "err_hr": np.nan, "snr": np.nan}
     ref_fused, pred_fused = fuse(freqs, ref_powers), fuse(freqs, pred_powers)
-    ref_hr, pred_hr = rate_of(freqs, ref_fused), rate_of(freqs, pred_fused)
+    ref_hr, pred_hr = float(rate_of(freqs, ref_fused)), float(rate_of(freqs, pred_fused))
     return {"n_traces": len(ref_powers), "ref_hr": ref_hr, "pred_hr": pred_hr,
-            "err_hr": pred_hr - ref_hr, "snr": snr(freqs, pred_fused, ref_hr)}
+            "err_hr": pred_hr - ref_hr, "snr": float(snr(freqs, pred_fused, ref_hr))}
 
 
 class Parameter(NamedTuple):

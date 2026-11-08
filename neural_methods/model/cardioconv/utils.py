@@ -1,6 +1,6 @@
 """Functions CardioConv's modules share: the wavelet centre frequencies of a
-heart rate, the spatial shrink and its inverse, circular statistics of a complex field, and
-presence-masked reduction."""
+heart rate, the spatial shrink and its inverse, circular statistics of a complex field,
+presence-masked reduction, and the power of a trace on a grid of bpm bins."""
 
 import math
 
@@ -104,3 +104,28 @@ def spatial_resultant(units: torch.Tensor, kernel: int) -> torch.Tensor:
                      "b c t h w n r -> (b c t n) r h w")
     mean = F.avg_pool2d(flat, kernel, stride=1, padding=kernel // 2, count_include_pad=False)
     return rearrange(mean.norm(dim=1), "(b c t n) h w -> b c t h w n", b=b, c=c, t=t, n=n)
+
+
+def interpolate_bins(values: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+    """``(..., n)`` values on a uniform grid -> ``(..., m)`` at fractional
+    indices ``positions`` ``(m,)``, by linear interpolation; positions past
+    either end take the end value."""
+    low = positions.floor().long().clamp(0, values.shape[-1] - 2)
+    frac = (positions - low).clamp(0.0, 1.0)
+    return values[..., low] * (1.0 - frac) + values[..., low + 1] * frac
+
+
+def grid_power(traces: torch.Tensor, fs: float, bins: torch.Tensor) -> torch.Tensor:
+    """``(..., T)`` traces -> ``(..., n_bins)`` power on the bpm grid ``bins``,
+    unit sum over the grid: Hann-windowed, FFT'd at the next power of two and
+    resampled onto the grid, which is what makes a reading of it independent
+    of window length and frame rate."""
+    # Float32 whatever autocast made of the traces: the FFT takes no half
+    # precision, and the readout should not inherit a coarse grid.
+    traces = traces.float()
+    t = traces.shape[-1]
+    window = torch.hann_window(t, device=traces.device, dtype=torch.float32)
+    n = 1 << (t - 1).bit_length()
+    power = torch.fft.rfft(traces * window, n=n, dim=-1).abs() ** 2             # (..., n // 2 + 1)
+    on_grid = interpolate_bins(power, bins / 60.0 / (fs / n))                   # fractional rfft bins
+    return on_grid / on_grid.sum(dim=-1, keepdim=True).clamp_min(EPS)

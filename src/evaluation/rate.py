@@ -27,6 +27,11 @@ several cardiac traces they are fused (:func:`fuse`):
 No config. The detrender is the upstream one, the band is wider than
 upstream's 36–198 bpm, and the trace tables are already in physical units,
 so nothing here needs to know how a trace's label was normalised.
+:func:`rate_of` and :func:`snr` are torch and batched, because the one
+reading of a rate is shared: the evaluation and the dataset's rate target
+call them on NumPy spectra one at a time, and CardioConv's
+``RateEstimator`` calls them on a batch of spectra on the GPU, so
+the model is gated on exactly the rate it is scored on.
 The two upstream helpers this needs (the smoothness-prior detrender and
 the FFT length) live at the top of this module; the rest of the toolbox's
 post-processing is gone.
@@ -35,6 +40,7 @@ post-processing is gone.
 import functools
 
 import numpy as np
+import torch
 from scipy.linalg import solveh_banded
 from scipy.signal import butter, filtfilt, hilbert, periodogram, sosfiltfilt
 from scipy.sparse import diags as sparse_diags
@@ -133,9 +139,15 @@ def in_band(freqs) -> np.ndarray:
     return (freqs >= BAND[0]) & (freqs <= BAND[1])
 
 
-def rate_of(freqs, power) -> float:
+def _tensor(x) -> torch.Tensor:
+    return x if isinstance(x, torch.Tensor) else torch.as_tensor(np.asarray(x))
+
+
+def rate_of(freqs, power) -> torch.Tensor:
     """The largest in-band bin, in beats per minute, unless half that
-    frequency explains the spectrum better.
+    frequency explains the spectrum better: ``freqs`` ``(F,)`` in Hz and
+    ``power`` ``(..., F)``, arrays or tensors, to a ``(...)`` tensor of bpm
+    (``float()`` it for one spectrum). Not a gradient path.
 
     A bare argmax picks the first harmonic on a trace whose second crest
     outweighs its first (CVP on its own, with nothing to fuse against). So
@@ -145,15 +157,14 @@ def rate_of(freqs, power) -> float:
     ``SUBHARMONIC_MARGIN_DB`` only when there is real power at ``f/2``. The
     margin is what stops sub-harmonic noise halving a clean rate.
     """
+    freqs, power = _tensor(freqs), _tensor(power)
     band = in_band(freqs)
-    peak = float(freqs[band][np.argmax(power[band])] * 60)
+    peak = freqs[band][power[..., band].argmax(dim=-1)] * 60
     half = peak / 2
-    if half < BAND[0] * 60:
-        return peak
     peak_snr, half_snr = snr(freqs, power, peak), snr(freqs, power, half)
-    if np.isfinite(half_snr) and half_snr > peak_snr + SUBHARMONIC_MARGIN_DB:
-        return half
-    return peak
+    better = ((half >= BAND[0] * 60) & torch.isfinite(half_snr)
+              & (half_snr > peak_snr + SUBHARMONIC_MARGIN_DB))
+    return torch.where(better, half, peak)
 
 
 def normalised(freqs, power) -> np.ndarray:
@@ -169,7 +180,7 @@ def fuse(freqs, powers) -> np.ndarray:
     weighted by its auto-SNR in dB clipped at zero (a NaN counts as zero).
     Uniform when no trace has a positive one."""
     stacked = np.stack([normalised(freqs, p) for p in powers])
-    weights = np.nan_to_num([max(snr(freqs, p), 0.0) for p in powers])
+    weights = np.nan_to_num([max(float(snr(freqs, p)), 0.0) for p in powers])
     if weights.sum() <= 0:
         weights = np.ones(len(powers))
     weights = weights / weights.sum()
@@ -201,7 +212,7 @@ def fused_waveform(traces, fs: float, hr_bpm: float) -> np.ndarray:
     narrow, weights = [], []
     for trace in traces:
         trace = np.asarray(trace, dtype=np.float64)
-        weights.append(snr(*spectrum(clean(trace, fs), fs), hr_bpm))
+        weights.append(float(snr(*spectrum(clean(trace, fs), fs), hr_bpm)))
         band = sosfiltfilt(sos, detrend(trace, DETREND_LAMBDA))
         narrow.append(hilbert(band / (band.std() + 1e-12)))
     weights = np.nan_to_num(np.maximum(weights, 0.0))
@@ -215,19 +226,21 @@ def fused_waveform(traces, fs: float, hr_bpm: float) -> np.ndarray:
     return (fused - fused.mean()) / (fused.std() + 1e-12)
 
 
-def snr(freqs, power, hr_bpm: float | None = None) -> float:
+def snr(freqs, power, hr_bpm=None) -> torch.Tensor:
     """Power within +/- 6 bpm of the reference rate and its second harmonic,
-    over the rest of the band, in dB (upstream's definition). Without a
+    over the rest of the band, in dB (upstream's definition): ``freqs``
+    ``(F,)``, ``power`` ``(..., F)`` and ``hr_bpm`` a scalar or ``(...)``
+    to a ``(...)`` tensor, NaN where either side has no power. Without a
     reference rate it is the *auto-SNR*, centred on the spectrum's own rate:
     how peaky the spectrum is, whatever the peak is of."""
-    if hr_bpm is None:
-        hr_bpm = rate_of(freqs, power)
+    freqs, power = _tensor(freqs), _tensor(power)
+    hr = rate_of(freqs, power) if hr_bpm is None else _tensor(hr_bpm).to(power.dtype)
     deviation = SNR_DEVIATION_BPM / 60
-    harmonic = np.zeros_like(freqs, dtype=bool)
-    for centre in (hr_bpm / 60, 2 * hr_bpm / 60):
+    harmonic = torch.zeros(hr.shape + freqs.shape, dtype=torch.bool, device=power.device)
+    for centre in (hr / 60, 2 * hr / 60):
+        centre = centre[..., None]
         harmonic |= (freqs >= centre - deviation) & (freqs <= centre + deviation)
     remainder = in_band(freqs) & ~harmonic
-    signal_power, noise_power = power[harmonic].sum(), power[remainder].sum()
-    if noise_power <= 0 or signal_power <= 0:
-        return _NAN
-    return float(10 * np.log10(signal_power / noise_power))
+    signal_power, noise_power = (power * harmonic).sum(dim=-1), (power * remainder).sum(dim=-1)
+    ratio = 10 * torch.log10(signal_power / noise_power)
+    return ratio.masked_fill((signal_power <= 0) | (noise_power <= 0), _NAN)

@@ -146,11 +146,6 @@ class FactorizePhysConfig(ModelConfig):
     FSAM: bool = True             # run the factorized attention module. For ablation testing
 
 
-#: ``RATE_ESTIMATOR``: CardioConv's and CardioHydra's own spectral estimator,
-#: the alternative to the NAME of a single-trace architecture.
-SPECTRAL_RATE = "Spectral"
-
-
 @dataclass
 class CardioBaseConfig(ModelConfig):
     """What CardioConv and CardioHydra share: their ablations (every one
@@ -162,8 +157,8 @@ class CardioBaseConfig(ModelConfig):
     RATE_TOLERANCE_BPM: float = 0.0   # a sample whose estimated rate is further than this
                                       # from its label rate skips the stages after the estimator
     RATE_ESTIMATOR: str = "RhythmFormer"  # what reads the heart rate: the NAME of a
-                                          # single-trace architecture, or the model's own
-                                          # spectral estimator (SPECTRAL_RATE)
+                                          # single-trace architecture, one copy of which
+                                          # predicts the waveform the rate is read off
     RATE_DOWNSCALE: int = 2           # area shrink of the frames the rate estimator reads;
                                       # 1 is none
     WAVELET_DOWNSCALE: int = 2        # area shrink of the frames the wavelet transform reads;
@@ -181,7 +176,7 @@ class CardioBaseConfig(ModelConfig):
         _require_positive(where, "RATE_TOLERANCE_BPM", self.RATE_TOLERANCE_BPM)
         _require_factor(where, "RATE_DOWNSCALE", self.RATE_DOWNSCALE)
         _require_factor(where, "WAVELET_DOWNSCALE", self.WAVELET_DOWNSCALE)
-        estimators = (SPECTRAL_RATE, *rate_architectures())
+        estimators = rate_architectures()
         if self.RATE_ESTIMATOR not in estimators:
             raise ConfigError(
                 f"{where}: RATE_ESTIMATOR must be one of {list(estimators)}, got "

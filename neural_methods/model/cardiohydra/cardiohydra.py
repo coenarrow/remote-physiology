@@ -5,10 +5,9 @@ CardioConv's front end with a different reading of what the masks select.
 The first four stages are CardioConv's own modules, loaded from its package,
 and the fifth is the kinematics both models share:
 
-1. :class:`~neural_methods.model.cardioconv.waveform_rate_estimator.WaveformRateEstimator`
+1. :class:`~neural_methods.model.cardioconv.rate_estimator.RateEstimator`
    reads the heart rate off the waveform of a single-trace network
-   (``RATE_ESTIMATOR``, RhythmFormer by default), or a ``RateEstimator`` off
-   a learned fusion of the channels' spectra;
+   (``RATE_ESTIMATOR``, RhythmFormer by default);
 2. :class:`~neural_methods.model.cardioconv.wavelet_transformer.WaveletTransformer`
    gives the complex wavelet field of every pixel at the harmonics of that
    rate, in closed form;
@@ -58,15 +57,14 @@ from einops import reduce
 
 from neural_methods.model.cardiohydra.ssm_predictor import SSMPredictor
 from neural_methods.model.cardioconv.cardioconv import (
-    BUFFER_BPM, N_HARMONICS, PHASE_BOUND, PHASE_PRIORS, PULSATILITY_BOUND, PULSATILITY_PRIORS, RATE_TERMS,
+    BUFFER_BPM, N_HARMONICS, PHASE_BOUND, PHASE_PRIORS, PULSATILITY_BOUND, PULSATILITY_PRIORS,
     STEP_BPM, CardioConv, capture, min_frame,
 )
 from neural_methods.model.cardioconv.phase_masker import PhaseMasker
 from neural_methods.model.cardioconv.pulsatility_masker import PulsatilityMasker
-from neural_methods.model.cardioconv.rate_estimator import RateEstimator, rate_terms
 from neural_methods.model.cardioconv.statistics_head import StatisticsHead
 from neural_methods.model.cardioconv.utils import shrink
-from neural_methods.model.cardioconv.waveform_rate_estimator import WaveformRateEstimator
+from neural_methods.model.cardioconv.rate_estimator import RateEstimator
 from neural_methods.model.cardioconv.wavelet_transformer import WaveletTransformer
 from neural_methods.model._shared_modules.kinematics import Kinematics
 from neural_methods.model._shared_modules.utils import pooled_speed, require_min_frame, window_weight
@@ -89,14 +87,14 @@ DT_INIT = math.log(2)
 
 
 class CardioHydra(nn.Module):
-    REGULARISERS = PULSATILITY_PRIORS + PHASE_PRIORS + RATE_TERMS
     NEEDS_RATE_TARGET = True
 
-    def __init__(self, in_channels: int, traces: tuple, fs: float, pulsatility_masker: bool = True,
+    def __init__(self, in_channels: int, traces: tuple, fs: float, rate_network: nn.Module,
+                 pulsatility_masker: bool = True,
                  phase_masker: bool = True, supervise_masks: bool = True,
                  rate_tolerance_bpm: float = 8.0, rate_downscale: int = 2,
                  wavelet_downscale: int = 2,
-                 mamba_lr_scale: float = 0.1, rate_network: nn.Module = None):
+                 mamba_lr_scale: float = 0.1):
         """Definition of CardioHydra.
 
         Args:
@@ -124,8 +122,7 @@ class CardioHydra(nn.Module):
             died after about 4,000 steps at the full rate and about 8,500 at
             a tenth (2026-10-11, experiments 5 and 6a; one run each).
           rate_network: one copy of a single-trace architecture to read the
-            rate off (``WaveformRateEstimator``); ``None`` is the spectral
-            ``RateEstimator``.
+            rate off (``RateEstimator``).
         """
         super().__init__()
         self.traces = tuple(traces)
@@ -135,9 +132,9 @@ class CardioHydra(nn.Module):
         self.wavelet_downscale = wavelet_downscale
         self.min_frame = min_frame(wavelet_downscale)
         n_traces = len(self.traces)
-        self.rate_estimator = (RateEstimator(in_channels, fs, downscale=rate_downscale)
-                               if rate_network is None
-                               else WaveformRateEstimator(rate_network, fs, downscale=rate_downscale))
+        self.rate_estimator = RateEstimator(rate_network, fs, downscale=rate_downscale)
+        # The label-free mask priors and whichever terms the estimator trains on.
+        self.REGULARISERS = PULSATILITY_PRIORS + PHASE_PRIORS + self.rate_estimator.TERMS
         # The bank's pad covers the slowest kernel the estimator can ask for.
         self.wavelet_transformer = WaveletTransformer(
             fs, N_HARMONICS, buffer_bpm=BUFFER_BPM, step_bpm=STEP_BPM,
@@ -184,14 +181,14 @@ class CardioHydra(nn.Module):
                 "Drop --no-gpu, or use CardioConv, which has a CPU path.")
         present = reduce(video.abs(), "b c t h w -> b c", "max") > 0
         clip = video.float()
-        rate, logits = self.rate_estimator(clip, present)
+        rate = self.rate_estimator(clip, present)
         zero = clip.new_zeros(())
 
         keep = 1.0                                # weight of the mask priors
         if target_rate is None:
             passed = torch.ones_like(rate, dtype=torch.bool)
             run = passed
-            terms = dict.fromkeys(RATE_TERMS, zero)
+            terms = dict.fromkeys(self.rate_estimator.TERMS, zero)
         else:
             error = (rate - target_rate).abs()
             passed = torch.isfinite(target_rate) & (error <= self.rate_tolerance_bpm)
@@ -204,8 +201,7 @@ class CardioHydra(nn.Module):
                 run = torch.zeros_like(passed)
                 run[torch.nan_to_num(error, nan=float("inf")).argmin()] = True
                 keep = 0.0
-            terms = rate_terms(logits, rate, target_rate, self.rate_estimator.bins)
-            terms["rate_waveform"] = self.rate_estimator.waveform_term(target_waveform)
+            terms = self.rate_estimator.terms(target_rate, target_waveform)
         self.sample_mask = passed
 
         index = run.nonzero().squeeze(1)

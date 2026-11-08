@@ -37,7 +37,7 @@ from neural_methods.model.rhythmformer import rhythmformer
 from neural_methods.model.tscan import tscan
 from neural_methods.model._shared_modules.utils import min_frame_message
 from src.model_config import (
-    MODEL_CONFIGS, SPECTRAL_RATE, CardioBaseConfig, CardioConvConfig, CardioHydraConfig, FactorizePhysConfig,
+    MODEL_CONFIGS, CardioBaseConfig, CardioConvConfig, CardioHydraConfig, FactorizePhysConfig,
     InterfaceConfig, ModelConfig, PhysMambaConfig, ResizeConfig, TemporalShiftConfig,
 )
 
@@ -348,16 +348,13 @@ def _build_single_trace(cfg: ModelConfig, interface: InterfaceConfig) -> MultiTr
 
 
 # -- multi-trace architectures ------------------------------------------------
-def _rate_network(cfg: CardioBaseConfig, interface: InterfaceConfig) -> nn.Module | None:
+def _rate_network(cfg: CardioBaseConfig, interface: InterfaceConfig) -> nn.Module:
     """One copy of the architecture ``RATE_ESTIMATOR`` names, at its paper's
     switches (its config's defaults), for the model to read the heart rate
-    off; ``None`` for the model's own spectral estimator. The copy is built
-    for the frame it will see, the interface's frame shrunk by
-    ``RATE_DOWNSCALE``, so a dense layer is sized to it and a stem's
-    floor is checked against it."""
+    off. The copy is built for the frame it will see, the interface's frame
+    shrunk by ``RATE_DOWNSCALE``, so a dense layer is sized to it and a
+    stem's floor is checked against it."""
     name = cfg.RATE_ESTIMATOR
-    if name == SPECTRAL_RATE:
-        return None
     shrunk = dataclasses.replace(interface, RESIZE=ResizeConfig(      # 0 (no resize) stays 0
         H=interface.RESIZE.H // cfg.RATE_DOWNSCALE, W=interface.RESIZE.W // cfg.RATE_DOWNSCALE))
     return SINGLE_TRACE[name](MODEL_CONFIGS[name](NAME=name), shrunk)

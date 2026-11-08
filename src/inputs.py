@@ -341,7 +341,7 @@ def window_rate(traces: list[np.ndarray], fs: float) -> float:
         return float("nan")
     spectra = [rate.spectrum(rate.clean(trace, fs), fs) for trace in traces]
     freqs = spectra[0][0]
-    return rate.rate_of(freqs, rate.fuse(freqs, [power for _, power in spectra]))
+    return float(rate.rate_of(freqs, rate.fuse(freqs, [power for _, power in spectra])))
 
 
 def window_waveform(traces: list[np.ndarray], interface: InterfaceConfig,
