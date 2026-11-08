@@ -28,7 +28,7 @@ from src.evaluation.measurements import PARAMETERS, pairs_of
 #: The thresholds, in the parameter's unit.
 SYSTOLIC_THRESHOLD_MMHG = 130.0
 DIASTOLIC_THRESHOLD_MMHG = 80.0
-CVP_MEAN_THRESHOLD_MMHG = 8.0
+CVP_MEAN_THRESHOLD_MMHG = 10.0
 TACHYCARDIA_BPM = 100.0
 BRADYCARDIA_BPM = 60.0
 _NAN = float("nan")

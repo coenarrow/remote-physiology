@@ -3,7 +3,8 @@ prediction with its spread across the overlapping windows, and the detected
 beats), the Bland-Altman plot of a pooled parameter, and the sets of them a
 run's evaluation writes (the best, median and worst measurement per
 signal, rainclouds of the waveform metrics and of the parameters'
-errors, one Bland-Altman plot per parameter), each with its numbers in a panel beside
+errors, one Bland-Altman plot per parameter, and the ROC curves
+``scripts/roc.py`` draws), each with its numbers in a panel beside
 the axes.
 
 Seaborn on the Agg backend. Every function draws and returns the figure; the
@@ -473,3 +474,73 @@ def parameter_errors_figure(frames: dict, pooled: pd.DataFrame) -> plt.Figure:
         icc_block.append((short, f"{row['icc']:.2f}"))
     return raincloud_figure(columns, "Parameter errors per measurement",
                             [error_block, icc_block])
+
+
+# ---------------------------------------------------------------------------
+# The ROC curves of the clinical thresholds
+# ---------------------------------------------------------------------------
+#: The ROC figures: one per signal, its conditions in order (names from
+#: ``src.evaluation.classification.CONDITIONS``); the second condition of a
+#: signal is dashed.
+ROC_FIGURES = {"ABP": ("elevated systolic", "elevated diastolic"),
+               "CVP": ("elevated CVP",),
+               "rate": ("tachycardia", "bradycardia")}
+ROC_DASHES = ((1, 0), (4, 2))
+
+
+def roc_figure(sweeps: pd.DataFrame, classes: pd.DataFrame, sig: str, names: tuple) -> plt.Figure:
+    """The ROC curves of one signal's conditions, from the sweep table
+    (``tables/roc.csv``) and the classification table
+    (``tables/classification.csv``, indexed by condition): sensitivity
+    against 1 - specificity in the signal's colour, the chance diagonal
+    dotted, a dot at the clinical cut-off. The panel holds each
+    condition's cut-off, AUC and positive count; the legend has the
+    conditions left and the marks right."""
+    curves = sweeps[sweeps["condition"].isin(names)]
+    curves = curves.assign(fpr=1 - curves["specificity"], tpr=curves["sensitivity"])
+    curves = curves.dropna(subset=["fpr", "tpr"]).sort_values(["condition", "fpr", "tpr"])
+    names = [n for n in names if n in set(curves["condition"])]
+    colour = SIGNAL_COLOURS[sig]
+    dashes = dict(zip(names, ROC_DASHES))
+    grid = sns.relplot(data=curves, x="fpr", y="tpr", hue="condition", hue_order=names,
+                       style="condition", style_order=names, palette=[colour] * len(names),
+                       dashes=dashes, kind="line", sort=False, estimator=None, linewidth=1.2,
+                       height=FIGURE_HEIGHT, aspect=FIGURE_ASPECT, legend=False)
+    axis = grid.ax
+    axis.plot([0, 1], [0, 1], color="0.6", linestyle=":", linewidth=0.8)
+    clinical = curves[curves["clinical"]]
+    axis.scatter(clinical["fpr"], clinical["tpr"], s=28, zorder=5, edgecolor="white",
+                 linewidth=0.5, color=colour)
+    axis.set_xlim(0, 1)
+    axis.set_ylim(0, 1)
+    axis.set_box_aspect(1)
+    axis.set_xlabel("1 − specificity")
+    axis.set_ylabel("sensitivity")
+    figure = _figure(grid, bottom=0.18)
+
+    units = {p.name: p.unit for p in PARAMETERS}
+    cutoff_block = [("cut-off",)]
+    for n in names:
+        row = classes.loc[n]
+        sign = "≥" if row["side"] == "at or above" else "<"
+        cutoff_block.append((n, f"{sign} {row['threshold']:g} {units[row['parameter']]}"))
+    auc_block = [("AUC",)] + [(n, f"{classes.loc[n, 'auc']:.2f}") for n in names]
+    positive_block = [("positive / n",)] + [
+        (n, f"{int(classes.loc[n, 'n_positive'])} / {int(classes.loc[n, 'n'])}") for n in names]
+    below = _panel(figure, [cutoff_block, auc_block, positive_block])
+    left_column = [Line2D([], [], color=colour, dashes=dashes[n], linewidth=1.2, label=n)
+                   for n in names]
+    right_column = [Line2D([], [], marker="o", linestyle="", color=colour, markersize=4,
+                           label="cut-off"),
+                    Line2D([], [], color="0.6", linestyle=":", linewidth=0.8, label="chance")]
+    _legend(figure, left_column, right_column, below)
+    return figure
+
+
+def roc_figures(sweeps: pd.DataFrame, classes: pd.DataFrame) -> dict:
+    """``{figure name: Figure}``: one :func:`roc_figure` per
+    :data:`ROC_FIGURES` signal with a curve in ``sweeps``."""
+    classes = classes.set_index("condition")
+    present = set(sweeps["condition"])
+    return {f"roc_{sig}": roc_figure(sweeps, classes, sig, names)
+            for sig, names in ROC_FIGURES.items() if present & set(names)}

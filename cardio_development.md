@@ -115,10 +115,6 @@ sits inside the wavelet bank's frequency buffer (below), so a sample that passes
 is guaranteed to have its true fundamental inside the bank. At test time no
 label reaches the model and every sample runs.
 
-An alternative estimator, `Spectral`, fuses attention-pooled per-channel
-spectra directly instead of predicting a waveform. It is kept as an option
-but is not the default.
-
 ## Wavelet Transform
 
 A wavelet transform analyses a signal with short oscillating kernels
